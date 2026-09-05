@@ -5,6 +5,7 @@ const { MongoClient } = require('mongodb');
 
 // 1. IMPORTAR MÓDULOS ESPECIALIZADOS
 const moduloRaids = require('./modulo_raids.js');
+const moduloLinks = require('./modulo_links.js');
 
 // 2. DATOS GLOBALES
 const whitelistUsuarios = JSON.parse(fs.readFileSync('./whitelist_usuarios.json', 'utf8'));
