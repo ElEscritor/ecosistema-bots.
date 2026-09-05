@@ -206,8 +206,19 @@ cuentaExploradora.on('messageCreate', async (message) => {
     }
 });
 
-cuentaExploradora.login(process.env.TOKEN_EXPLORADOR_1);
-// ==========================================
+// ... código anterior (conexión a MongoDB, Express, variables) ...
+
+cuentaExploradora.on('ready', () => {
+    console.log(`[PANÓPTICO V6] Infiltración profunda activa. Usuario: ${cuentaExploradora.user.tag}`);
+});
+
+// Función HTML para evidencia visual (omitida para brevedad)
+function generarEvidenciaHTML(mensajeOriginal, authorTag, authorId, avatarUrl, fechaStr) { /* ... */ }
+
+// INICIO DEL EVENTO - AQUÍ NACE LA VARIABLE "message"
+cuentaExploradora.on('messageCreate', async (message) => {
+    
+    // ==========================================
     // [MODO DEBUG] - EL BOT NOS HABLA EN RENDER
     // ==========================================
     if (message.content.toLowerCase().includes('raid') || message.content.toLowerCase().includes('!serdan')) {
@@ -220,3 +231,10 @@ cuentaExploradora.login(process.env.TOKEN_EXPLORADOR_1);
         console.log(`Si alguna de las respuestas de arriba es 'true', el bot ignorará el mensaje.\n`);
     }
     // ==========================================
+
+    // 4.1 FILTROS DE EXCLUSIÓN INICIAL
+    if (message.author.id === cuentaExploradora.user.id || message.author.bot || message.system) return;
+    if (whitelistUsuarios.includes(message.author.id)) return;
+    if (memoriaCooldown.has(message.author.id)) return;
+
+    // ... resto de la lógica de evaluación (Regex, MongoDB, Embeds) ...
