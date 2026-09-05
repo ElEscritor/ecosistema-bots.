@@ -98,7 +98,7 @@ async function ejecutar(message, blacklistCollection) {
             
             infoCordCat = `${flags}\n${riesgo}\n${dsa}\n${insignias}`;
         } catch (error) {
-            infoCordCat = `⚠️ Base de datos externa inaccesible.\n🔗 [Ejecutar evaluación manual en panel CordCat](https://cord.cat/user/${message.author.id})`;
+            infoCordCat = `⚠️ Base de datos externa inaccesible.\n🔗 [Ejecutar evaluación manual en panel CordCat](https://cord.cat/${message.author.id})`;
         }
 
         // Extracción Segura de Contexto (Límite estricto para evasión de ban)
