@@ -37,58 +37,85 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 app.get('/', (req, res) => {
     res.set('Access-Control-Allow-Origin', '*');
-    res.json({ estado: "operativo", nucleo: "Modular-Enrutador-v1" });
+    res.json({ estado: "operativo", nucleo: "Enjambre-v2" });
 }); 
 app.listen(PORT, () => console.log(`[LATIDO] Motor web activo en puerto ${PORT}`));
 
-// 5. MEMORIA ANTI-SPAM GLOBAL
+// 5. MEMORIA ANTI-SPAM GLOBAL (Compartida por todo el enjambre)
 const memoriaCooldown = new Set();
 const hashMensajesRecientes = new Set();
 
-// 6. INICIO DEL BOT
-const cuentaExploradora = new Client({
-    checkUpdate: false,
-    presence: { status: 'invisible' }
-});
-
-cuentaExploradora.on('ready', () => {
-    console.log(`[PANÓPTICO] Infiltración activa. Usuario: ${cuentaExploradora.user.tag}`);
-});
-
-// 7. ENRUTADOR DE INTELIGENCIA
-cuentaExploradora.on('messageCreate', async (message) => {
-    
-    // Filtros Iniciales
-    if (message.author.id === cuentaExploradora.user.id || message.author.bot || message.system) return;
-    if (whitelistUsuarios.includes(message.author.id)) return;
-    if (memoriaCooldown.has(message.author.id)) return;
-
-    const firmaMensaje = `${message.author.id}-${message.content}`;
-    if (hashMensajesRecientes.has(firmaMensaje)) return;
-
-    // Escudos temporales
-    memoriaCooldown.add(message.author.id);
-    setTimeout(() => memoriaCooldown.delete(message.author.id), 60000);
-    hashMensajesRecientes.add(firmaMensaje);
-    setTimeout(() => hashMensajesRecientes.delete(firmaMensaje), 120000);
-
-    // Enrutamiento seguro a módulos
-    try {
-        // 1º Filtro: Especialista de Raids
-        const esRaid = await moduloRaids.ejecutar(message, blacklistCollection);
-        if (esRaid) return; 
-
-        // 2º Filtro: Especialista de Enlaces
-        const esEnlace = await moduloLinks.ejecutar(message, blacklistCollection);
-        if (esEnlace) return; 
-
-        // 3º Filtro: Monitor de la Organización
-        const esMencionOrg = await moduloOrg.ejecutar(message, blacklistCollection);
-        if (esMencionOrg) return;
-
-    } catch (error) {
-        console.error(`[ESCUDO ACTIVO] Un módulo falló, pero el núcleo sigue vivo. Error: ${error.message}`);
+// 6. EXTRACCIÓN DINÁMICA DE TOKENS
+const tokens = [];
+for (let i = 1; i <= 10; i++) {
+    if (process.env[`TOKEN_EXPLORADOR_${i}`]) {
+        tokens.push(process.env[`TOKEN_EXPLORADOR_${i}`]);
     }
-});
+}
 
-cuentaExploradora.login(process.env.TOKEN_EXPLORADOR_1);
+if (tokens.length === 0) {
+    console.error("ERROR CRÍTICO: No se encontraron tokens de exploradores (TOKEN_EXPLORADOR_1) en Render.");
+    process.exit(1);
+}
+
+// Función de retardo táctico para evasión de radar
+const delay = ms => new Promise(res => setTimeout(res, ms));
+
+// 7. PROTOCOLO DE DESPLIEGUE ESCALONADO
+async function iniciarEnjambre() {
+    console.log(`[ENJAMBRE] Iniciando despliegue de ${tokens.length} cuentas de inteligencia...`);
+
+    for (let i = 0; i < tokens.length; i++) {
+        const cuentaExploradora = new Client({
+            checkUpdate: false,
+            presence: { status: 'invisible' }
+        });
+
+        cuentaExploradora.on('ready', () => {
+            console.log(`[PANÓPTICO-${i+1}] Infiltración activa. Usuario: ${cuentaExploradora.user.tag}`);
+        });
+
+        cuentaExploradora.on('messageCreate', async (message) => {
+            if (message.author.id === cuentaExploradora.user.id || message.author.bot || message.system) return;
+            if (whitelistUsuarios.includes(message.author.id)) return;
+            if (memoriaCooldown.has(message.author.id)) return;
+
+            const firmaMensaje = `${message.author.id}-${message.content}`;
+            if (hashMensajesRecientes.has(firmaMensaje)) return;
+
+            memoriaCooldown.add(message.author.id);
+            setTimeout(() => memoriaCooldown.delete(message.author.id), 60000);
+            hashMensajesRecientes.add(firmaMensaje);
+            setTimeout(() => hashMensajesRecientes.delete(firmaMensaje), 120000);
+
+            try {
+                const esRaid = await moduloRaids.ejecutar(message, blacklistCollection);
+                if (esRaid) return; 
+
+                const esEnlace = await moduloLinks.ejecutar(message, blacklistCollection);
+                if (esEnlace) return; 
+
+                const esMencionOrg = await moduloOrg.ejecutar(message, blacklistCollection);
+                if (esMencionOrg) return;
+
+            } catch (error) {
+                console.error(`[ESCUDO ACTIVO] Un módulo falló. Error: ${error.message}`);
+            }
+        });
+
+        try {
+            await cuentaExploradora.login(tokens[i]);
+            
+            // Pausa obligatoria entre conexiones para evitar bloqueos por IP
+            if (i < tokens.length - 1) {
+                console.log(`[ENJAMBRE] Esperando 45 segundos antes de infiltrar la siguiente cuenta para evadir defensas...`);
+                await delay(45000); 
+            }
+        } catch (error) {
+            console.error(`[FALLO DE INFILTRACIÓN] Token ${i+1} inválido, caducado o bloqueado por Discord.`);
+        }
+    }
+    console.log(`[ENJAMBRE] Despliegue de inteligencia completado. Todas las cuentas operativas.`);
+}
+
+iniciarEnjambre();
