@@ -1,78 +1,78 @@
 const { WebhookClient, MessageEmbed } = require('discord.js-selfbot-v13');
 const fs = require('fs');
 
+// Cargar solo las reglas (No necesitamos base de datos ni comandos aquí)
 const reglasAlertas = JSON.parse(fs.readFileSync('./reglas_alertas.json', 'utf8'));
 
-async function ejecutar(message, blacklistCollection) {
+async function ejecutar(message) {
     const contenidoMensaje = message.content.toLowerCase();
     let alertaDisparada = false;
     let datosAlerta = null;
-    let casoIdGenerado = 'ORG_' + Math.random().toString(36).substring(2, 9).toUpperCase();
 
-    // 1. Escáner de Menciones a Aliados / Organización
+    // Escáner de Palabras Clave (Solo reglas asignadas a WEBHOOK_Org)
     for (const regla of reglasAlertas) {
         if (regla.webhookDestino === "WEBHOOK_Org") {
             const regexPatron = new RegExp(regla.patron, 'i');
             if (regexPatron.test(contenidoMensaje)) {
                 alertaDisparada = true;
-                datosAlerta = { 
-                    idRegla: regla.id_regla, 
-                    colorHex: regla.colorHex, 
-                    webhookDestino: regla.webhookDestino, 
-                    accionId: casoIdGenerado 
-                };
+                datosAlerta = { idRegla: regla.id_regla, colorHex: regla.colorHex, webhookDestino: regla.webhookDestino };
                 break;
             }
         }
     }
 
-    // 2. Ejecución y Notificación de Inteligencia
     if (alertaDisparada && datosAlerta) {
-        
-        // Soporte de enlace directo o variable de entorno
-        let urlWebhook = datosAlerta.webhookDestino.startsWith('http') 
-            ? datosAlerta.webhookDestino 
-            : process.env[datosAlerta.webhookDestino];
+        const urlWebhook = process.env[datosAlerta.webhookDestino];
+        if (!urlWebhook) return true; // Ignora silenciosamente si falta el webhook
 
-        if (!urlWebhook) {
-            console.log(`[ERROR ORG] No se encontró el Webhook: ${datosAlerta.webhookDestino}`);
-            return true; 
+        // Extraer un poco de contexto (los 2 mensajes anteriores)
+        let contextoConversacion = "";
+        try {
+            const mensajesPrevios = await message.channel.messages.fetch({ limit: 2, before: message.id });
+            const mensajesOrdenados = mensajesPrevios.sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+            
+            mensajesOrdenados.forEach(msg => {
+                contextoConversacion += `[${msg.author.username}]: ${msg.content}\n`;
+            });
+        } catch (e) {
+            contextoConversacion += "(No se pudo cargar el historial previo)\n";
+        }
+        // Añadir el mensaje exacto que detonó el radar
+        contextoConversacion += `[${message.author.username}] (📌 MENCIÓN): ${message.content}`;
+
+        // Limitar tamaño por si escribieron un testamento
+        if (contextoConversacion.length > 2000) {
+            contextoConversacion = contextoConversacion.substring(0, 1950) + '\n...[Texto truncado]';
         }
 
-        const webhook = new WebhookClient({ url: urlWebhook });
-        
-        // Verificación de Antecedentes (Solo lectura, no fichamos por mencionar)
-        let estadoBanXN = "Error de conexión BD";
-        if (blacklistCollection) {
-            const usuarioFichado = await blacklistCollection.findOne({ userId: message.author.id });
-            if (usuarioFichado) {
-                estadoBanXN = `⚠️ ALERTA ROJA: Raider conocido hablando de la Org (${usuarioFichado.accion})`;
-            } else {
-                estadoBanXN = "Sujeto limpio (Sin antecedentes penales en BD)";
-            }
-        }
+        const nombreServidor = message.guild ? message.guild.name : 'Mensaje Privado (DM)';
+        const nombreCanal = message.channel.name ? message.channel.name : 'oculto';
+        const avatarURL = message.author.displayAvatarURL({ format: 'png', dynamic: true, size: 128 });
 
-        const mensajeCorto = message.content.length > 1000 
-            ? message.content.substring(0, 1000) + '...' 
-            : message.content;
-
-        const panelForense = new MessageEmbed()
-            .setColor(datosAlerta.colorHex)
-            .setAuthor({ name: `INTELIGENCIA: ${datosAlerta.idRegla.toUpperCase()}`, iconURL: 'https://cdn-icons-png.flaticon.com/512/3260/3260143.png' })
-            .setDescription(`**Intercepción de Comunicaciones:**\n\`\`\`\n${mensajeCorto}\n\`\`\``)
+        // Diseño Minimalista y Funcional (Tonos neutros/informativos)
+        const panelRadar = new MessageEmbed()
+            .setColor(datosAlerta.colorHex || '#3498db') // Usa el color del JSON o azul por defecto
+            .setAuthor({ name: message.author.tag, iconURL: avatarURL })
+            .setTitle(`📡 Rastreo de Palabra Clave: ${datosAlerta.idRegla}`)
+            .setDescription(`**Contexto de la conversación:**\n\`\`\`text\n${contextoConversacion}\n\`\`\``)
             .addFields(
-                { name: '🗣️ Sujeto Identificado', value: `**${message.author.tag}**\n\`${message.author.id}\``, inline: true },
-                { name: '📍 Coordenadas', value: `**Canal:** <#${message.channel.id}>`, inline: true },
-                { name: '🛡️ Cotejo con Base de Datos', value: estadoBanXN, inline: false }
+                { name: '👤 Usuario', value: `\`${message.author.id}\``, inline: true },
+                { name: '📍 Servidor', value: `**${nombreServidor}**\n(\`${message.guild ? message.guild.id : 'N/A'}\`)`, inline: true },
+                { name: '💬 Ubicación', value: `**#${nombreCanal}**\n[Ir al mensaje](${message.url})`, inline: true }
             )
-            .setFooter({ text: `Rastreo ID: ${datosAlerta.accionId}` })
-            .setTimestamp();
+            .setTimestamp(); // Pone la hora exacta automáticamente abajo
 
-        webhook.send({ embeds: [panelForense] }).catch(err => console.error('[FALLO RED ORG]', err.message));
+        try {
+            const webhook = new WebhookClient({ url: urlWebhook });
+            await webhook.send({ embeds: [panelRadar] });
+        } catch (err) {
+            console.error('[FALLO RED ORG]', err.message);
+        }
+        
         return true; 
     }
 
-    return false; // Continúa si quieres añadir más módulos en el futuro
+    return false;
 }
 
 module.exports = { ejecutar };
