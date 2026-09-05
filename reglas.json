@@ -1,7 +1,18 @@
 [
   {
-    "palabraClave": "urgente",
-    "webhookDestino": "WEBHOOK_1"
+    "id": "alerta_raid",
+    "patronRegex": "\\b(raid|raidear|nukear|ataque masivo)\\b",
+    "webhookDestino": "WEBHOOK_1",
+    "gravedad": "Critica",
+    "color": 16711680,
+    "descripcion": "Intento de raid o ataque coordinado"
+  },
+  {
+    "id": "enlaces_externos",
+    "patronRegex": "(discord\\.gg/|discord\\.com/invite/)",
+    "webhookDestino": "WEBHOOK_1",
+    "gravedad": "Media",
+    "color": 16753920,
+    "descripcion": "Distribución de enlaces no autorizados"
   }
 ]
-
