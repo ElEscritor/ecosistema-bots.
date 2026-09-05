@@ -1,13 +1,14 @@
 const { WebhookClient, MessageEmbed } = require('discord.js-selfbot-v13');
 const fs = require('fs');
-const axios = require('axios'); // Motor de peticiones HTTP para auditoría externa
+const axios = require('axios');
+const path = require('path');
 
 // 1. CARGA DE CONFIGURACIÓN ESTÁTICA Y CREDENCIALES
 const comandosSquads = JSON.parse(fs.readFileSync('./comandos_squads.json', 'utf8'));
 const reglasAlertas = JSON.parse(fs.readFileSync('./reglas_alertas.json', 'utf8'));
-const CORDCAT_API_KEY = "cc_c67695eac3f8b0fc7b83db00075086e016f0ce9f55b688142";
+const CORDCAT_API_KEY = "cc_c67695eac3f8b0fc7b83db00075086e016f0ce9f55b68814"; // Clave actualizada
 
-// 2. MOTOR DE RENDERIZADO FORENSE HTML (Simulación de Captura UI Discord)
+// 2. MOTOR DE RENDERIZADO FORENSE HTML
 function generarEvidenciaHTML(mensajeOriginal, authorTag, authorId, avatarUrl, fechaStr) {
     return `
     <!DOCTYPE html>
@@ -39,7 +40,7 @@ function generarEvidenciaHTML(mensajeOriginal, authorTag, authorId, avatarUrl, f
             </div>
         </div>
         <div class="watermark">
-            REGISTRO FORENSE ENCRIPTADO | ID SUJETO: ${authorId} | PANÓPTICO CLOUD INFRASTRUCTURE
+            REGISTRO FORENSE | ID SUJETO: ${authorId} | PANÓPTICO CLOUD INFRASTRUCTURE
         </div>
     </body>
     </html>`;
@@ -51,7 +52,7 @@ async function ejecutar(message, blacklistCollection) {
     let alertaDisparada = false;
     let datosAlerta = null;
 
-    // Escáner de Comandos Estrictos
+    // Escáner de Comandos
     for (const cmd of comandosSquads) {
         if (cmd.webhookDestino === "WEBHOOK_Raids" && contenidoMensaje.startsWith(cmd.comando.toLowerCase())) {
             alertaDisparada = true;
@@ -60,7 +61,7 @@ async function ejecutar(message, blacklistCollection) {
         }
     }
 
-    // Escáner Analítico por Expresiones Regulares
+    // Escáner Analítico por Regex
     if (!alertaDisparada) {
         for (const regla of reglasAlertas) {
             if (regla.webhookDestino === "WEBHOOK_Raids") {
@@ -78,24 +79,38 @@ async function ejecutar(message, blacklistCollection) {
     if (alertaDisparada && datosAlerta) {
         const urlWebhook = process.env[datosAlerta.webhookDestino];
         if (!urlWebhook) {
-            console.error(`[ERROR FATAL] Variable de entorno ${datosAlerta.webhookDestino} inexistente.`);
+            console.error(`[ERROR] Variable de entorno ${datosAlerta.webhookDestino} inexistente.`);
             return true;
         }
         
         const webhook = new WebhookClient({ url: urlWebhook });
 
         // Extracción de Inteligencia de Terceros (CordCat API)
-        let infoCordCat = "Procesando auditoría de riesgo...";
+        let infoCordCat = "Procesando auditoría...";
         try {
-            const cordcatRes = await axios.get(`https://api.cordcat.com/v1/users/${message.author.id}`, {
+            // Intentamos con la URL base proporcionada, ajustando al endpoint probable
+            const cordcatRes = await axios.get(`https://cord.cat/api/v1/user/${message.author.id}`, {
                 headers: { 'Authorization': `Bearer ${CORDCAT_API_KEY}` },
-                timeout: 2500
+                timeout: 3000
             });
             infoCordCat = cordcatRes.data.flags 
                 ? `🚩 Alerta de Banderas: ${cordcatRes.data.flags}` 
-                : "✅ Perfil verificado sin banderas de riesgo";
+                : "✅ Perfil verificado sin banderas";
         } catch (error) {
-            infoCordCat = `⚠️ Error de API. Cotejo manual requerido:\nhttps://cordcat.com/user/${message.author.id}`;
+            infoCordCat = `⚠️ Error de API. Cotejo manual: [Ver Perfil en CordCat](https://cord.cat/user/${message.author.id})`;
+        }
+
+        // Extracción de Contexto para el archivo TXT (Últimos 3 mensajes)
+        let contextoTxtData = `=========================================\nREPORTE DE CONTEXTO TÁCTICO\n=========================================\nSujeto: ${message.author.tag} (${message.author.id})\nFecha: ${new Date().toUTCString()}\n\n--- HISTORIAL RECIENTE DEL CANAL ---\n`;
+        try {
+            const mensajesPrevios = await message.channel.messages.fetch({ limit: 3, before: message.id });
+            const mensajesOrdenados = mensajesPrevios.sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+            mensajesOrdenados.forEach(msg => {
+                contextoTxtData += `[${new Date(msg.createdTimestamp).toISOString().split('T')[1].slice(0,8)}] ${msg.author.tag}: ${msg.content}\n`;
+            });
+            contextoTxtData += `[${new Date(message.createdTimestamp).toISOString().split('T')[1].slice(0,8)}] ${message.author.tag} (🔥 INTERCEPTADO): ${message.content}\n`;
+        } catch (e) {
+            contextoTxtData += "Error al extraer historial (Posible falta de permisos o DM cerrado).\n";
         }
 
         // Procesamiento de Fechas (Formato Europeo / Madrid)
@@ -111,49 +126,49 @@ async function ejecutar(message, blacklistCollection) {
         
         const avatarURL = message.author.displayAvatarURL({ format: 'png', dynamic: true, size: 256 });
         const mensajeCorto = message.content.length > 900 
-            ? message.content.substring(0, 900) + '\n\n[... TEXTO TRUNCADO - VER CAPTURA HTML]' 
+            ? message.content.substring(0, 900) + '\n\n[... TEXTO TRUNCADO]' 
             : message.content;
 
-        // Estructuración del Panel Visual (Embed)
+        // Estructuración del Panel Visual Optimizada (Agrupando campos para ensanchar)
         const panelForense = new MessageEmbed()
             .setColor(datosAlerta.colorHex)
-            .setAuthor({ name: `${message.author.tag}`, iconURL: avatarURL }) // Identidad visual superior
+            .setAuthor({ name: `${message.author.tag}`, iconURL: avatarURL }) 
             .setTitle(`🚨 Detección de Alusión a Raid`)
-            .setDescription(`**Carga Útil Interceptada:**\n\`\`\`text\n${mensajeCorto}\n\`\`\``)
-            .setThumbnail(avatarURL) // Proyección del Avatar en el flanco derecho
+            .setDescription(`**Evidencia Interceptada:**\n\`\`\`text\n${mensajeCorto}\n\`\`\``)
+            .setThumbnail(avatarURL) 
             .addFields(
-                { name: '👤 Identificador de Sujeto', value: `\`${message.author.id}\``, inline: true },
-                { name: '📅 Origen de la Cuenta', value: `<t:${creacionCuentaUnix}:F>`, inline: true },
-                { name: '🆔 Coordenada de Mensaje', value: `[Ir al mensaje](${message.url}) (\`${message.id}\`)`, inline: true },
-                { name: '📍 Vector de Ataque (Canal)', value: `**#${nombreCanal}**\n(\`${message.channel.id}\`)`, inline: true },
-                { name: '🌍 Zona de Impacto (Servidor)', value: `**${nombreServidor}**\n(\`${idServidor}\`)`, inline: true },
+                // Fila 1: Identidad y Origen (Agrupados)
+                { name: '👤 Identidad del Sujeto', value: `**Usuario:** ${message.author.tag}\n**ID:** \`${message.author.id}\`\n**Cuenta Creada:** <t:${creacionCuentaUnix}:R>`, inline: true },
+                // Fila 2: Coordenadas (Agrupadas)
+                { name: '📍 Coordenadas de Impacto', value: `**Servidor:** ${nombreServidor} (\`${idServidor}\`)\n**Canal:** #${nombreCanal} (\`${message.channel.id}\`)\n**Vínculo:** [Saltar al mensaje original](${message.url})`, inline: true },
+                // Fila 3: Inteligencia Externa
                 { name: '🔎 Inteligencia de Amenazas (CordCat)', value: infoCordCat, inline: false }
             )
-            .setFooter({ text: `Intercepción Confirmada (Hora Peninsular Española): ${fechaIntercepcionES}` });
+            .setFooter({ text: `Fecha de Intercepción: ${fechaIntercepcionES} (Hora España)` });
 
-        // Compilación y Empaquetado del Archivo HTML
+        // --- BYPASS DE DISCO DURO PARA LOS ARCHIVOS ---
         const htmlData = generarEvidenciaHTML(message.content, message.author.tag, message.author.id, avatarURL, fechaMensajeOriginal);
         
-        // Empaquetado seguro en formato de objeto plano para el WebhookClient
-        const capturaHTML = {
-            attachment: Buffer.from(htmlData, 'utf-8'),
-            name: `EVIDENCIA_FORENSE_${message.author.id}.html`
-        };
+        // Creamos rutas temporales en Render
+        const rutaHTML = path.join(__dirname, `EVIDENCIA_${message.author.id}.html`);
+        const rutaTXT = path.join(__dirname, `CONTEXTO_${message.author.id}.txt`);
 
-        // Bloque de Transmisión Tolerante a Fallos
+        // Escribimos los archivos físicamente
+        fs.writeFileSync(rutaHTML, htmlData, 'utf8');
+        fs.writeFileSync(rutaTXT, contextoTxtData, 'utf8');
+
+        // Transmisión con archivos físicos (Infalible)
         try {
             await webhook.send({ 
                 embeds: [panelForense],
-                files: [capturaHTML] 
+                files: [rutaHTML, rutaTXT] 
             });
         } catch (err) {
-            console.error('[FALLO RED WEBOOK] Transmisión con adjuntos rechazada. Ejecutando envío degradado.', err.message);
-            // Protocolo de seguridad: Si Discord rechaza el HTML, se fuerza el envío del panel textual.
-            try {
-                await webhook.send({ embeds: [panelForense] });
-            } catch(e) {
-                console.error('[COLAPSO TOTAL DE TRANSMISIÓN]', e.message);
-            }
+            console.error('[FALLO RED WEBOOK]', err.message);
+        } finally {
+            // Limpieza táctica: Borramos los archivos para no saturar el servidor
+            if (fs.existsSync(rutaHTML)) fs.unlinkSync(rutaHTML);
+            if (fs.existsSync(rutaTXT)) fs.unlinkSync(rutaTXT);
         }
         
         return true; 
