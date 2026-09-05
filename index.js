@@ -72,7 +72,7 @@ cuentaExploradora.on('messageCreate', async (message) => {
     hashMensajesRecientes.add(firmaMensaje);
     setTimeout(() => hashMensajesRecientes.delete(firmaMensaje), 120000);
 
-// Enrutamiento seguro a módulos
+    // Enrutamiento seguro a módulos
     try {
         // 1º Filtro: Especialista de Raids
         const esRaid = await moduloRaids.ejecutar(message, blacklistCollection);
@@ -89,5 +89,6 @@ cuentaExploradora.on('messageCreate', async (message) => {
     } catch (error) {
         console.error(`[ESCUDO ACTIVO] Un módulo falló, pero el núcleo sigue vivo. Error: ${error.message}`);
     }
+});
 
 cuentaExploradora.login(process.env.TOKEN_EXPLORADOR_1);
