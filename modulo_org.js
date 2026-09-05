@@ -1,72 +1,90 @@
 const { WebhookClient, MessageEmbed } = require('discord.js-selfbot-v13');
 const fs = require('fs');
 
-// Cargar solo las reglas (No necesitamos base de datos ni comandos aquí)
+// Carga de la matriz de palabras clave
 const reglasAlertas = JSON.parse(fs.readFileSync('./reglas_alertas.json', 'utf8'));
 
 async function ejecutar(message) {
     const contenidoMensaje = message.content.toLowerCase();
-    let alertaDisparada = false;
+    let mencionesDetectadas = [];
     let datosAlerta = null;
 
-    // Escáner de Palabras Clave (Solo reglas asignadas a WEBHOOK_Org)
+    // 1. Escáner de Palabras Clave (Optimizado para lectura rápida)
     for (const regla of reglasAlertas) {
         if (regla.webhookDestino === "WEBHOOK_Org") {
             const regexPatron = new RegExp(regla.patron, 'i');
             if (regexPatron.test(contenidoMensaje)) {
-                alertaDisparada = true;
-                datosAlerta = { idRegla: regla.id_regla, colorHex: regla.colorHex, webhookDestino: regla.webhookDestino };
-                break;
+                // Extracción de la palabra exacta que activó el radar
+                const coincidencia = contenidoMensaje.match(regexPatron);
+                if (coincidencia) {
+                    mencionesDetectadas.push(coincidencia[0]);
+                }
+                datosAlerta = { colorHex: regla.colorHex, webhookDestino: regla.webhookDestino };
             }
         }
     }
 
-    if (alertaDisparada && datosAlerta) {
+    if (mencionesDetectadas.length > 0 && datosAlerta) {
         const urlWebhook = process.env[datosAlerta.webhookDestino];
-        if (!urlWebhook) return true; // Ignora silenciosamente si falta el webhook
+        if (!urlWebhook) {
+            console.error(`[ERROR TELEMETRÍA] Variable ${datosAlerta.webhookDestino} no configurada.`);
+            return true;
+        }
 
-        // Extraer un poco de contexto (los 2 mensajes anteriores)
-        let contextoConversacion = "";
+        // 2. Extracción Ligera de Contexto (Micro-historial en RAM)
+        let contextoDialogo = "";
         try {
-            const mensajesPrevios = await message.channel.messages.fetch({ limit: 2, before: message.id });
-            const mensajesOrdenados = mensajesPrevios.sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+            // Solicita los 2 mensajes anteriores para dar sentido a la mención
+            const historial = await message.channel.messages.fetch({ limit: 2, before: message.id });
+            const ordenados = historial.sort((a, b) => a.createdTimestamp - b.createdTimestamp);
             
-            mensajesOrdenados.forEach(msg => {
-                contextoConversacion += `[${msg.author.username}]: ${msg.content}\n`;
+            ordenados.forEach(msg => {
+                const nombreLimpio = msg.author.username.replace(/_/g, '\\_');
+                contextoDialogo += `**${nombreLimpio}**: ${msg.content}\n`;
             });
+            // Añade el mensaje interceptado con un marcador visual
+            const autorLimpio = message.author.username.replace(/_/g, '\\_');
+            contextoDialogo += `**${autorLimpio}**: ${message.content} 🎯\n`;
         } catch (e) {
-            contextoConversacion += "(No se pudo cargar el historial previo)\n";
-        }
-        // Añadir el mensaje exacto que detonó el radar
-        contextoConversacion += `[${message.author.username}] (📌 MENCIÓN): ${message.content}`;
-
-        // Limitar tamaño por si escribieron un testamento
-        if (contextoConversacion.length > 2000) {
-            contextoConversacion = contextoConversacion.substring(0, 1950) + '\n...[Texto truncado]';
+            // Si el bot no tiene historial (ej. canal recién creado o sin permisos)
+            contextoDialogo = `**${message.author.username}**: ${message.content} 🎯\n*(Historial previo inaccesible)*`;
         }
 
-        const nombreServidor = message.guild ? message.guild.name : 'Mensaje Privado (DM)';
-        const nombreCanal = message.channel.name ? message.channel.name : 'oculto';
+        // 3. Procesamiento de Metadatos y Coordenadas
+        const creacionCuentaUnix = Math.floor(message.author.createdTimestamp / 1000);
         const avatarURL = message.author.displayAvatarURL({ format: 'png', dynamic: true, size: 128 });
-
-        // Diseño Minimalista y Funcional (Tonos neutros/informativos)
-        const panelRadar = new MessageEmbed()
-            .setColor(datosAlerta.colorHex || '#3498db') // Usa el color del JSON o azul por defecto
-            .setAuthor({ name: message.author.tag, iconURL: avatarURL })
-            .setTitle(`📡 Rastreo de Palabra Clave: ${datosAlerta.idRegla}`)
-            .setDescription(`**Contexto de la conversación:**\n\`\`\`text\n${contextoConversacion}\n\`\`\``)
+        
+        const nombreServidor = message.guild ? message.guild.name : 'Sector Privado (DM)';
+        const idServidor = message.guild ? message.guild.id : 'N/A';
+        const nombreCanal = message.channel.name ? message.channel.name : 'Canal Oculto';
+        
+        // 4. Construcción del Panel de Observación (UI Minimalista)
+        const panelObservacion = new MessageEmbed()
+            .setColor(datosAlerta.colorHex || '#3498db') // Azul neutral por defecto
+            .setAuthor({ name: `Radar de Intercepción: ${message.author.tag}`, iconURL: avatarURL })
+            .setDescription(`Se ha detectado una mención a las palabras clave: **${mencionesDetectadas.join(', ')}**\n\n**Transcripción del Diálogo:**\n> ${contextoDialogo.replace(/\n/g, '\n> ')}`)
             .addFields(
-                { name: '👤 Usuario', value: `\`${message.author.id}\``, inline: true },
-                { name: '📍 Servidor', value: `**${nombreServidor}**\n(\`${message.guild ? message.guild.id : 'N/A'}\`)`, inline: true },
-                { name: '💬 Ubicación', value: `**#${nombreCanal}**\n[Ir al mensaje](${message.url})`, inline: true }
+                { name: '👤 Identificador', value: `\`${message.author.id}\``, inline: true },
+                { name: '📅 Registro', value: `<t:${creacionCuentaUnix}:R>`, inline: true },
+                { name: '📍 Coordenada', value: `[Saltar al mensaje](${message.url})`, inline: true },
+                { name: '🌍 Servidor', value: `**${nombreServidor}**\n(\`${idServidor}\`)`, inline: true },
+                { name: '📡 Canal', value: `**#${nombreCanal}**\n(\`${message.channel.id}\`)`, inline: true }
             )
-            .setTimestamp(); // Pone la hora exacta automáticamente abajo
+            .setFooter({ text: 'Monitoreo Pasivo • Panóptico Cloud' })
+            .setTimestamp();
 
+        // 5. Transmisión Nativa
         try {
-            const webhook = new WebhookClient({ url: urlWebhook });
-            await webhook.send({ embeds: [panelRadar] });
+            const formData = new FormData();
+            formData.append('payload_json', JSON.stringify({ embeds: [panelObservacion.toJSON()] }));
+
+            const response = await fetch(urlWebhook, { method: 'POST', body: formData });
+            if (!response.ok) throw new Error(`HTTP STATUS ${response.status}`);
         } catch (err) {
-            console.error('[FALLO RED ORG]', err.message);
+            console.error('[FALLO TELEMETRÍA]', err.message);
+            // Contingencia mediante librería estándar si el fetch nativo falla
+            const webhookEmergencia = new WebhookClient({ url: urlWebhook });
+            webhookEmergencia.send({ embeds: [panelObservacion] }).catch(console.error);
         }
         
         return true; 
