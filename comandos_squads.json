@@ -1,15 +1,13 @@
 [
   {
     "comando": "!serdan",
-    "accionId": "o1_BulLIgJqY",
-    "descripcion": "Solicitud de bot de raid externo",
+    "descripcion": "Solicitud de bot de raid externo (Serdan)",
     "severidad": "CRÍTICO",
     "colorHex": 10181046,
     "webhookDestino": "WEBHOOK_Raids"
   },
   {
     "comando": "!nuke",
-    "accionId": "nuke_exec_cmd",
     "descripcion": "Ejecución de comando de destrucción masiva",
     "severidad": "CRÍTICO",
     "colorHex": 16711680,
