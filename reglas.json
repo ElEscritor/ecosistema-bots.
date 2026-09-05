@@ -4,7 +4,7 @@
     "patron": "\\b(raid|raidear|nuke|nukear|tirar el server|destruir el servidor)\\b",
     "severidad": "CRÍTICO",
     "colorHex": 16711680,
-    "webhookDestino": "WEBHOOK_1",
+    "webhookDestino": "WEBHOOK_Raids",
     "tipo": "keyword"
   },
   {
@@ -12,7 +12,7 @@
     "patron": "(discord\\.gg\\/[a-zA-Z0-9]+|discord\\.com\\/invite\\/[a-zA-Z0-9]+)",
     "severidad": "ADVERTENCIA",
     "colorHex": 16753920,
-    "webhookDestino": "WEBHOOK_1",
+    "webhookDestino": "WEBHOOK_Links",
     "tipo": "link"
   },
   {
@@ -20,7 +20,7 @@
     "patron": "\\b(xn|rz|el escritor)\\b",
     "severidad": "INFORMATIVO",
     "colorHex": 3447003,
-    "webhookDestino": "WEBHOOK_1",
+    "webhookDestino": "WEBHOOK_Org",
     "tipo": "mention"
   }
 ]
