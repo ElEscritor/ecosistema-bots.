@@ -74,13 +74,17 @@ cuentaExploradora.on('messageCreate', async (message) => {
 
 // Enrutamiento seguro a módulos
     try {
-        // Enviar al Especialista de Raids
+        // 1º Filtro: Especialista de Raids
         const esRaid = await moduloRaids.ejecutar(message, blacklistCollection);
-        if (esRaid) return; // Si fue procesado como raid, el ciclo termina aquí.
+        if (esRaid) return; 
 
-        // Enviar al Especialista de Enlaces (INYECCIÓN B)
+        // 2º Filtro: Especialista de Enlaces
         const esEnlace = await moduloLinks.ejecutar(message, blacklistCollection);
         if (esEnlace) return; 
+
+        // 3º Filtro: Monitor de la Organización
+        const esMencionOrg = await moduloOrg.ejecutar(message, blacklistCollection);
+        if (esMencionOrg) return;
 
     } catch (error) {
         console.error(`[ESCUDO ACTIVO] Un módulo falló, pero el núcleo sigue vivo. Error: ${error.message}`);
