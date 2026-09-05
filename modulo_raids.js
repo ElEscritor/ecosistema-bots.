@@ -1,12 +1,11 @@
 const { WebhookClient, MessageEmbed } = require('discord.js-selfbot-v13');
 const fs = require('fs');
 const axios = require('axios');
-const path = require('path');
 
 // 1. CARGA DE CONFIGURACIÓN ESTÁTICA Y CREDENCIALES
 const comandosSquads = JSON.parse(fs.readFileSync('./comandos_squads.json', 'utf8'));
 const reglasAlertas = JSON.parse(fs.readFileSync('./reglas_alertas.json', 'utf8'));
-const CORDCAT_API_KEY = "cc_c67695eac3f8b0fc7b83db00075086e016f0ce9f55b68814"; // Clave actualizada
+const CORDCAT_API_KEY = "cc_c67695eac3f8b0fc7b83db00075086e016f0ce9f55b68814"; 
 
 // 2. MOTOR DE RENDERIZADO FORENSE HTML
 function generarEvidenciaHTML(mensajeOriginal, authorTag, authorId, avatarUrl, fechaStr) {
@@ -82,13 +81,10 @@ async function ejecutar(message, blacklistCollection) {
             console.error(`[ERROR] Variable de entorno ${datosAlerta.webhookDestino} inexistente.`);
             return true;
         }
-        
-        const webhook = new WebhookClient({ url: urlWebhook });
 
         // Extracción de Inteligencia de Terceros (CordCat API)
         let infoCordCat = "Procesando auditoría...";
         try {
-            // Intentamos con la URL base proporcionada, ajustando al endpoint probable
             const cordcatRes = await axios.get(`https://cord.cat/api/v1/user/${message.author.id}`, {
                 headers: { 'Authorization': `Bearer ${CORDCAT_API_KEY}` },
                 timeout: 3000
@@ -129,7 +125,7 @@ async function ejecutar(message, blacklistCollection) {
             ? message.content.substring(0, 900) + '\n\n[... TEXTO TRUNCADO]' 
             : message.content;
 
-        // Estructuración del Panel Visual Optimizada (Agrupando campos para ensanchar)
+        // Estructuración del Panel Visual Optimizada
         const panelForense = new MessageEmbed()
             .setColor(datosAlerta.colorHex)
             .setAuthor({ name: `${message.author.tag}`, iconURL: avatarURL }) 
@@ -137,38 +133,52 @@ async function ejecutar(message, blacklistCollection) {
             .setDescription(`**Evidencia Interceptada:**\n\`\`\`text\n${mensajeCorto}\n\`\`\``)
             .setThumbnail(avatarURL) 
             .addFields(
-                // Fila 1: Identidad y Origen (Agrupados)
                 { name: '👤 Identidad del Sujeto', value: `**Usuario:** ${message.author.tag}\n**ID:** \`${message.author.id}\`\n**Cuenta Creada:** <t:${creacionCuentaUnix}:R>`, inline: true },
-                // Fila 2: Coordenadas (Agrupadas)
                 { name: '📍 Coordenadas de Impacto', value: `**Servidor:** ${nombreServidor} (\`${idServidor}\`)\n**Canal:** #${nombreCanal} (\`${message.channel.id}\`)\n**Vínculo:** [Saltar al mensaje original](${message.url})`, inline: true },
-                // Fila 3: Inteligencia Externa
                 { name: '🔎 Inteligencia de Amenazas (CordCat)', value: infoCordCat, inline: false }
             )
             .setFooter({ text: `Fecha de Intercepción: ${fechaIntercepcionES} (Hora España)` });
 
-        // --- BYPASS DE DISCO DURO PARA LOS ARCHIVOS ---
+        // Compilación de Evidencia HTML
         const htmlData = generarEvidenciaHTML(message.content, message.author.tag, message.author.id, avatarURL, fechaMensajeOriginal);
-        
-        // Creamos rutas temporales en Render
-        const rutaHTML = path.join(__dirname, `EVIDENCIA_${message.author.id}.html`);
-        const rutaTXT = path.join(__dirname, `CONTEXTO_${message.author.id}.txt`);
 
-        // Escribimos los archivos físicamente
-        fs.writeFileSync(rutaHTML, htmlData, 'utf8');
-        fs.writeFileSync(rutaTXT, contextoTxtData, 'utf8');
-
-        // Transmisión con archivos físicos (Infalible)
+        // --- BYPASS DE TRANSMISIÓN NATIVA (NODE.JS 24+ FETCH API) ---
         try {
-            await webhook.send({ 
-                embeds: [panelForense],
-                files: [rutaHTML, rutaTXT] 
+            // Construcción del límite multipart/form-data puro
+            const formData = new FormData();
+            
+            // Inyección del Embed serializado
+            formData.append('payload_json', JSON.stringify({ 
+                embeds: [panelForense.toJSON()] 
+            }));
+            
+            // Inyección del búfer de memoria HTML disfrazado de archivo (Blob)
+            const blobHTML = new Blob([htmlData], { type: 'text/html' });
+            formData.append('files[0]', blobHTML, `EVIDENCIA_FORENSE_${message.author.id}.html`);
+            
+            // Inyección del búfer de memoria TXT disfrazado de archivo (Blob)
+            const blobTXT = new Blob([contextoTxtData], { type: 'text/plain' });
+            formData.append('files[1]', blobTXT, `CONTEXTO_TACTICO_${message.author.id}.txt`);
+
+            // Disparo del payload HTTP mediante Fetch crudo
+            const response = await fetch(urlWebhook, {
+                method: 'POST',
+                body: formData
             });
+
+            if (!response.ok) {
+                throw new Error(`Discord API rechazó la carga nativa: STATUS ${response.status}`);
+            }
+
         } catch (err) {
-            console.error('[FALLO RED WEBOOK]', err.message);
-        } finally {
-            // Limpieza táctica: Borramos los archivos para no saturar el servidor
-            if (fs.existsSync(rutaHTML)) fs.unlinkSync(rutaHTML);
-            if (fs.existsSync(rutaTXT)) fs.unlinkSync(rutaTXT);
+            console.error('[FALLO RED NATIVO] La red rechazó el FormData puro. Forzando modo de degradación seguro.', err.message);
+            // Protocolo de contingencia: Si incluso el Fetch falla, se emplea WebhookClient sin archivos para asegurar la alerta.
+            try {
+                const webhookEmergencia = new WebhookClient({ url: urlWebhook });
+                await webhookEmergencia.send({ embeds: [panelForense] });
+            } catch(e) {
+                console.error('[COLAPSO TOTAL DE ALERTA]', e.message);
+            }
         }
         
         return true; 
