@@ -220,3 +220,4 @@ cuentaExploradora.on('messageCreate', async (message) => {
 
 // INICIO DE SESIÓN
 cuentaExploradora.login(process.env.TOKEN_EXPLORADOR_1);
+}
