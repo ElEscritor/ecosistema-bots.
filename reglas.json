@@ -13,7 +13,7 @@
     "severidad": "ADVERTENCIA",
     "colorHex": 16753920,
     "webhookDestino": "WEBHOOK_Links",
-    "tipo": "link"
+    "tipo": "keyword"
   },
   {
     "id_regla": "mencion_marca_aliados",
@@ -21,6 +21,6 @@
     "severidad": "INFORMATIVO",
     "colorHex": 3447003,
     "webhookDestino": "WEBHOOK_Org",
-    "tipo": "mention"
+    "tipo": "keyword"
   }
 ]
