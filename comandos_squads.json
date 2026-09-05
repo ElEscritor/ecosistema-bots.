@@ -5,7 +5,7 @@
     "descripcion": "Solicitud de bot de raid externo",
     "severidad": "CRÍTICO",
     "colorHex": 10181046,
-    "webhookDestino": "WEBHOOK_Squads"
+    "webhookDestino": "WEBHOOK_Raids"
   },
   {
     "comando": "!nuke",
@@ -13,6 +13,6 @@
     "descripcion": "Ejecución de comando de destrucción masiva",
     "severidad": "CRÍTICO",
     "colorHex": 16711680,
-    "webhookDestino": "WEBHOOK_Squads"
+    "webhookDestino": "WEBHOOK_Raids"
   }
 ]
