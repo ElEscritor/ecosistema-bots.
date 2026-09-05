@@ -1,18 +1,26 @@
 [
   {
-    "id": "alerta_raid",
-    "patronRegex": "\\b(raid|raidear|nukear|ataque masivo)\\b",
+    "id_regla": "amenaza_raid_nuke",
+    "patron": "\\b(raid|raidear|nuke|nukear|tirar el server|destruir el servidor)\\b",
+    "severidad": "CRÍTICO",
+    "colorHex": 16711680,
     "webhookDestino": "WEBHOOK_1",
-    "gravedad": "Critica",
-    "color": 16711680,
-    "descripcion": "Intento de raid o ataque coordinado"
+    "tipo": "keyword"
   },
   {
-    "id": "enlaces_externos",
-    "patronRegex": "(discord\\.gg/|discord\\.com/invite/)",
+    "id_regla": "captura_enlaces_invitacion",
+    "patron": "(discord\\.gg\\/[a-zA-Z0-9]+|discord\\.com\\/invite\\/[a-zA-Z0-9]+)",
+    "severidad": "ADVERTENCIA",
+    "colorHex": 16753920,
     "webhookDestino": "WEBHOOK_1",
-    "gravedad": "Media",
-    "color": 16753920,
-    "descripcion": "Distribución de enlaces no autorizados"
+    "tipo": "link"
+  },
+  {
+    "id_regla": "mencion_marca_aliados",
+    "patron": "\\b(xn|rz|el escritor)\\b",
+    "severidad": "INFORMATIVO",
+    "colorHex": 3447003,
+    "webhookDestino": "WEBHOOK_1",
+    "tipo": "mention"
   }
 ]
