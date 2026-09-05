@@ -1,18 +1,19 @@
 const { Client, WebhookClient, MessageEmbed } = require('discord.js-selfbot-v13');
 const express = require('express');
 const fs = require('fs');
+const path = require('path');
 
 const reglasAlertas = JSON.parse(fs.readFileSync('./reglas_alertas.json', 'utf8'));
 const comandosSquads = JSON.parse(fs.readFileSync('./comandos_squads.json', 'utf8'));
-let blackList = JSON.parse(fs.readFileSync('./black_list.json', 'utf8'));
+const rutaBlackList = path.join(__dirname, 'black_list.json');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 app.get('/', (req, res) => {
     res.set('Access-Control-Allow-Origin', '*'); 
-    res.json({ estado: "operativo", nucleo: "Forense-Autonomo-v4" });
+    res.json({ estado: "operativo", nucleo: "Contrainteligencia-Autonoma-v4" });
 });
-app.listen(PORT, () => console.log(`[SISTEMA] API activa en puerto ${PORT}`));
+app.listen(PORT, () => console.log(`[SISTEMA] Motor de contrainteligencia activo en puerto ${PORT}`));
 
 const memoriaCooldown = new Set();
 const TIEMPO_ENFRIAMIENTO_MS = 45000;
@@ -23,7 +24,7 @@ const cuentaExploradora = new Client({
 });
 
 cuentaExploradora.on('ready', () => {
-    console.log(`[PANÓPTICO V4] Operando de forma invisible como: ${cuentaExploradora.user.tag}`);
+    console.log(`[PANÓPTICO V4] Red de infiltración operativa como: ${cuentaExploradora.user.tag}`);
 });
 
 cuentaExploradora.on('messageCreate', async (message) => {
@@ -33,28 +34,28 @@ cuentaExploradora.on('messageCreate', async (message) => {
     const contenidoMensaje = message.content.toLowerCase();
     let alertaDisparada = false;
     let datosAlerta = null;
-    let idCasoGenerado = 'CASO-' + Math.random().toString(36).substring(2, 9).toUpperCase();
+    let casoIdGenerado = 'CASO_' + Math.random().toString(36).substring(2, 9).toUpperCase();
 
     // 1. EVALUACIÓN DE COMANDOS DE SQUADS Y AUTO-FICHAJE
     for (const cmd of comandosSquads) {
         if (contenidoMensaje.startsWith(cmd.comando.toLowerCase())) {
             alertaDisparada = true;
             
-            // Comprobar si el infractor ya existe en la base de datos
-            const infractorExistente = blackList.find(b => b.userId === message.author.id);
+            // Proceso de lectura, actualización y escritura autónoma de la base de datos
+            let blackList = JSON.parse(fs.readFileSync(rutaBlackList, 'utf8'));
+            const usuarioYaFichado = blackList.find(b => b.userId === message.author.id);
             
-            // Si no existe, se añade automáticamente a la lista y se guarda el archivo
-            if (!infractorExistente) {
-                const nuevoRegistro = {
+            if (!usuarioYaFichado) {
+                const nuevoFichaje = {
                     userId: message.author.id,
                     nombreUsuario: message.author.tag,
-                    accion: cmd.descripcion,
+                    accion: `Infracción automatizada: Uso del comando ${cmd.comando}`,
                     fechaFichaje: new Date().toISOString().split('T')[0],
-                    idCaso: idCasoGenerado
+                    casoId: casoIdGenerado
                 };
-                blackList.push(nuevoRegistro);
-                fs.writeFileSync('./black_list.json', JSON.stringify(blackList, null, 2));
-                console.log(`[BASE DE DATOS] Nuevo infractor registrado: ${message.author.tag}`);
+                blackList.push(nuevoFichaje);
+                fs.writeFileSync(rutaBlackList, JSON.stringify(blackList, null, 2), 'utf8');
+                console.log(`[NUEVO INGRESO] Usuario ${message.author.tag} añadido a la lista negra.`);
             }
 
             datosAlerta = {
@@ -64,13 +65,13 @@ cuentaExploradora.on('messageCreate', async (message) => {
                 colorHex: cmd.colorHex,
                 webhookKey: cmd.webhookDestino,
                 detalleAccion: cmd.descripcion,
-                accionId: infractorExistente ? infractorExistente.idCaso : idCasoGenerado
+                accionId: usuarioYaFichado ? "REINCIDENTE" : casoIdGenerado
             };
             break;
         }
     }
 
-    // 2. EVALUACIÓN DE REGLAS GENERALES
+    // 2. EVALUACIÓN DE REGLAS GENERALES (Sin auto-fichaje, solo monitoreo)
     if (!alertaDisparada) {
         for (const regla of reglasAlertas) {
             const regexPatron = new RegExp(regla.patron, 'i');
@@ -82,55 +83,59 @@ cuentaExploradora.on('messageCreate', async (message) => {
                     severidad: regla.severidad,
                     colorHex: regla.colorHex,
                     webhookKey: regla.webhookDestino,
-                    detalleAccion: `Coincidencia por patrón (${regla.tipo})`,
-                    accionId: idCasoGenerado
+                    detalleAccion: `Intercepción por patrón de vigilancia`,
+                    accionId: casoIdGenerado
                 };
                 break;
             }
         }
     }
 
-    // 3. ENVÍO DE LA ALERTA AL WEBHOOK
+    // 3. CONSTRUCCIÓN Y ENVÍO DEL REPORTE FORENSE
     if (alertaDisparada && datosAlerta) {
         memoriaCooldown.add(message.author.id);
         setTimeout(() => memoriaCooldown.delete(message.author.id), TIEMPO_ENFRIAMIENTO_MS);
 
         const urlWebhook = process.env[datosAlerta.webhookKey];
-        if (!urlWebhook) return;
+        if (!urlWebhook) {
+            console.error(`ERROR CRÍTICO: Falta la clave de enrutamiento ${datosAlerta.webhookKey} en Render.`);
+            return;
+        }
 
         const webhook = new WebhookClient({ url: urlWebhook });
 
-        // Verificamos nuevamente la base de datos actualizada en tiempo real
-        const estadoActualizado = blackList.find(b => b.userId === message.author.id);
-        const estadoBanXN = estadoActualizado 
-            ? `Si, [🟨] ${estadoActualizado.accion} (ID caso: ${estadoActualizado.idCaso})` 
-            : `No registrado en blacklist activa.`;
+        // Lectura de estado actual en la lista negra
+        const blackListActualizada = JSON.parse(fs.readFileSync(rutaBlackList, 'utf8'));
+        const infractorFichado = blackListActualizada.find(b => b.userId === message.author.id);
+        const estadoBanXN = infractorFichado 
+            ? `Si, [🟨] ${infractorFichado.accion} (Caso asociado: ${infractorFichado.casoId || 'Antiguo'})` 
+            : `No consta en los registros de seguridad.`;
 
         const enlaceMensaje = `https://discord.com/channels/${message.guild ? message.guild.id : '@me'}/${message.channel.id}/${message.id}`;
-        const nombreServidor = message.guild ? message.guild.name : 'Canal Privado (DM)';
+        const nombreServidor = message.guild ? message.guild.name : 'Sector Privado (DM)';
         const idServidor = message.guild ? message.guild.id : 'N/A';
         const fechaCreacionCuenta = `<t:${Math.floor(message.author.createdTimestamp / 1000)}:R>`;
 
         const panelForense = new MessageEmbed()
             .setColor(datosAlerta.colorHex)
             .setAuthor({ 
-                name: `PANÓPTICO INTEL: ${datosAlerta.idRegla.toUpperCase()}`, 
+                name: `ALERTA DE SEGURIDAD: ${datosAlerta.idRegla.toUpperCase()}`, 
                 iconURL: 'https://cdn-icons-png.flaticon.com/512/573/573389.png' 
             })
-            .setDescription(`**Nuevo evento interceptado:**\n\`\`\`\n${message.content}\n\`\`\``)
+            .setDescription(`**Evidencia capturada en tiempo real:**\n\`\`\`\n${message.content}\n\`\`\``)
             .addFields(
-                { name: '🆔 ID Caso', value: `\`${datosAlerta.accionId}\``, inline: false },
-                { name: '👤 Usuario', value: `${message.author.tag} (\`${message.author.id}\`)`, inline: true },
-                { name: '📅 Creada', value: fechaCreacionCuenta, inline: true },
-                { name: '📍 Servidor / Canal', value: `${nombreServidor}\n<#${message.channel.id}> (\`${idServidor}\`)`, inline: false },
-                { name: '🛡️ Registro Interno', value: `${estadoBanXN}`, inline: false },
-                { name: '🔗 Enlace Directo', value: `[Ir al mensaje original](${enlaceMensaje})`, inline: false }
+                { name: '🆔 Identificador de Caso', value: `\`${datosAlerta.accionId}\``, inline: false },
+                { name: '👤 Identidad del Sujeto', value: `${message.author.tag}\n(\`${message.author.id}\`)`, inline: true },
+                { name: '📅 Antigüedad de Cuenta', value: fechaCreacionCuenta, inline: true },
+                { name: '📍 Coordenadas de Origen', value: `${nombreServidor}\n<#${message.channel.id}> (\`${idServidor}\`)`, inline: false },
+                { name: '🛡️ Estado en Base de Datos', value: `${estadoBanXN}`, inline: false },
+                { name: '🔗 Trazabilidad', value: `[Acceder al registro original del servidor](${enlaceMensaje})`, inline: false }
             )
             .setThumbnail(message.author.displayAvatarURL({ dynamic: true }))
-            .setFooter({ text: `Sistema de Inteligencia Forense | ID Servidor: ${idServidor}` })
+            .setFooter({ text: `Departamento de Contrainteligencia | ID Origen: ${idServidor}` })
             .setTimestamp();
 
-        webhook.send({ embeds: [panelForense] }).catch(error => console.error('[ERROR WEBHOOK]', error.message));
+        webhook.send({ embeds: [panelForense] }).catch(error => console.error('[FALLO DE TRANSMISIÓN]', error.message));
     }
 });
 
