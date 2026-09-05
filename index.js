@@ -175,11 +175,6 @@ cuentaExploradora.on('messageCreate', async (message) => {
             attachment: Buffer.from(contextoTxtData, 'utf-8'),
             name: `Contexto_${message.author.id}.txt`
         };
-
-        // ...
-
-        webhook.send({ embeds: [panelForense], files: [adjuntoHTML, adjuntoTXT] }).catch(error => console.error('[FALLO DE TRANSMISIÓN]', error.message));
-
         let infoCordCat = "Procesando auditoría...";
         try {
             const cordcatRes = await axios.get(`https://api.cordcat.com/v1/users/${message.author.id}`, {
