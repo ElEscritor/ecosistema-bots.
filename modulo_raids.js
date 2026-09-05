@@ -49,15 +49,21 @@ function generarEvidenciaHTML(mensajeOriginal, authorTag, authorId, avatarUrl, f
 
 // 3. NÚCLEO DEL ANALIZADOR DE RAIDS
 async function ejecutar(message, blacklistCollection) {
+// (Dentro de async function ejecutar)
     const contenidoMensaje = message.content.toLowerCase();
     let alertaDisparada = false;
     let datosAlerta = null;
 
-    for (const cmd of comandosSquads) {
-        if (cmd.webhookDestino === "WEBHOOK_Raids" && contenidoMensaje.startsWith(cmd.comando.toLowerCase())) {
-            alertaDisparada = true;
-            datosAlerta = { idRegla: cmd.comando, colorHex: cmd.colorHex, webhookDestino: cmd.webhookDestino };
-            break;
+    // Escáner Analítico exclusivo para patrones Regex de Raids
+    for (const regla of reglasAlertas) {
+        // Ignora cualquier regla que no esté dirigida al Webhook de Raids
+        if (regla.webhookDestino === "WEBHOOK_Raids") {
+            const regexPatron = new RegExp(regla.patron, 'i');
+            if (regexPatron.test(contenidoMensaje)) {
+                alertaDisparada = true;
+                datosAlerta = { idRegla: regla.id_regla, colorHex: regla.colorHex, webhookDestino: regla.webhookDestino };
+                break;
+            }
         }
     }
 
