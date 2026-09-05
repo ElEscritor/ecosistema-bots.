@@ -2,6 +2,7 @@ const { Client, WebhookClient, MessageEmbed } = require('discord.js-selfbot-v13'
 const express = require('express');
 const fs = require('fs');
 
+// Carga los 3 archivos JSON que has creado
 const reglasAlertas = JSON.parse(fs.readFileSync('./reglas_alertas.json', 'utf8'));
 const comandosSquads = JSON.parse(fs.readFileSync('./comandos_squads.json', 'utf8'));
 const blackList = JSON.parse(fs.readFileSync('./black_list.json', 'utf8'));
@@ -12,7 +13,7 @@ app.get('/', (req, res) => {
     res.set('Access-Control-Allow-Origin', '*'); 
     res.json({ estado: "operativo", nucleo: "Forense-Inteligencia-v3" });
 });
-app.listen(PORT, () => console.log(`[SISTEMA] API de monitorización activa en puerto ${PORT}`));
+app.listen(PORT, () => console.log(`[SISTEMA] API activa en puerto ${PORT}`));
 
 const memoriaCooldown = new Set();
 const TIEMPO_ENFRIAMIENTO_MS = 45000;
@@ -34,7 +35,7 @@ cuentaExploradora.on('messageCreate', async (message) => {
     let alertaDisparada = false;
     let datosAlerta = null;
 
-    // 1. EVALUACIÓN DE COMANDOS DE SQUADS (Ej: !serdan)
+    // EVALUACIÓN DE COMANDOS DE SQUADS
     for (const cmd of comandosSquads) {
         if (contenidoMensaje.startsWith(cmd.comando.toLowerCase())) {
             alertaDisparada = true;
@@ -51,7 +52,7 @@ cuentaExploradora.on('messageCreate', async (message) => {
         }
     }
 
-    // 2. EVALUACIÓN DE REGLAS GENERALES (Regex, Enlaces, Menciones)
+    // EVALUACIÓN DE REGLAS GENERALES
     if (!alertaDisparada) {
         for (const regla of reglasAlertas) {
             const regexPatron = new RegExp(regla.patron, 'i');
@@ -71,19 +72,22 @@ cuentaExploradora.on('messageCreate', async (message) => {
         }
     }
 
+    // SI ENCUENTRA ALGO, DISPARA LA ALERTA
     if (alertaDisparada && datosAlerta) {
         memoriaCooldown.add(message.author.id);
         setTimeout(() => memoriaCooldown.delete(message.author.id), TIEMPO_ENFRIAMIENTO_MS);
 
         const urlWebhook = process.env[datosAlerta.webhookKey];
-        if (!urlWebhook) return;
+        if (!urlWebhook) {
+            console.error(`ERROR: No encuentro la variable ${datosAlerta.webhookKey} en Render.`);
+            return;
+        }
 
         const webhook = new WebhookClient({ url: urlWebhook });
 
-        // Cruce con Base de Datos Interna (Blacklist)
         const infractorFichado = blackList.find(b => b.userId === message.author.id);
         const estadoBanXN = infractorFichado 
-            ? `Si, [🟨] ${infractorFichado.accion} (ID accion: ${datosAlerta.accionId})` 
+            ? `Si, [🟨] ${infractorFichado.accion} (Fichado: ${infractorFichado.fechaFichaje})` 
             : `No registrado en blacklist activa.`;
 
         const enlaceMensaje = `https://discord.com/channels/${message.guild ? message.guild.id : '@me'}/${message.channel.id}/${message.id}`;
