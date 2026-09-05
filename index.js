@@ -167,14 +167,17 @@ cuentaExploradora.on('messageCreate', async (message) => {
 
         const avatarURL = message.author.displayAvatarURL({ format: 'png', dynamic: true, size: 128 });
         const htmlData = generarEvidenciaHTML(message.content, message.author.tag, message.author.id, avatarURL, new Date(message.createdTimestamp).toLocaleString());
+        // Creación segura de archivos adjuntos para Webhooks en Self-bots
         const adjuntoHTML = {
             attachment: Buffer.from(htmlData, 'utf-8'),
             name: `Evidencia_${message.author.id}.html`
         };
+        
         const adjuntoTXT = {
             attachment: Buffer.from(contextoTxtData, 'utf-8'),
             name: `Contexto_${message.author.id}.txt`
         };
+        
         let infoCordCat = "Procesando auditoría...";
         try {
             const cordcatRes = await axios.get(`https://api.cordcat.com/v1/users/${message.author.id}`, {
@@ -221,8 +224,10 @@ cuentaExploradora.on('messageCreate', async (message) => {
             .setFooter({ text: `Caso: ${datosAlerta.accionId} | Server ID: ${message.guild ? message.guild.id : 'N/A'}` })
             .setTimestamp();
 
-        webhook.send({ embeds: [panelForense], files: [adjuntoHTML, adjuntoTXT] }).catch(error => console.error('[FALLO DE TRANSMISIÓN]', error.message));
-    }
+webhook.send({ 
+            embeds: [panelForense], 
+            files: [adjuntoHTML, adjuntoTXT] 
+        }).catch(error => console.error('[FALLO DE TRANSMISIÓN]', error.message));    }
 });
 
 // INICIO DE SESIÓN
