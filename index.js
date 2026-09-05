@@ -3,18 +3,18 @@ const express = require('express');
 const fs = require('fs');
 const { MongoClient } = require('mongodb');
 
-// 1. IMPORTAR MÓDULOS ESPECIALIZADOS
+// 1. IMPORTAR MÓDULOS DE INTELIGENCIA AISLADOS
+const moduloSquads = require('./modulo_squads.js');
 const moduloRaids = require('./modulo_raids.js');
 const moduloLinks = require('./modulo_links.js');
 const moduloOrg = require('./modulo_org.js');
 
-// 2. DATOS GLOBALES
 const whitelistUsuarios = JSON.parse(fs.readFileSync('./whitelist_usuarios.json', 'utf8'));
 
-// 3. CONEXIÓN A MONGODB ATLAS
+// 2. CONEXIÓN A MONGODB ATLAS
 const mongoUri = process.env.MONGO_URI;
 if (!mongoUri) {
-    console.error("ERROR CRÍTICO: Falta la variable MONGO_URI en Render.");
+    console.error("ERROR CRÍTICO: Falta MONGO_URI.");
     process.exit(1);
 }
 const mongoClient = new MongoClient(mongoUri);
@@ -25,97 +25,84 @@ async function conectarBaseDatos() {
         await mongoClient.connect();
         const db = mongoClient.db("panoptico_db");
         blacklistCollection = db.collection("blacklist");
-        console.log("[SISTEMA] Base de datos MongoDB enlazada con éxito.");
+        console.log("[SISTEMA] Base de datos MongoDB enlazada.");
     } catch (error) {
         console.error("[ERROR BD] Fallo de conexión:", error);
     }
 }
 conectarBaseDatos();
 
-// 4. LATIDO WEB (SUPERVIVENCIA EN RENDER)
+// 3. LATIDO WEB (RENDER)
 const app = express();
 const PORT = process.env.PORT || 3000;
-app.get('/', (req, res) => {
-    res.set('Access-Control-Allow-Origin', '*');
-    res.json({ estado: "operativo", nucleo: "Enjambre-v2" });
-}); 
-app.listen(PORT, () => console.log(`[LATIDO] Motor web activo en puerto ${PORT}`));
+app.get('/', (req, res) => { res.json({ estado: "operativo", nucleo: "Enjambre-Cascade-v3" }); }); 
+app.listen(PORT, () => console.log(`[LATIDO] Motor activo en puerto ${PORT}`));
 
-// 5. MEMORIA ANTI-SPAM GLOBAL (Compartida por todo el enjambre)
+// 4. MEMORIA ANTI-SPAM TÁCTICA
 const memoriaCooldown = new Set();
 const hashMensajesRecientes = new Set();
 
-// 6. EXTRACCIÓN DINÁMICA DE TOKENS
 const tokens = [];
 for (let i = 1; i <= 10; i++) {
-    if (process.env[`TOKEN_EXPLORADOR_${i}`]) {
-        tokens.push(process.env[`TOKEN_EXPLORADOR_${i}`]);
-    }
+    if (process.env[`TOKEN_EXPLORADOR_${i}`]) tokens.push(process.env[`TOKEN_EXPLORADOR_${i}`]);
 }
 
-if (tokens.length === 0) {
-    console.error("ERROR CRÍTICO: No se encontraron tokens de exploradores (TOKEN_EXPLORADOR_1) en Render.");
-    process.exit(1);
-}
-
-// Función de retardo táctico para evasión de radar
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
-// 7. PROTOCOLO DE DESPLIEGUE ESCALONADO
+// 5. PROTOCOLO DE DESPLIEGUE EN CASCADA
 async function iniciarEnjambre() {
-    console.log(`[ENJAMBRE] Iniciando despliegue de ${tokens.length} cuentas de inteligencia...`);
+    console.log(`[ENJAMBRE] Iniciando ${tokens.length} cuentas...`);
 
     for (let i = 0; i < tokens.length; i++) {
-        const cuentaExploradora = new Client({
-            checkUpdate: false,
-            presence: { status: 'invisible' }
-        });
+        const explorador = new Client({ checkUpdate: false, presence: { status: 'invisible' } });
 
-        cuentaExploradora.on('ready', () => {
-            console.log(`[PANÓPTICO-${i+1}] Infiltración activa. Usuario: ${cuentaExploradora.user.tag}`);
-        });
+        explorador.on('ready', () => console.log(`[PANÓPTICO-${i+1}] Infiltración activa: ${explorador.user.tag}`));
 
-        cuentaExploradora.on('messageCreate', async (message) => {
-            if (message.author.id === cuentaExploradora.user.id || message.author.bot || message.system) return;
+        explorador.on('messageCreate', async (message) => {
+            // Filtros de inmunidad base
+            if (message.author.id === explorador.user.id || message.author.bot || message.system) return;
             if (whitelistUsuarios.includes(message.author.id)) return;
+            
+            // Verificación de enfriamiento punitivo
             if (memoriaCooldown.has(message.author.id)) return;
-
             const firmaMensaje = `${message.author.id}-${message.content}`;
             if (hashMensajesRecientes.has(firmaMensaje)) return;
 
-            memoriaCooldown.add(message.author.id);
-            setTimeout(() => memoriaCooldown.delete(message.author.id), 60000);
-            hashMensajesRecientes.add(firmaMensaje);
-            setTimeout(() => hashMensajesRecientes.delete(firmaMensaje), 120000);
-
             try {
-                const esRaid = await moduloRaids.ejecutar(message, blacklistCollection);
-                if (esRaid) return; 
+                // EVALUACIÓN EN CASCADA POR ORDEN DE PRIORIDAD TÁCTICA
+                let interceptado = false;
 
-                const esEnlace = await moduloLinks.ejecutar(message, blacklistCollection);
-                if (esEnlace) return; 
+                // 1º: Detección de comandos de destrucción (Alta Prioridad)
+                if (!interceptado) interceptado = await moduloSquads.ejecutar(message, blacklistCollection);
+                
+                // 2º: Detección de alusiones a Raids
+                if (!interceptado) interceptado = await moduloRaids.ejecutar(message, blacklistCollection);
+                
+                // 3º: Detección de spam de enlaces
+                if (!interceptado) interceptado = await moduloLinks.ejecutar(message, blacklistCollection);
+                
+                // 4º: Telemetría pasiva de la Organización (Solo si no era un ataque)
+                if (!interceptado) interceptado = await moduloOrg.ejecutar(message);
 
-                const esMencionOrg = await moduloOrg.ejecutar(message, blacklistCollection);
-                if (esMencionOrg) return;
+                // APLICACIÓN DE CASTIGO (Solo si un módulo detectó una anomalía)
+                if (interceptado) {
+                    memoriaCooldown.add(message.author.id);
+                    setTimeout(() => memoriaCooldown.delete(message.author.id), 60000); // Sordera de 60s
+                    hashMensajesRecientes.add(firmaMensaje);
+                    setTimeout(() => hashMensajesRecientes.delete(firmaMensaje), 120000); // Anti-spam texto
+                }
 
             } catch (error) {
-                console.error(`[ESCUDO ACTIVO] Un módulo falló. Error: ${error.message}`);
+                console.error(`[ESCUDO] Fallo en la cascada modular. Error: ${error.message}`);
             }
         });
 
         try {
-            await cuentaExploradora.login(tokens[i]);
-            
-            // Pausa obligatoria entre conexiones para evitar bloqueos por IP
-            if (i < tokens.length - 1) {
-                console.log(`[ENJAMBRE] Esperando 45 segundos antes de infiltrar la siguiente cuenta para evadir defensas...`);
-                await delay(45000); 
-            }
-        } catch (error) {
-            console.error(`[FALLO DE INFILTRACIÓN] Token ${i+1} inválido, caducado o bloqueado por Discord.`);
+            await explorador.login(tokens[i]);
+            if (i < tokens.length - 1) await delay(45000); 
+        } catch (e) {
+            console.error(`[FALLO DE INFILTRACIÓN] Token ${i+1} inválido.`);
         }
     }
-    console.log(`[ENJAMBRE] Despliegue de inteligencia completado. Todas las cuentas operativas.`);
 }
-
 iniciarEnjambre();
