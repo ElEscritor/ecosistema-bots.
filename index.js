@@ -71,19 +71,18 @@ cuentaExploradora.on('messageCreate', async (message) => {
     hashMensajesRecientes.add(firmaMensaje);
     setTimeout(() => hashMensajesRecientes.delete(firmaMensaje), 120000);
 
-    // Enrutamiento seguro a módulos
+// Enrutamiento seguro a módulos
     try {
         // Enviar al Especialista de Raids
         const esRaid = await moduloRaids.ejecutar(message, blacklistCollection);
         if (esRaid) return; // Si fue procesado como raid, el ciclo termina aquí.
 
-        // [Futuro] Aquí inyectaremos los módulos de enlaces y alianzas:
-        // const esEnlace = await moduloLinks.ejecutar(message);
-        // if (esEnlace) return;
+        // Enviar al Especialista de Enlaces (INYECCIÓN B)
+        const esEnlace = await moduloLinks.ejecutar(message, blacklistCollection);
+        if (esEnlace) return; 
 
     } catch (error) {
         console.error(`[ESCUDO ACTIVO] Un módulo falló, pero el núcleo sigue vivo. Error: ${error.message}`);
     }
-});
 
 cuentaExploradora.login(process.env.TOKEN_EXPLORADOR_1);
