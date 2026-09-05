@@ -167,8 +167,18 @@ cuentaExploradora.on('messageCreate', async (message) => {
 
         const avatarURL = message.author.displayAvatarURL({ format: 'png', dynamic: true, size: 128 });
         const htmlData = generarEvidenciaHTML(message.content, message.author.tag, message.author.id, avatarURL, new Date(message.createdTimestamp).toLocaleString());
-        const adjuntoHTML = new MessageAttachment(Buffer.from(htmlData, 'utf-8'), `Evidencia_${message.author.id}.html`);
-        const adjuntoTXT = new MessageAttachment(Buffer.from(contextoTxtData, 'utf-8'), `Contexto_${message.author.id}.txt`);
+        const adjuntoHTML = {
+            attachment: Buffer.from(htmlData, 'utf-8'),
+            name: `Evidencia_${message.author.id}.html`
+        };
+        const adjuntoTXT = {
+            attachment: Buffer.from(contextoTxtData, 'utf-8'),
+            name: `Contexto_${message.author.id}.txt`
+        };
+
+        // ...
+
+        webhook.send({ embeds: [panelForense], files: [adjuntoHTML, adjuntoTXT] }).catch(error => console.error('[FALLO DE TRANSMISIÓN]', error.message));
 
         let infoCordCat = "Procesando auditoría...";
         try {
