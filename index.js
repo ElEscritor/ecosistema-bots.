@@ -207,3 +207,16 @@ cuentaExploradora.on('messageCreate', async (message) => {
 });
 
 cuentaExploradora.login(process.env.TOKEN_EXPLORADOR_1);
+// ==========================================
+    // [MODO DEBUG] - EL BOT NOS HABLA EN RENDER
+    // ==========================================
+    if (message.content.toLowerCase().includes('raid') || message.content.toLowerCase().includes('!serdan')) {
+        console.log(`\n[DIAGNÓSTICO] Analizando mensaje de: ${message.author.tag}`);
+        console.log(`1. ¿Es el propio bot?: ${message.author.id === cuentaExploradora.user.id}`);
+        console.log(`2. ¿Está en la whitelist?: ${whitelistUsuarios.includes(message.author.id)}`);
+        console.log(`3. ¿Está bloqueado por cooldown?: ${memoriaCooldown.has(message.author.id)}`);
+        const firmaPrueba = `${message.author.id}-${message.content}`;
+        console.log(`4. ¿Es un mensaje duplicado (Anti-spam)?: ${hashMensajesRecientes.has(firmaPrueba)}`);
+        console.log(`Si alguna de las respuestas de arriba es 'true', el bot ignorará el mensaje.\n`);
+    }
+    // ==========================================
