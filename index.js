@@ -196,19 +196,30 @@ cuentaExploradora.on('messageCreate', async (message) => {
             }
         }
 
-        // Ensamblaje del Embed Final sin Jump Links innecesarios
+        // Truncado de seguridad para el mensaje incrustado (Evita colapsos de la API de Discord)
+        const mensajeCorto = message.content.length > 1000 
+            ? message.content.substring(0, 1000) + '\n\n[... TEXTO TRUNCADO - VER ARCHIVO TXT ADJUNTO]' 
+            : message.content;
+
+        // Formateo visual de CordCat
+        const iconoCordCat = infoCordCat.includes("Flags") || infoCordCat.includes("búsqueda manual") ? "⚠️" : "✅";
+
+        // Ensamblaje del Embed Final Optimizado
         const panelForense = new MessageEmbed()
             .setColor(datosAlerta.colorHex)
-            .setAuthor({ name: `INFRACCIÓN: ${datosAlerta.idRegla.toUpperCase()}`, iconURL: 'https://cdn-icons-png.flaticon.com/512/573/573389.png' })
+            .setAuthor({ 
+                name: `INFRACCIÓN: ${datosAlerta.idRegla.toUpperCase()}`, 
+                iconURL: '[https://cdn-icons-png.flaticon.com/512/573/573389.png](https://cdn-icons-png.flaticon.com/512/573/573389.png)' 
+            })
+            .setDescription(`**Evidencia Interceptada:**\n\`\`\`\n${mensajeCorto}\n\`\`\``)
             .addFields(
-                { name: '🆔 Identificador de Caso', value: `\`${datosAlerta.accionId}\``, inline: false },
-                { name: '👤 Sospechoso', value: `${message.author.tag}\n(\`${message.author.id}\`)`, inline: true },
+                { name: '👤 Sospechoso', value: `**${message.author.tag}**\n\`${message.author.id}\``, inline: true },
                 { name: '📅 Cuenta Creada', value: `<t:${Math.floor(message.author.createdTimestamp / 1000)}:R>`, inline: true },
-                { name: '📍 Coordenadas de Origen', value: `**Server:** ${nombreServidor}\n**Canal:** <#${message.channel.id}> (\`#${nombreCanal}\`)`, inline: false },
-                { name: '🔎 Auditoría Externa (CordCat)', value: infoCordCat, inline: false }
+                { name: '🔎 CordCat API', value: `${iconoCordCat} ${infoCordCat}`, inline: true },
+                { name: '📍 Coordenadas de Origen', value: `**Servidor:** ${nombreServidor}\n**Canal:** \`#${nombreCanal}\` (<#${message.channel.id}>)`, inline: false }
             )
             .setThumbnail(avatarURL)
-            .setFooter({ text: `Evidencia HTML y TXT adjunta | ID Origen: ${message.guild ? message.guild.id : 'N/A'}` })
+            .setFooter({ text: `Caso: ${datosAlerta.accionId} | Server ID: ${message.guild ? message.guild.id : 'N/A'}` })
             .setTimestamp();
 
         // Enviar todo al Webhook (Embed + Archivo HTML + Archivo TXT)
