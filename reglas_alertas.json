@@ -12,7 +12,7 @@
     "patron": "(discord\\.gg\\/[a-zA-Z0-9]+|discord\\.com\\/invite\\/[a-zA-Z0-9]+)",
     "severidad": "ADVERTENCIA",
     "colorHex": 16753920,
-    "webhookDestino": "WEBHOOK_Links",
+    "webhookDestino": "https://discord.com/api/webhooks/1545591313208967190/GoIshTq80ubBfv1y_riVsYLbpUCrC_TC4l124hWXzZH0NcaQM68jNWeQLDK_cxybucco",
     "tipo": "keyword"
   },
   {
