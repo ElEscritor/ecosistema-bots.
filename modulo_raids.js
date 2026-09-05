@@ -11,7 +11,7 @@ async function ejecutar(message, blacklistCollection) {
     let datosAlerta = null;
     let casoIdGenerado = 'CASO_' + Math.random().toString(36).substring(2, 9).toUpperCase();
 
-    // 1. Detección de Comandos (Solo los dirigidos al Webhook de Raids)
+    // 1. Detección de Comandos
     for (const cmd of comandosSquads) {
         if (cmd.webhookDestino === "WEBHOOK_Raids" && contenidoMensaje.startsWith(cmd.comando.toLowerCase())) {
             alertaDisparada = true;
@@ -39,7 +39,7 @@ async function ejecutar(message, blacklistCollection) {
         }
     }
 
-    // 2. Detección por Regex (Solo reglas de Raids)
+    // 2. Detección por Regex
     if (!alertaDisparada) {
         for (const regla of reglasAlertas) {
             if (regla.webhookDestino === "WEBHOOK_Raids") {
@@ -53,34 +53,46 @@ async function ejecutar(message, blacklistCollection) {
         }
     }
 
-    // 3. Envío al Webhook si hubo detección
+    // 3. Envío al Webhook con Diseño Profesional
     if (alertaDisparada && datosAlerta) {
         const urlWebhook = process.env[datosAlerta.webhookDestino];
         if (!urlWebhook) {
             console.log(`[ERROR] Falta variable ${datosAlerta.webhookDestino} en Render.`);
-            return true; // Retorna true para que index.js sepa que procesó (aunque fallara el envío)
+            return true; 
         }
 
         const webhook = new WebhookClient({ url: urlWebhook });
-        const mensajeCorto = message.content.length > 1000 ? message.content.substring(0, 1000) + '...' : message.content;
+        
+        // --- PREPARACIÓN DE DATOS VISUALES ---
+        const mensajeCorto = message.content.length > 1000 ? message.content.substring(0, 1000) + '\n\n[... TEXTO TRUNCADO]' : message.content;
+        const avatarURL = message.author.displayAvatarURL({ format: 'png', dynamic: true, size: 256 });
+        const creacionCuenta = Math.floor(message.author.createdTimestamp / 1000);
+        const nombreServidor = message.guild ? message.guild.name : 'Mensaje Privado (DM)';
 
+        // --- CONSTRUCCIÓN DEL PANEL FORENSE ---
         const panelForense = new MessageEmbed()
             .setColor(datosAlerta.colorHex)
             .setAuthor({ name: `INFRACCIÓN: ${datosAlerta.idRegla.toUpperCase()}`, iconURL: 'https://cdn-icons-png.flaticon.com/512/573/573389.png' })
-            .setDescription(`**Evidencia Interceptada:**\n\`\`\`\n${mensajeCorto}\n\`\`\``)
+            .setDescription(`**Mensaje Interceptado:**\n\`\`\`text\n${mensajeCorto}\n\`\`\``)
+            .setThumbnail(avatarURL)
             .addFields(
-                { name: '👤 Sospechoso', value: `**${message.author.tag}**\n\`${message.author.id}\``, inline: true },
-                { name: '📍 Origen', value: `**Canal:** <#${message.channel.id}>`, inline: true },
-                { name: '🛡️ Estado Base de Datos', value: datosAlerta.estadoBD, inline: false }
+                // Fila 1: Cuadrícula de 3 columnas (Identidad, Antigüedad, Ubicación)
+                { name: '👤 Sospechoso', value: `**${message.author.tag}**\n(\`${message.author.id}\`)`, inline: true },
+                { name: '📅 Cuenta Creada', value: `<t:${creacionCuenta}:R>`, inline: true },
+                { name: '📍 Ubicación', value: `**${nombreServidor}**\n<#${message.channel.id}>`, inline: true },
+                
+                // Fila 2: Base de Datos y Enlace Directo
+                { name: '🛡️ Estado Base de Datos', value: datosAlerta.estadoBD, inline: false },
+                { name: '🔗 Acción Directa', value: `[Ir al mensaje original](${message.url})`, inline: false }
             )
-            .setFooter({ text: `Caso: ${datosAlerta.accionId}` })
+            .setFooter({ text: `ID Servidor: ${message.guild ? message.guild.id : 'N/A'} • Caso: ${datosAlerta.accionId}` })
             .setTimestamp();
 
         webhook.send({ embeds: [panelForense] }).catch(err => console.error('[FALLO RED]', err.message));
-        return true; // Indica que este módulo atrapó al raider
+        return true; 
     }
 
-    return false; // No era un raid. Pasa el mensaje al siguiente módulo.
+    return false; 
 }
 
 module.exports = { ejecutar };
