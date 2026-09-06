@@ -49,11 +49,7 @@ function generarEvidenciaHTML(mensajeOriginal, authorTag, authorId, avatarUrl, f
 }
 
 // 3. NÚCLEO DEL ANALIZADOR DE RAIDS
-async function ejecutar(message, blacklistCollection) {
-// (Dentro de async function ejecutar)
-    const contenidoMensaje = message.content.toLowerCase();
-    let alertaDisparada = false;
-    let datosAlerta = null;
+const estadoBD = await database.ficharInfractor(message.author.id, message.author.tag, `Alusión a Raid: ${datosAlerta.idRegla}`, datosAlerta.accionId);
 
     // Escáner Analítico exclusivo para patrones Regex de Raids
     for (const regla of reglasAlertas) {
