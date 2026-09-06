@@ -8,15 +8,12 @@ async function ejecutar(message) {
     let mencionesDetectadas = [];
     let datosAlerta = null;
 
-    // 1. Escáner Analítico de Palabras Clave
     for (const regla of reglasAlertas) {
         if (regla.webhookDestino === "WEBHOOK_Org") {
-            // El modificador 'gi' busca de forma global sin importar mayúsculas/minúsculas
             const regexPatron = new RegExp(regla.patron, 'gi');
             const coincidencias = contenidoMensaje.match(regexPatron);
 
             if (coincidencias && coincidencias.length > 0) {
-                // Filtramos duplicados (ej. si dice "rz" dos veces, solo lo marcamos una)
                 mencionesDetectadas = [...new Set(coincidencias.map(p => p.toLowerCase()))];
                 datosAlerta = { 
                     idRegla: regla.id_regla, 
@@ -28,20 +25,14 @@ async function ejecutar(message) {
         }
     }
 
-    // 2. Procesamiento y Transmisión
     if (mencionesDetectadas.length > 0 && datosAlerta) {
         const urlWebhook = process.env[datosAlerta.webhookDestino];
-        if (!urlWebhook) {
-            console.error(`[ERROR] Variable de entorno ${datosAlerta.webhookDestino} no configurada.`);
-            return true;
-        }
+        if (!urlWebhook) return true;
 
         const webhook = new WebhookClient({ url: urlWebhook });
 
-        // 3. Extracción del Micro-Historial
         let contextoDialogo = "";
         try {
-            // Recuperamos los 2 mensajes anteriores
             const historial = await message.channel.messages.fetch({ limit: 2, before: message.id });
             const ordenados = historial.sort((a, b) => a.createdTimestamp - b.createdTimestamp);
             
@@ -50,17 +41,14 @@ async function ejecutar(message) {
                 contextoDialogo += `**${nombreLimpio}**: ${msg.content}\n`;
             });
         } catch (e) {
-            // Si no hay permisos de lectura de historial, el bot se mantiene en silencio y sigue operando
+            // Sin historial, continuamos
         }
         
-        // Añadimos el mensaje actual detectado
         const autorLimpio = message.author.username.replace(/_/g, '\\_');
         contextoDialogo += `**${autorLimpio}**: ${message.content} 🎯`;
 
-        // 4. Formateo Visual
         const creacionCuentaUnix = Math.floor(message.author.createdTimestamp / 1000);
         const avatarURL = message.author.displayAvatarURL({ format: 'png', dynamic: true, size: 128 });
-        
         const nombreServidor = message.guild ? message.guild.name : 'Sector Privado (DM)';
         
         const panelObservacion = new MessageEmbed()
@@ -77,12 +65,9 @@ async function ejecutar(message) {
             .setFooter({ text: `ID: ${message.author.id} • Monitoreo Pasivo` })
             .setTimestamp();
 
-        // 5. Transmisión nativa limpia (Sin FormData, sin fallos)
         webhook.send({ embeds: [panelObservacion] }).catch(err => console.error('[FALLO RED ORG]', err.message));
-        
         return true; 
     }
-
     return false;
 }
 
