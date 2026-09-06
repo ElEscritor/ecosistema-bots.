@@ -35,8 +35,8 @@ async function ficharInfractor(userId, userTag, accion, casoId) {
             { upsert: true, returnDocument: 'after' }
         );
         const expediente = resultado.value || resultado;
-        if (expediente && expediente.totalInfracciones === 1) return "🟨 **Nuevo Ingreso:** Primer delito registrado.";
-        else if (expediente) return `🟥 **Reincidente:** Expediente actualizado (Infracción #${expediente.totalInfracciones}).`;
+        if (expediente && expediente.totalInfracciones === 1) return "🟨 **Nuevo Ingreso:** Primer delito.";
+        else if (expediente) return `🟥 **Reincidente:** Expediente (Infracción #${expediente.totalInfracciones}).`;
         return "✅ Registro completado.";
     } catch (error) {
         return "⚠️ Error de escritura.";
@@ -48,7 +48,6 @@ async function consultarExpediente(userId) {
     return await dbCollection.findOne({ userId: userId });
 }
 
-// NUEVAS FUNCIONES PARA EL PANEL WEB
 async function obtenerExpedientes(filtro = {}) {
     if (!dbCollection) return [];
     return await dbCollection.find(filtro).sort({ totalInfracciones: -1 }).toArray();
@@ -59,9 +58,7 @@ async function eliminarExpediente(userId) {
     try {
         await dbCollection.deleteOne({ userId: userId });
         return true;
-    } catch (error) {
-        return false;
-    }
+    } catch (error) { return false; }
 }
 
 module.exports = { conectarBaseDatos, ficharInfractor, consultarExpediente, obtenerExpedientes, eliminarExpediente };
