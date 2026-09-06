@@ -11,33 +11,36 @@ const moduloOrg = require('./modulo_org.js');
 
 const whitelistUsuarios = JSON.parse(fs.readFileSync('./whitelist_usuarios.json', 'utf8'));
 
+// ==========================================
 // 2. SUBSISTEMA WEB (PANEL FORENSE SEGURO)
+// ==========================================
 const app = express();
 const PORT = process.env.PORT || 3000;
-app.use(express.urlencoded({ extended: true })); // Necesario para el botón de borrar
+app.use(express.urlencoded({ extended: true }));
 
 const bloqueoSeguridad = (req, res, next) => {
     const b64auth = (req.headers.authorization || '').split(' ')[1] || '';
     const [login, password] = Buffer.from(b64auth, 'base64').toString().split(':');
     const adminPass = process.env.PANEL_PASSWORD;
 
-    if (!adminPass) return res.status(500).send('Configura PANEL_PASSWORD en Render.');
+    if (!adminPass) return res.status(500).send('ERROR: Configura PANEL_PASSWORD en Render.');
     if (login === 'admin' && password === adminPass) return next();
     
-    res.set('WWW-Authenticate', 'Basic realm="Acceso Restringido"');
-    res.status(401).send('Acceso denegado.');
+    res.set('WWW-Authenticate', 'Basic realm="Acceso Restringido al Panóptico"');
+    res.status(401).send('Acceso denegado. Credenciales requeridas.');
 };
 
-app.get('/', (req, res) => res.json({ estado: "operativo", nucleo: "Panoptico-Stealth" }));
+// Ruta de estado
+app.get('/', (req, res) => res.json({ estado: "operativo", nucleo: "Panoptico-Stealth-v7" }));
 
-// Eliminar infractor
+// Acción: Eliminar Expediente
 app.post('/panel/eliminar', bloqueoSeguridad, async (req, res) => {
     const { userId } = req.body;
     if (userId) await database.eliminarExpediente(userId);
     res.redirect('/panel'); 
 });
 
-// Exportar CSV
+// Acción: Exportar CSV
 app.get('/panel/exportar', bloqueoSeguridad, async (req, res) => {
     try {
         const query = req.query.q || '';
@@ -57,10 +60,10 @@ app.get('/panel/exportar', bloqueoSeguridad, async (req, res) => {
         res.header('Content-Type', 'text/csv');
         res.attachment(`Panoptico_Registros_${new Date().toISOString().split('T')[0]}.csv`);
         res.send(csv);
-    } catch (error) { res.status(500).send('Error de exportación.'); }
+    } catch (error) { res.status(500).send('Error procesando exportación.'); }
 });
 
-// Interfaz Gráfica del Panel
+// Interfaz Gráfica (Buscador y Tabla)
 app.get('/panel', bloqueoSeguridad, async (req, res) => {
     try {
         const query = req.query.q || '';
@@ -85,7 +88,7 @@ app.get('/panel', bloqueoSeguridad, async (req, res) => {
                     <td style="text-align: center;">
                         <form method="POST" action="/panel/eliminar" style="margin: 0;">
                             <input type="hidden" name="userId" value="${inf.userId}">
-                            <button type="submit" class="delete-btn" onclick="return confirm('¿Borrar expediente de ${alias}?')">🗑️ Purga</button>
+                            <button type="submit" class="delete-btn" onclick="return confirm('ATENCIÓN: ¿Borrar expediente de ${alias}?')">🗑️ Purga</button>
                         </form>
                     </td>
                 </tr>
@@ -126,14 +129,14 @@ app.get('/panel', bloqueoSeguridad, async (req, res) => {
                 <button type="submit" class="btn">🔍 Buscar</button>
                 <a href="/panel" class="btn btn-clear">❌ Limpiar</a>
             </form>
-            <div style="margin-bottom: 15px;">Sujetos encontrados: <strong>${infractores.length}</strong></div>
+            <div style="margin-bottom: 15px;">Sujetos filtrados: <strong>${infractores.length}</strong></div>
             <table>
                 <thead>
                     <tr>
                         <th>ID del Sujeto</th>
                         <th>Alias</th>
                         <th>Infracciones</th>
-                        <th>Ingreso</th>
+                        <th>Primer Ingreso</th>
                         <th>Última Actividad</th>
                         <th style="text-align: center;">Acción</th>
                     </tr>
@@ -143,12 +146,14 @@ app.get('/panel', bloqueoSeguridad, async (req, res) => {
         </body>
         </html>
         `);
-    } catch (error) { res.status(500).send('Error interno leyendo la base de datos.'); }
+    } catch (error) { res.status(500).send('Error cargando la base de datos.'); }
 });
 
-app.listen(PORT, () => console.log(`[LATIDO] Panel Web seguro activo en puerto ${PORT}`));
+app.listen(PORT, () => console.log(`[LATIDO] Servidor Web UI activo en puerto ${PORT}`));
 
+// ==========================================
 // 3. ENJAMBRE DE INTELIGENCIA TÁCTICA
+// ==========================================
 const memoriaCooldown = new Set();
 const hashMensajesRecientes = new Set();
 const tokens = [];
@@ -158,7 +163,7 @@ for (let i = 1; i <= 10; i++) {
 }
 
 if (tokens.length === 0) {
-    console.error("ERROR CRÍTICO: No hay tokens.");
+    console.error("ERROR CRÍTICO: No hay tokens de explorador.");
     process.exit(1);
 }
 
@@ -166,7 +171,7 @@ const delay = ms => new Promise(res => setTimeout(res, ms));
 
 async function iniciarEnjambre() {
     await database.conectarBaseDatos();
-    console.log(`[ENJAMBRE] Desplegando ${tokens.length} unidades (Modo Silencioso)...`);
+    console.log(`[ENJAMBRE] Desplegando ${tokens.length} unidades (Modo Stealth)...`);
 
     for (let i = 0; i < tokens.length; i++) {
         const explorador = new Client({ checkUpdate: false, presence: { status: 'invisible' } });
@@ -182,22 +187,26 @@ async function iniciarEnjambre() {
             if (hashMensajesRecientes.has(firmaMensaje)) return;
 
             try {
-                let interceptado = false;
+                let interceptadoPor = null;
 
-                // Evaluación táctica silenciosa (Sin comando de expediente)
-                if (!interceptado) interceptado = await moduloSquads.ejecutar(message);
-                if (!interceptado) interceptado = await moduloRaids.ejecutar(message);
-                if (!interceptado) interceptado = await moduloLinks.ejecutar(message);
-                if (!interceptado) interceptado = await moduloOrg.ejecutar(message);
+                // CASCADA DE EVALUACIÓN
+                if (await moduloSquads.ejecutar(message)) interceptadoPor = 'SQUADS';
+                else if (await moduloRaids.ejecutar(message)) interceptadoPor = 'RAIDS';
+                else if (await moduloLinks.ejecutar(message)) interceptadoPor = 'LINKS';
+                else if (await moduloOrg.ejecutar(message)) interceptadoPor = 'ORG';
 
-                if (interceptado) {
-                    memoriaCooldown.add(message.author.id);
-                    // ENFRIAMIENTO BAJADO A 10 SEGUNDOS PARA PRUEBAS
-                    setTimeout(() => memoriaCooldown.delete(message.author.id), 10000); 
-                    
-                    hashMensajesRecientes.add(firmaMensaje);
-                    setTimeout(() => hashMensajesRecientes.delete(firmaMensaje), 120000); 
+                if (interceptadoPor) {
+                    // COOLDOWN SELECTIVO: Solo ensordecer el bot si es Spam (Links) o Comandos masivos (Squads)
+                    if (interceptadoPor === 'LINKS' || interceptadoPor === 'SQUADS') {
+                        memoriaCooldown.add(message.author.id);
+                        setTimeout(() => memoriaCooldown.delete(message.author.id), 10000); // 10s para pruebas
+                        
+                        hashMensajesRecientes.add(firmaMensaje);
+                        setTimeout(() => hashMensajesRecientes.delete(firmaMensaje), 120000); 
+                    }
+                    // Si interceptadoPor === 'RAIDS' u 'ORG', el bot lo registra pero sigue escuchando inmediatamente.
                 }
+
             } catch (error) {
                 console.error(`[ESCUDO DEFENSIVO] Fallo detectado. Error: ${error.message}`);
             }
