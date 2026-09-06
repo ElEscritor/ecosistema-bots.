@@ -1,7 +1,7 @@
 const { WebhookClient, MessageEmbed } = require('discord.js-selfbot-v13');
 const fs = require('fs');
 const axios = require('axios');
-const database = require('./database.js');
+const database = require('./database.js'); 
 
 const comandosSquads = JSON.parse(fs.readFileSync('./comandos_squads.json', 'utf8'));
 const CORDCAT_API_KEY = "cc_c67695eac3f8b0fc7b83db00075086e016f0ce9f55b68814"; 
@@ -10,27 +10,16 @@ function generarEvidenciaHTML(mensajeOriginal, authorTag, authorId, avatarUrl, f
     return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><style>@import url('https://fonts.googleapis.com/css2?family=gg+sans:wght@400;500;600&display=swap');body { background-color: #313338; color: #dbdee1; font-family: 'gg sans', sans-serif; padding: 15px 20px; margin: 0; }.message-container { display: flex; padding-top: 2px; padding-bottom: 2px; }.message-container:hover { background-color: #2e3035; }.avatar { width: 40px; height: 40px; border-radius: 50%; margin-right: 16px; margin-top: 2px; }.content { display: flex; flex-direction: column; }.header { display: flex; align-items: baseline; margin-bottom: 4px; }.username { color: #f2f3f5; font-weight: 500; font-size: 16px; margin-right: 8px; }.timestamp { color: #949ba4; font-size: 12px; }.text { font-size: 16px; line-height: 1.375rem; white-space: pre-wrap; word-break: break-word; }.watermark { margin-top: 40px; padding-top: 15px; border-top: 1px solid #3f4147; color: #5c5e66; font-size: 11px; text-transform: uppercase; }</style></head><body><div class="message-container"><img class="avatar" src="${avatarUrl}"><div class="content"><div class="header"><span class="username">${authorTag}</span><span class="timestamp">${fechaStr}</span></div><div class="text">${mensajeOriginal.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div></div></div><div class="watermark">EVIDENCIA COMMAND SQUAD | ID: ${authorId}</div></body></html>`;
 }
 
-async function ejecutar(message, blacklistCollection) {
+async function ejecutar(message) {
     const contenidoMensaje = message.content.toLowerCase();
     let alertaDisparada = false;
     let datosAlerta = null;
+    let casoIdGenerado = 'SQD_' + Math.random().toString(36).substring(2, 9).toUpperCase();
 
     for (const cmd of comandosSquads) {
         if (contenidoMensaje.startsWith(cmd.comando.toLowerCase())) {
             alertaDisparada = true;
-            datosAlerta = { idRegla: cmd.comando, colorHex: cmd.colorHex, webhookDestino: cmd.webhookDestino };
-            
-            // Fichaje punitivo automático para comandos críticos
-            if (blacklistCollection && cmd.severidad === "CRÍTICO") {
-                const existe = await blacklistCollection.findOne({ userId: message.author.id });
-                if (!existe) {
-                    await blacklistCollection.insertOne({
-                        userId: message.author.id, nombreUsuario: message.author.tag,
-                        accion: `Ejecución de comando táctico: ${cmd.comando}`,
-                        fechaFichaje: new Date().toISOString().split('T')[0]
-                    });
-                }
-            }
+            datosAlerta = { idRegla: cmd.comando, colorHex: cmd.colorHex, webhookDestino: cmd.webhookDestino, severidad: cmd.severidad, accionId: casoIdGenerado };
             break;
         }
     }
@@ -38,6 +27,11 @@ async function ejecutar(message, blacklistCollection) {
     if (alertaDisparada && datosAlerta) {
         const urlWebhook = process.env[datosAlerta.webhookDestino];
         if (!urlWebhook) return true;
+
+        let estadoBD = "No requiere fichaje (Nivel Informativo)";
+        if (datosAlerta.severidad === "CRITICO") {
+            estadoBD = await database.ficharInfractor(message.author.id, message.author.tag, `Ejecución de Comando de Squad: ${datosAlerta.idRegla}`, datosAlerta.accionId);
+        }
 
         let infoCordCat = "Procesando...";
         try {
@@ -67,11 +61,12 @@ async function ejecutar(message, blacklistCollection) {
             .setThumbnail(avatarURL) 
             .addFields(
                 { name: '👤 Identificador Único (ID)', value: `\`${message.author.id}\``, inline: true },
-                { name: '📍 Coordenada Espacial', value: `[Saltar al mensaje](${message.url})`, inline: true },
+                { name: '📍 Coordenada', value: `[Saltar al mensaje](${message.url})`, inline: true },
                 { name: '🌍 Zona de Impacto', value: `**Servidor:** ${message.guild ? message.guild.name : 'DM'}\n**Canal:** <#${message.channel.id}>`, inline: true },
+                { name: '🛡️ Estado en Panóptico DB', value: estadoBD, inline: false },
                 { name: '🔎 Inteligencia (CordCat)', value: infoCordCat, inline: false }
             )
-            .setFooter({ text: `Intercepción: ${new Date().toLocaleString('es-ES', opcionesFecha)}` });
+            .setFooter({ text: `Caso: ${datosAlerta.accionId} | Hora España: ${new Date().toLocaleString('es-ES', opcionesFecha)}` });
 
         const htmlData = generarEvidenciaHTML(message.content, message.author.tag, message.author.id, avatarURL, new Date(message.createdTimestamp).toLocaleString('es-ES', opcionesFecha));
 
