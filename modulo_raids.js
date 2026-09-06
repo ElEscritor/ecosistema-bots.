@@ -1,6 +1,7 @@
 const { WebhookClient, MessageEmbed } = require('discord.js-selfbot-v13');
 const fs = require('fs');
 const axios = require('axios');
+const database = require('./database.js');
 
 // 1. CARGA DE CONFIGURACIÓN ESTÁTICA Y CREDENCIALES
 const comandosSquads = JSON.parse(fs.readFileSync('./comandos_squads.json', 'utf8'));
