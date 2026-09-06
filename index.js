@@ -1,9 +1,8 @@
 const { Client } = require('discord.js-selfbot-v13');
 const fs = require('fs');
 
-// 1. IMPORTACIÓN ESTRUCTURAL DE MÓDULOS DE INTELIGENCIA
 const database = require('./database.js');
-const servidorWeb = require('./servidor_web.js'); // <-- Importamos el nuevo servidor
+const servidorWeb = require('./servidor_web.js'); 
 const moduloExpedientes = require('./modulo_expedientes.js');
 const moduloSquads = require('./modulo_squads.js');
 const moduloRaids = require('./modulo_raids.js');
@@ -12,7 +11,6 @@ const moduloOrg = require('./modulo_org.js');
 
 const whitelistUsuarios = JSON.parse(fs.readFileSync('./whitelist_usuarios.json', 'utf8'));
 
-// 2. MEMORIA ANTI-SPAM TÁCTICA Y CONTROL DE FLUJO
 const memoriaCooldown = new Set();
 const hashMensajesRecientes = new Set();
 
@@ -24,19 +22,17 @@ for (let i = 1; i <= 10; i++) {
 }
 
 if (tokens.length === 0) {
-    console.error("ERROR CRÍTICO: No se detectaron tokens de infiltración.");
+    console.error("ERROR CRÍTICO: No se detectaron tokens.");
     process.exit(1);
 }
 
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
-// 3. PROTOCOLO DE DESPLIEGUE EN CASCADA
 async function iniciarEnjambre() {
-    // 3.1. Arranque de Infraestructura de Soporte
     await database.conectarBaseDatos();
-    servidorWeb.iniciar(); // <-- Iniciamos la interfaz web en su propio hilo
+    servidorWeb.iniciar(); 
 
-    console.log(`[ENJAMBRE] Iniciando despliegue de ${tokens.length} unidades de reconocimiento...`);
+    console.log(`[ENJAMBRE] Iniciando despliegue de ${tokens.length} unidades...`);
 
     for (let i = 0; i < tokens.length; i++) {
         const explorador = new Client({ checkUpdate: false, presence: { status: 'invisible' } });
@@ -76,10 +72,9 @@ async function iniciarEnjambre() {
             await explorador.login(tokens[i]);
             if (i < tokens.length - 1) await delay(45000); 
         } catch (e) {
-            console.error(`[FALLO DE INFILTRACIÓN] El token de la unidad ${i+1} es inválido.`);
+            console.error(`[FALLO INFILTRACIÓN] Token ${i+1} inválido.`);
         }
     }
-    console.log(`[ENJAMBRE] Malla de inteligencia completamente desplegada.`);
 }
 
 iniciarEnjambre();
