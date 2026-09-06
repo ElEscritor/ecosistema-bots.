@@ -2,7 +2,7 @@ const { MongoClient } = require('mongodb');
 
 const mongoUri = process.env.MONGO_URI;
 if (!mongoUri) {
-    console.error("ERROR CRÍTICO: Falta MONGO_URI en Render.");
+    console.error("ERROR CRÍTICO: Falta MONGO_URI.");
     process.exit(1);
 }
 
@@ -13,11 +13,9 @@ async function conectarBaseDatos() {
     try {
         await client.connect();
         dbCollection = client.db("panoptico_db").collection("blacklist");
-        console.log("[SISTEMA] Motor de Expedientes MongoDB enlazado.");
+        console.log("[SISTEMA] Motor MongoDB enlazado.");
         return dbCollection;
-    } catch (error) {
-        console.error("[ERROR BD] Fallo de conexión:", error);
-    }
+    } catch (error) { console.error("[ERROR BD]", error); }
 }
 
 async function ficharInfractor(userId, userTag, accion, casoId) {
@@ -34,20 +32,13 @@ async function ficharInfractor(userId, userTag, accion, casoId) {
             },
             { upsert: true, returnDocument: 'after' }
         );
-        const expediente = resultado.value || resultado;
-        if (expediente && expediente.totalInfracciones === 1) return "🟨 **Nuevo Ingreso:** Primer delito.";
-        else if (expediente) return `🟥 **Reincidente:** Expediente (Infracción #${expediente.totalInfracciones}).`;
-        return "✅ Registro completado.";
-    } catch (error) {
-        return "⚠️ Error de escritura.";
-    }
+        const exp = resultado.value || resultado;
+        if (exp && exp.totalInfracciones === 1) return "🟨 **Nuevo Ingreso:** Primer delito.";
+        return `🟥 **Reincidente:** Expediente actualizado (Infracción #${exp?.totalInfracciones}).`;
+    } catch (error) { return "⚠️ Error de escritura."; }
 }
 
-async function consultarExpediente(userId) {
-    if (!dbCollection) return null;
-    return await dbCollection.findOne({ userId: userId });
-}
-
+// Funciones para la Web
 async function obtenerExpedientes(filtro = {}) {
     if (!dbCollection) return [];
     return await dbCollection.find(filtro).sort({ totalInfracciones: -1 }).toArray();
@@ -61,4 +52,4 @@ async function eliminarExpediente(userId) {
     } catch (error) { return false; }
 }
 
-module.exports = { conectarBaseDatos, ficharInfractor, consultarExpediente, obtenerExpedientes, eliminarExpediente };
+module.exports = { conectarBaseDatos, ficharInfractor, obtenerExpedientes, eliminarExpediente };
