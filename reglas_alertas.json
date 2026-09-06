@@ -1,7 +1,7 @@
 [
   {
     "id_regla": "Scan Word-Raid",
-    "patron": "\\b(raid|raidear|nuke|nukear|tirar el server|destruir el servidor)\\b",
+    "patron": "(raid|ddos|dox|raidear|nuke|nukear|tirar el server|destruir el servidor)",
     "severidad": "CRITICO",
     "colorHex": 16711680,
     "webhookDestino": "WEBHOOK_Raids",
@@ -17,7 +17,7 @@
   },
   {
     "id_regla": "Scan Palabra-Clave",
-    "patron": "\\b(xn|rz|squad|redencion escarlata|routem zar|el escritor|serdan|escritor|alianza)\\b",
+    "patron": "(xn|rz|squad|redencion escarlata|routem zar|el escritor|serdan|alianza)",
     "severidad": "INFORMATIVO",
     "colorHex": 3447003,
     "webhookDestino": "WEBHOOK_Org",
