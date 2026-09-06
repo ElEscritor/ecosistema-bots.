@@ -1,6 +1,6 @@
 const { WebhookClient, MessageEmbed } = require('discord.js-selfbot-v13');
 const fs = require('fs');
-const database = require('./database.js'); // Conexión inyectada
+const database = require('./database.js'); 
 
 const reglasAlertas = JSON.parse(fs.readFileSync('./reglas_alertas.json', 'utf8'));
 
@@ -27,11 +27,9 @@ async function ejecutar(message) {
 
         const webhook = new WebhookClient({ url: urlWebhook });
         
-        // Extraer enlace para renderizar la tarjeta en Discord
         const matchEnlace = message.content.match(/(https?:\/\/[^\s]+|discord\.gg\/[^\s]+)/i);
         const enlaceAislado = matchEnlace ? matchEnlace[0] : null;
 
-        // FICHAJE DINÁMICO EN EXPEDIENTE
         const estadoBD = await database.ficharInfractor(message.author.id, message.author.tag, `Distribución de Links: ${datosAlerta.idRegla}`, datosAlerta.accionId);
 
         const avatarURL = message.author.displayAvatarURL({ format: 'png', dynamic: true, size: 256 });
@@ -48,7 +46,6 @@ async function ejecutar(message) {
             .setFooter({ text: `Caso: ${datosAlerta.accionId}` })
             .setTimestamp();
 
-        // Construir la carga útil final aislando el enlace fuera del Embed
         const payload = { embeds: [panelForense] };
         if (enlaceAislado) {
             payload.content = `🔗 **Enlace detectado:** ${enlaceAislado}`; 
