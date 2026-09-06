@@ -5,10 +5,8 @@ function iniciar() {
     const app = express();
     const PORT = process.env.PORT || 3000;
 
-    // Middleware para procesar formularios (necesario para el botón de borrar)
     app.use(express.urlencoded({ extended: true }));
 
-    // Middleware de Autenticación
     const bloqueoSeguridad = (req, res, next) => {
         const b64auth = (req.headers.authorization || '').split(' ')[1] || '';
         const [login, password] = Buffer.from(b64auth, 'base64').toString().split(':');
@@ -21,24 +19,19 @@ function iniciar() {
         res.status(401).send('Acceso denegado.');
     };
 
-    // Ruta de estado público (Latido para Render)
     app.get('/', (req, res) => res.json({ estado: "operativo", nucleo: "Servidor-Aislado-v1" }));
 
-    // Ruta para Eliminar Infractores (POST)
     app.post('/panel/eliminar', bloqueoSeguridad, async (req, res) => {
         const { userId } = req.body;
         if (userId) await database.eliminarExpediente(userId);
-        res.redirect('/panel'); // Recarga el panel tras borrar
+        res.redirect('/panel'); 
     });
 
-    // Ruta de Exportación CSV (Respeta el filtro de búsqueda)
     app.get('/panel/exportar', bloqueoSeguridad, async (req, res) => {
         try {
             const query = req.query.q || '';
             let filtro = {};
-            if (query) {
-                filtro = { $or: [{ userId: new RegExp(query, 'i') }, { ultimoAlias: new RegExp(query, 'i') }] };
-            }
+            if (query) filtro = { $or: [{ userId: new RegExp(query, 'i') }, { ultimoAlias: new RegExp(query, 'i') }] };
 
             const infractores = await database.obtenerExpedientes(filtro);
             let csv = 'ID_Sujeto,Alias,Total_Infracciones,Fecha_Primer_Ingreso,Ultima_Accion_Registrada\n';
@@ -54,25 +47,18 @@ function iniciar() {
             res.header('Content-Type', 'text/csv');
             res.attachment(`Panoptico_Registros_${new Date().toISOString().split('T')[0]}.csv`);
             res.send(csv);
-        } catch (error) {
-            res.status(500).send('Error exportando datos.');
-        }
+        } catch (error) { res.status(500).send('Error exportando datos.'); }
     });
 
-    // Panel Principal (Buscador y Visualización)
     app.get('/panel', bloqueoSeguridad, async (req, res) => {
         try {
             const query = req.query.q || '';
             let filtro = {};
-            
-            // Lógica del buscador por ID o Nombre
-            if (query) {
-                filtro = { $or: [{ userId: new RegExp(query, 'i') }, { ultimoAlias: new RegExp(query, 'i') }] };
-            }
+            if (query) filtro = { $or: [{ userId: new RegExp(query, 'i') }, { ultimoAlias: new RegExp(query, 'i') }] };
 
             const infractores = await database.obtenerExpedientes(filtro);
-            
             let filasHTML = '';
+            
             infractores.forEach(inf => {
                 const alias = inf.ultimoAlias || inf.nombreUsuario || 'Desconocido';
                 const total = inf.totalInfracciones || 1;
@@ -89,7 +75,7 @@ function iniciar() {
                         <td style="text-align: center;">
                             <form method="POST" action="/panel/eliminar" style="margin: 0;">
                                 <input type="hidden" name="userId" value="${inf.userId}">
-                                <button type="submit" class="delete-btn" onclick="return confirm('ATENCIÓN: ¿Borrar expediente de ${alias} permanentemente?')">🗑️ Purga</button>
+                                <button type="submit" class="delete-btn" onclick="return confirm('¿Borrar expediente de ${alias}?')">🗑️ Purga</button>
                             </form>
                         </td>
                     </tr>
@@ -125,16 +111,12 @@ function iniciar() {
                     <h1>🛡️ Registro de Expedientes</h1>
                     <a href="/panel/exportar?q=${query}" class="btn btn-export">⬇️ Exportar CSV</a>
                 </div>
-                
-                <!-- Buscador -->
                 <form method="GET" action="/panel" class="search-bar">
-                    <input type="text" name="q" class="search-input" placeholder="Buscar por ID o Alias (ej. escritor)..." value="${query}">
+                    <input type="text" name="q" class="search-input" placeholder="Buscar por ID o Alias..." value="${query}">
                     <button type="submit" class="btn">🔍 Buscar</button>
                     <a href="/panel" class="btn btn-clear">❌ Limpiar</a>
                 </form>
-
                 <div style="margin-bottom: 15px; color: #a3a6aa;">Sujetos filtrados: <strong>${infractores.length}</strong></div>
-                
                 <table>
                     <thead>
                         <tr>
@@ -152,9 +134,7 @@ function iniciar() {
             </html>
             `;
             res.send(html);
-        } catch (error) {
-            res.status(500).send('Error interno leyendo la base de datos.');
-        }
+        } catch (error) { res.status(500).send('Error interno leyendo la base de datos.'); }
     });
 
     app.listen(PORT, () => console.log(`[LATIDO] Servidor Web UI activo en puerto ${PORT}`));
