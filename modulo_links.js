@@ -1,16 +1,15 @@
 const { WebhookClient, MessageEmbed } = require('discord.js-selfbot-v13');
 const fs = require('fs');
-const database = require('./database.js');
+const database = require('./database.js'); // Conexión inyectada
 
 const reglasAlertas = JSON.parse(fs.readFileSync('./reglas_alertas.json', 'utf8'));
 
-async function ejecutar(message, blacklistCollection) {
+async function ejecutar(message) {
     const contenidoMensaje = message.content.toLowerCase();
     let alertaDisparada = false;
     let datosAlerta = null;
     let casoIdGenerado = 'LNK_' + Math.random().toString(36).substring(2, 9).toUpperCase();
 
-    // 1. Escáner de enlaces
     for (const regla of reglasAlertas) {
         if (regla.webhookDestino === "WEBHOOK_Links") {
             const regexPatron = new RegExp(regla.patron, 'i');
@@ -27,47 +26,30 @@ async function ejecutar(message, blacklistCollection) {
         if (!urlWebhook) return true;
 
         const webhook = new WebhookClient({ url: urlWebhook });
-
-        // 2. Extraer el enlace exacto (aislarlo del resto del texto)
+        
+        // Extraer enlace para renderizar la tarjeta en Discord
         const matchEnlace = message.content.match(/(https?:\/\/[^\s]+|discord\.gg\/[^\s]+)/i);
         const enlaceAislado = matchEnlace ? matchEnlace[0] : null;
 
-        // 3. Fichaje en MongoDB
-        let estadoBanXN = "Base de datos inactiva";
-        if (blacklistCollection) {
-            const usuarioYaFichado = await blacklistCollection.findOne({ userId: message.author.id });
-            if (!usuarioYaFichado) {
-                await blacklistCollection.insertOne({
-                    userId: message.author.id, 
-                    nombreUsuario: message.author.tag,
-                    accion: `Spam de enlaces`, 
-                    fechaFichaje: new Date().toISOString().split('T')[0]
-                });
-                estadoBanXN = "Nuevo ingreso [🟨]";
-            } else {
-                estadoBanXN = "Infractor reincidente [🟥]";
-            }
-        }
+        // FICHAJE DINÁMICO EN EXPEDIENTE
+        const estadoBD = await database.ficharInfractor(message.author.id, message.author.tag, `Distribución de Links: ${datosAlerta.idRegla}`, datosAlerta.accionId);
 
-        // 4. Panel visual limpio (sin el enlace, solo con el contexto)
         const avatarURL = message.author.displayAvatarURL({ format: 'png', dynamic: true, size: 256 });
         const panelForense = new MessageEmbed()
             .setColor(datosAlerta.colorHex)
             .setAuthor({ name: `ALERTA DE ENLACE: ${datosAlerta.idRegla.toUpperCase()}` })
-            .setDescription(`**Contexto del mensaje:**\n${message.content}`)
+            .setDescription(`**Contexto del mensaje:**\n${message.content.substring(0, 900)}`)
             .setThumbnail(avatarURL)
             .addFields(
                 { name: '👤 Remitente', value: `**${message.author.tag}**\n\`${message.author.id}\``, inline: true },
                 { name: '📍 Origen', value: `**Canal:** <#${message.channel.id}>`, inline: true },
-                { name: '🛡️ Estado en BD', value: estadoBanXN, inline: false }
+                { name: '🛡️ Estado en BD', value: estadoBD, inline: false }
             )
             .setFooter({ text: `Caso: ${datosAlerta.accionId}` })
             .setTimestamp();
 
-        // 5. EL TRUCO: Construir el mensaje final
+        // Construir la carga útil final aislando el enlace fuera del Embed
         const payload = { embeds: [panelForense] };
-        
-        // Si atrapamos un enlace, lo ponemos fuera del Embed para que Discord cargue la preview de la invitación
         if (enlaceAislado) {
             payload.content = `🔗 **Enlace detectado:** ${enlaceAislado}`; 
         }
