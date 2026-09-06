@@ -29,7 +29,6 @@ const bloqueoSeguridad = (req, res, next) => {
         return res.status(500).send('ERROR: La variable PANEL_PASSWORD no está configurada en Render.');
     }
 
-    // El usuario fijo será "admin", la contraseña es la variable de entorno
     if (login === 'admin' && password === adminPass) {
         return next();
     }
@@ -39,15 +38,50 @@ const bloqueoSeguridad = (req, res, next) => {
 
 // Ruta de estado público (Latido para Render)
 app.get('/', (req, res) => { 
-    res.json({ estado: "operativo", nucleo: "Enjambre-Cascade-v5-WebUI" }); 
+    res.json({ estado: "operativo", nucleo: "Enjambre-Cascade-v6-Exportacion" }); 
 }); 
+
+// Ruta de Descarga Segura de Base de Datos (CSV)
+app.get('/panel/exportar', bloqueoSeguridad, async (req, res) => {
+    if (!coleccionBD) return res.status(503).send('Base de datos no inicializada aún.');
+    
+    try {
+        const infractores = await coleccionBD.find({}).sort({ totalInfracciones: -1 }).toArray();
+        
+        // Cabeceras del archivo Excel/CSV
+        let csv = 'ID_Sujeto,Alias,Total_Infracciones,Fecha_Primer_Ingreso,Ultima_Accion_Registrada\n';
+        
+        infractores.forEach(inf => {
+            // Limpieza de comas en cadenas de texto para evitar roturas de columna en el CSV
+            const alias = (inf.ultimoAlias || inf.nombreUsuario || 'Desconocido').replace(/,/g, '');
+            const total = inf.totalInfracciones || 1;
+            const fecha = new Date(inf.primerFichaje || inf.fechaFichaje).toLocaleDateString('es-ES');
+            
+            let ultimaAccion = "Desconocida";
+            if (inf.historial && inf.historial.length > 0) {
+                ultimaAccion = inf.historial[inf.historial.length - 1].accion.replace(/,/g, '');
+            } else if (inf.accion) {
+                ultimaAccion = inf.accion.replace(/,/g, '');
+            }
+
+            // Ensamblaje de la fila
+            csv += `${inf.userId},${alias},${total},${fecha},${ultimaAccion}\n`;
+        });
+
+        // Forzar al navegador a descargar el archivo en lugar de mostrarlo como texto
+        res.header('Content-Type', 'text/csv');
+        res.attachment(`Panoptico_Registros_${new Date().toISOString().split('T')[0]}.csv`);
+        res.send(csv);
+    } catch (error) {
+        res.status(500).send('Error crítico al procesar la exportación del archivo.');
+    }
+});
 
 // Ruta del Panel Forense (Protegida)
 app.get('/panel', bloqueoSeguridad, async (req, res) => {
     if (!coleccionBD) return res.status(503).send('Base de datos no inicializada aún.');
     
     try {
-        // Extrae todos los infractores ordenados por mayor reincidencia
         const infractores = await coleccionBD.find({}).sort({ totalInfracciones: -1 }).toArray();
         
         let filasHTML = '';
@@ -74,7 +108,6 @@ app.get('/panel', bloqueoSeguridad, async (req, res) => {
             `;
         });
 
-        // Interfaz Gráfica (Dark Mode)
         const html = `
         <!DOCTYPE html>
         <html lang="es">
@@ -83,8 +116,11 @@ app.get('/panel', bloqueoSeguridad, async (req, res) => {
             <title>Panóptico - Base de Datos</title>
             <style>
                 body { background-color: #1e1e24; color: #cfd2d6; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 40px; margin: 0; }
-                h1 { color: #ffffff; border-bottom: 2px solid #ed4245; padding-bottom: 10px; }
-                table { width: 100%; border-collapse: collapse; margin-top: 20px; background-color: #2b2d31; border-radius: 8px; overflow: hidden; }
+                .header-container { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #ed4245; padding-bottom: 10px; margin-bottom: 20px; }
+                h1 { color: #ffffff; margin: 0; }
+                .download-btn { background-color: #3ba55c; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; font-weight: bold; transition: background-color 0.2s; }
+                .download-btn:hover { background-color: #2d7d46; }
+                table { width: 100%; border-collapse: collapse; background-color: #2b2d31; border-radius: 8px; overflow: hidden; }
                 th, td { padding: 15px; text-align: left; border-bottom: 1px solid #1e1f22; }
                 th { background-color: #111214; color: #a3a6aa; text-transform: uppercase; font-size: 12px; letter-spacing: 1px; }
                 tr:hover { background-color: #313338; }
@@ -93,7 +129,10 @@ app.get('/panel', bloqueoSeguridad, async (req, res) => {
             </style>
         </head>
         <body>
-            <h1>🛡️ Registro de Expedientes Criminales</h1>
+            <div class="header-container">
+                <h1>🛡️ Registro de Expedientes Criminales</h1>
+                <a href="/panel/exportar" class="download-btn">⬇️ Exportar CSV (Excel)</a>
+            </div>
             <div class="stats">Total de sujetos fichados: <strong>${infractores.length}</strong></div>
             <table>
                 <thead>
