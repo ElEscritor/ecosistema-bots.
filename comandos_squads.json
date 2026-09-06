@@ -1,50 +1,50 @@
 [
   {
     "comando": "!serdan",
-    "descripcion": "Solicitud de bot de raid externo (Serdan)",
-    "severidad": "CRÍTICO",
+    "descripcion": "Solicitud de bot de raid externo",
+    "severidad": "CRITICO",
     "colorHex": 10181046,
     "webhookDestino": "WEBHOOK_Squads"
   },
- {
+  {
     "comando": ".ayuda",
-    "descripcion": "Solicitud de bot de raid Seculax (Serdan)",
-    "severidad": "CRÍTICO",
+    "descripcion": "Solicitud de bot de raid Seculax",
+    "severidad": "CRITICO",
     "colorHex": 10181046,
     "webhookDestino": "WEBHOOK_Squads"
   },
-   {
+  {
     "comando": ".unionraid",
-    "descripcion": "Solicitud de uso de bot raid para atacar server (Serdan)",
-    "severidad": "CRÍTICO",
+    "descripcion": "Ataque a servidor",
+    "severidad": "CRITICO",
     "colorHex": 10181046,
     "webhookDestino": "WEBHOOK_Squads"
   },
-   {
+  {
     "comando": ".sexo",
-    "descripcion": "Solicitud de uso de bot raid para atacar server (Serdan)",
-    "severidad": "CRÍTICO",
+    "descripcion": "Comando raid",
+    "severidad": "CRITICO",
     "colorHex": 10181046,
     "webhookDestino": "WEBHOOK_Squads"
   },
-   {
+  {
     "comando": ".sexopremium",
-    "descripcion": "Solicitud de uso de bot raid para atacar server (Serdan)",
-    "severidad": "CRÍTICO",
+    "descripcion": "Comando raid",
+    "severidad": "CRITICO",
     "colorHex": 10181046,
     "webhookDestino": "WEBHOOK_Squads"
   },
-   {
+  {
     "comando": ".raid",
-    "descripcion": "Solicitud de uso de bot raid",
-    "severidad": "CRÍTICO",
+    "descripcion": "Solicitud raid",
+    "severidad": "CRITICO",
     "colorHex": 10181046,
     "webhookDestino": "WEBHOOK_Squads"
   },
   {
     "comando": "!nuke",
-    "descripcion": "Ejecución de comando de destrucción masiva",
-    "severidad": "CRÍTICO",
+    "descripcion": "Destruccion masiva",
+    "severidad": "CRITICO",
     "colorHex": 16711680,
     "webhookDestino": "WEBHOOK_Squads"
   }
