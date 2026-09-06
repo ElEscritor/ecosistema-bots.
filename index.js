@@ -12,17 +12,118 @@ const moduloOrg = require('./modulo_org.js');
 
 const whitelistUsuarios = JSON.parse(fs.readFileSync('./whitelist_usuarios.json', 'utf8'));
 
-// 2. SUBSISTEMA DE SUPERVIVENCIA WEB (RENDER)
+// VARIABLE GLOBAL DE BASE DE DATOS PARA EL SERVIDOR WEB
+let coleccionBD;
+
+// 2. SUBSISTEMA DE SUPERVIVENCIA WEB Y PANEL FORENSE (RENDER)
 const app = express();
 const PORT = process.env.PORT || 3000;
-app.get('/', (req, res) => { res.json({ estado: "operativo", nucleo: "Enjambre-Cascade-v4-Expedientes" }); }); 
-app.listen(PORT, () => console.log(`[LATIDO] Motor activo en puerto ${PORT}`));
+
+// Middleware de Seguridad (Autenticación Básica)
+const bloqueoSeguridad = (req, res, next) => {
+    const b64auth = (req.headers.authorization || '').split(' ')[1] || '';
+    const [login, password] = Buffer.from(b64auth, 'base64').toString().split(':');
+    const adminPass = process.env.PANEL_PASSWORD;
+
+    if (!adminPass) {
+        return res.status(500).send('ERROR: La variable PANEL_PASSWORD no está configurada en Render.');
+    }
+
+    // El usuario fijo será "admin", la contraseña es la variable de entorno
+    if (login === 'admin' && password === adminPass) {
+        return next();
+    }
+    res.set('WWW-Authenticate', 'Basic realm="Acceso Restringido al Panóptico"');
+    res.status(401).send('Acceso denegado. Credenciales incorrectas.');
+};
+
+// Ruta de estado público (Latido para Render)
+app.get('/', (req, res) => { 
+    res.json({ estado: "operativo", nucleo: "Enjambre-Cascade-v5-WebUI" }); 
+}); 
+
+// Ruta del Panel Forense (Protegida)
+app.get('/panel', bloqueoSeguridad, async (req, res) => {
+    if (!coleccionBD) return res.status(503).send('Base de datos no inicializada aún.');
+    
+    try {
+        // Extrae todos los infractores ordenados por mayor reincidencia
+        const infractores = await coleccionBD.find({}).sort({ totalInfracciones: -1 }).toArray();
+        
+        let filasHTML = '';
+        infractores.forEach(inf => {
+            const alias = inf.ultimoAlias || inf.nombreUsuario || 'Desconocido';
+            const total = inf.totalInfracciones || 1;
+            const fecha = new Date(inf.primerFichaje || inf.fechaFichaje).toLocaleDateString('es-ES');
+            
+            let ultimaAccion = "Desconocida";
+            if (inf.historial && inf.historial.length > 0) {
+                ultimaAccion = inf.historial[inf.historial.length - 1].accion;
+            } else if (inf.accion) {
+                ultimaAccion = inf.accion;
+            }
+
+            filasHTML += `
+                <tr>
+                    <td><code>${inf.userId}</code></td>
+                    <td><strong>${alias}</strong></td>
+                    <td style="color: #ff5252; font-weight: bold;">${total}</td>
+                    <td>${fecha}</td>
+                    <td>${ultimaAccion}</td>
+                </tr>
+            `;
+        });
+
+        // Interfaz Gráfica (Dark Mode)
+        const html = `
+        <!DOCTYPE html>
+        <html lang="es">
+        <head>
+            <meta charset="UTF-8">
+            <title>Panóptico - Base de Datos</title>
+            <style>
+                body { background-color: #1e1e24; color: #cfd2d6; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 40px; margin: 0; }
+                h1 { color: #ffffff; border-bottom: 2px solid #ed4245; padding-bottom: 10px; }
+                table { width: 100%; border-collapse: collapse; margin-top: 20px; background-color: #2b2d31; border-radius: 8px; overflow: hidden; }
+                th, td { padding: 15px; text-align: left; border-bottom: 1px solid #1e1f22; }
+                th { background-color: #111214; color: #a3a6aa; text-transform: uppercase; font-size: 12px; letter-spacing: 1px; }
+                tr:hover { background-color: #313338; }
+                code { background-color: #111214; padding: 4px 8px; border-radius: 4px; font-family: monospace; color: #00a8fc; }
+                .stats { margin-bottom: 20px; font-size: 14px; color: #a3a6aa; }
+            </style>
+        </head>
+        <body>
+            <h1>🛡️ Registro de Expedientes Criminales</h1>
+            <div class="stats">Total de sujetos fichados: <strong>${infractores.length}</strong></div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID del Sujeto</th>
+                        <th>Último Alias</th>
+                        <th>Infracciones</th>
+                        <th>Fecha de Ingreso</th>
+                        <th>Última Actividad Hostil</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${filasHTML}
+                </tbody>
+            </table>
+        </body>
+        </html>
+        `;
+        res.send(html);
+    } catch (error) {
+        res.status(500).send('Error interno leyendo la base de datos.');
+    }
+});
+
+app.listen(PORT, () => console.log(`[LATIDO] Motor web activo en puerto ${PORT}`));
 
 // 3. MEMORIA ANTI-SPAM TÁCTICA Y CONTROL DE FLUJO
 const memoriaCooldown = new Set();
 const hashMensajesRecientes = new Set();
 
-// 4. EXTRACCIÓN DINÁMICA DE TOKENS (SOPORTE PARA 10 EXPLORADORES)
 const tokens = [];
 for (let i = 1; i <= 10; i++) {
     if (process.env[`TOKEN_EXPLORADOR_${i}`]) {
@@ -37,10 +138,10 @@ if (tokens.length === 0) {
 
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
-// 5. PROTOCOLO DE DESPLIEGUE EN CASCADA Y ARRANQUE DE INFRAESTRUCTURA
+// 4. PROTOCOLO DE DESPLIEGUE EN CASCADA
 async function iniciarEnjambre() {
-    // Inicialización del modelo Singleton para la base de datos
-    const blacklistCollection = await database.conectarBaseDatos();
+    // Almacenamos la colección en la variable global para que Express la lea
+    coleccionBD = await database.conectarBaseDatos();
 
     console.log(`[ENJAMBRE] Iniciando despliegue de ${tokens.length} unidades de reconocimiento...`);
 
@@ -50,58 +151,42 @@ async function iniciarEnjambre() {
         explorador.on('ready', () => console.log(`[PANÓPTICO-${i+1}] Infiltración activa: ${explorador.user.tag}`));
 
         explorador.on('messageCreate', async (message) => {
-            // Filtros de inmunidad absoluta (Prevención de bucles de retroalimentación)
             if (message.author.id === explorador.user.id || message.author.bot || message.system) return;
             if (whitelistUsuarios.includes(message.author.id)) return;
             
-            // Verificación de aislamiento punitivo
             if (memoriaCooldown.has(message.author.id)) return;
             const firmaMensaje = `${message.author.id}-${message.content}`;
             if (hashMensajesRecientes.has(firmaMensaje)) return;
 
             try {
-                // EVALUACIÓN DE AMENAZAS EN CASCADA (Mapeo de responsabilidades secuenciales)
                 let interceptado = false;
 
-                // Prioridad 0: Consultas Administrativas (Expedientes Forenses)
                 if (!interceptado) interceptado = await moduloExpedientes.ejecutar(message);
-
-                // Prioridad 1: Detección de comandos de destrucción masiva
-                if (!interceptado) interceptado = await moduloSquads.ejecutar(message, blacklistCollection);
-                
-                // Prioridad 2: Intercepción de alusiones y organización de Raids
-                if (!interceptado) interceptado = await moduloRaids.ejecutar(message, blacklistCollection);
-                
-                // Prioridad 3: Análisis de vectores de distribución de Spam/Enlaces
-                if (!interceptado) interceptado = await moduloLinks.ejecutar(message, blacklistCollection);
-                
-                // Prioridad 4: Telemetría pasiva de la Organización (Requiere confirmación de civil)
+                if (!interceptado) interceptado = await moduloSquads.ejecutar(message, coleccionBD);
+                if (!interceptado) interceptado = await moduloRaids.ejecutar(message, coleccionBD);
+                if (!interceptado) interceptado = await moduloLinks.ejecutar(message, coleccionBD);
                 if (!interceptado) interceptado = await moduloOrg.ejecutar(message);
 
-                // PROTOCOLO DE CASTIGO TEMPORAL (Solo aplicable ante anomalías confirmadas)
                 if (interceptado) {
                     memoriaCooldown.add(message.author.id);
-                    setTimeout(() => memoriaCooldown.delete(message.author.id), 60000); // 60 segundos de silencio
-                    
+                    setTimeout(() => memoriaCooldown.delete(message.author.id), 60000); 
                     hashMensajesRecientes.add(firmaMensaje);
-                    setTimeout(() => hashMensajesRecientes.delete(firmaMensaje), 120000); // Prevención de clonación
+                    setTimeout(() => hashMensajesRecientes.delete(firmaMensaje), 120000); 
                 }
 
             } catch (error) {
-                console.error(`[ESCUDO DEFENSIVO] Fallo detectado en la matriz de cascada modular. Error: ${error.message}`);
+                console.error(`[ESCUDO DEFENSIVO] Fallo detectado. Error: ${error.message}`);
             }
         });
 
         try {
             await explorador.login(tokens[i]);
-            // Evasión de heurísticas de Discord mediante desincronización de peticiones WebSocket
             if (i < tokens.length - 1) await delay(45000); 
         } catch (e) {
-            console.error(`[FALLO DE INFILTRACIÓN] El token de la unidad ${i+1} ha sido revocado o es inválido.`);
+            console.error(`[FALLO DE INFILTRACIÓN] El token de la unidad ${i+1} es inválido.`);
         }
     }
-    
-    console.log(`[ENJAMBRE] Malla de inteligencia completamente desplegada y enlazada al motor MongoDB.`);
+    console.log(`[ENJAMBRE] Malla de inteligencia completamente desplegada.`);
 }
 
 iniciarEnjambre();
