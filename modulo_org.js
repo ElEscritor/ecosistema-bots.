@@ -1,7 +1,11 @@
-const { WebhookClient, MessageEmbed } = require('discord.js-selfbot-v13');
+const { MessageEmbed } = require('discord.js-selfbot-v13');
 const fs = require('fs');
+const path = require('path');
 
-const reglasAlertas = JSON.parse(fs.readFileSync('./reglas_alertas.json', 'utf8'));
+const transmisor = require('../web/transmisor.js');
+
+const reglasPath = path.join(__dirname, '../reglas_alertas.json');
+const reglasAlertas = JSON.parse(fs.readFileSync(reglasPath, 'utf8'));
 
 async function ejecutar(message) {
     const contenidoMensaje = message.content.toLowerCase();
@@ -29,8 +33,6 @@ async function ejecutar(message) {
         const urlWebhook = process.env[datosAlerta.webhookDestino];
         if (!urlWebhook) return true;
 
-        const webhook = new WebhookClient({ url: urlWebhook });
-
         let contextoDialogo = "";
         try {
             const historial = await message.channel.messages.fetch({ limit: 2, before: message.id });
@@ -41,7 +43,7 @@ async function ejecutar(message) {
                 contextoDialogo += `**${nombreLimpio}**: ${msg.content}\n`;
             });
         } catch (e) {
-            // Sin historial, continuamos
+            // Se ignora la extracción si el historial es inaccesible
         }
         
         const autorLimpio = message.author.username.replace(/_/g, '\\_');
@@ -65,7 +67,8 @@ async function ejecutar(message) {
             .setFooter({ text: `ID: ${message.author.id} • Monitoreo Pasivo` })
             .setTimestamp();
 
-        webhook.send({ embeds: [panelObservacion] }).catch(err => console.error('[FALLO RED ORG]', err.message));
+        // Enlace pasivo hacia el proxy transmisor
+        await transmisor.enviarWebhook(urlWebhook, panelObservacion.toJSON(), null, []);
         return true; 
     }
     return false;

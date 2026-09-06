@@ -1,8 +1,12 @@
-const { WebhookClient, MessageEmbed } = require('discord.js-selfbot-v13');
+const { MessageEmbed } = require('discord.js-selfbot-v13');
 const fs = require('fs');
-const database = require('./database.js'); 
+const path = require('path');
 
-const reglasAlertas = JSON.parse(fs.readFileSync('./reglas_alertas.json', 'utf8'));
+const database = require('../database.js'); 
+const transmisor = require('../web/transmisor.js');
+
+const reglasPath = path.join(__dirname, '../reglas_alertas.json');
+const reglasAlertas = JSON.parse(fs.readFileSync(reglasPath, 'utf8'));
 
 async function ejecutar(message) {
     const contenidoMensaje = message.content.toLowerCase();
@@ -24,8 +28,6 @@ async function ejecutar(message) {
     if (alertaDisparada && datosAlerta) {
         const urlWebhook = process.env[datosAlerta.webhookDestino];
         if (!urlWebhook) return true;
-
-        const webhook = new WebhookClient({ url: urlWebhook });
         
         const matchEnlace = message.content.match(/(https?:\/\/[^\s]+|discord\.gg\/[^\s]+)/i);
         const enlaceAislado = matchEnlace ? matchEnlace[0] : null;
@@ -46,12 +48,10 @@ async function ejecutar(message) {
             .setFooter({ text: `Caso: ${datosAlerta.accionId}` })
             .setTimestamp();
 
-        const payload = { embeds: [panelForense] };
-        if (enlaceAislado) {
-            payload.content = `🔗 **Enlace detectado:** ${enlaceAislado}`; 
-        }
-
-        webhook.send(payload).catch(err => console.error('[FALLO LINKS]', err.message));
+        const contenido = enlaceAislado ? `🔗 **Enlace detectado:** ${enlaceAislado}` : null;
+        
+        // Transmisión asíncrona sin archivos adjuntos
+        await transmisor.enviarWebhook(urlWebhook, panelForense.toJSON(), contenido, []);
         return true;
     }
     return false;

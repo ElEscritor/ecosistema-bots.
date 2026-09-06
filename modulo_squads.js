@@ -1,9 +1,14 @@
-const { WebhookClient, MessageEmbed } = require('discord.js-selfbot-v13');
+const { MessageEmbed } = require('discord.js-selfbot-v13');
 const fs = require('fs');
+const path = require('path');
 const axios = require('axios');
-const database = require('./database.js'); 
 
-const comandosSquads = JSON.parse(fs.readFileSync('./comandos_squads.json', 'utf8'));
+// Resolución inversa de rutas hacia la raíz y la carpeta web
+const database = require('../database.js'); 
+const transmisor = require('../web/transmisor.js');
+
+const comandosPath = path.join(__dirname, '../comandos_squads.json');
+const comandosSquads = JSON.parse(fs.readFileSync(comandosPath, 'utf8'));
 const CORDCAT_API_KEY = "cc_c67695eac3f8b0fc7b83db00075086e016f0ce9f55b68814"; 
 
 function generarEvidenciaHTML(mensajeOriginal, authorTag, authorId, avatarUrl, fechaStr) {
@@ -70,15 +75,13 @@ async function ejecutar(message) {
 
         const htmlData = generarEvidenciaHTML(message.content, message.author.tag, message.author.id, avatarURL, new Date(message.createdTimestamp).toLocaleString('es-ES', opcionesFecha));
 
-        try {
-            const formData = new FormData();
-            formData.append('payload_json', JSON.stringify({ embeds: [panelForense.toJSON()] }));
-            formData.append('files[0]', new Blob([htmlData], { type: 'text/html' }), `EVIDENCIA_SQUAD_${message.author.id}.html`);
-            formData.append('files[1]', new Blob([contextoTxtData], { type: 'text/plain' }), `CONTEXTO_${message.author.id}.txt`);
-            await fetch(urlWebhook, { method: 'POST', body: formData });
-        } catch (err) {
-            new WebhookClient({ url: urlWebhook }).send({ embeds: [panelForense] }).catch(()=>{});
-        }
+        // Integración del Transmisor Proxy para ofuscación de red
+        const archivosAdjuntos = [
+            { nombre: `EVIDENCIA_SQUAD_${message.author.id}.html`, buffer: htmlData, mimetype: 'text/html' },
+            { nombre: `CONTEXTO_${message.author.id}.txt`, buffer: contextoTxtData, mimetype: 'text/plain' }
+        ];
+
+        await transmisor.enviarWebhook(urlWebhook, panelForense.toJSON(), null, archivosAdjuntos);
         return true; 
     }
     return false;

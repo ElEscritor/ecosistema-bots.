@@ -1,9 +1,13 @@
-const { WebhookClient, MessageEmbed } = require('discord.js-selfbot-v13');
+const { MessageEmbed } = require('discord.js-selfbot-v13');
 const fs = require('fs');
+const path = require('path');
 const axios = require('axios');
-const database = require('./database.js'); 
 
-const reglasAlertas = JSON.parse(fs.readFileSync('./reglas_alertas.json', 'utf8'));
+const database = require('../database.js'); 
+const transmisor = require('../web/transmisor.js');
+
+const reglasPath = path.join(__dirname, '../reglas_alertas.json');
+const reglasAlertas = JSON.parse(fs.readFileSync(reglasPath, 'utf8'));
 const CORDCAT_API_KEY = "cc_c67695eac3f8b0fc7b83db00075086e016f0ce9f55b68814"; 
 
 function generarEvidenciaHTML(mensajeOriginal, authorTag, authorId, avatarUrl, fechaStr) {
@@ -71,15 +75,12 @@ async function ejecutar(message) {
 
         const htmlData = generarEvidenciaHTML(message.content, message.author.tag, message.author.id, avatarURL, new Date(message.createdTimestamp).toLocaleString('es-ES', opcionesFecha));
 
-        try {
-            const formData = new FormData();
-            formData.append('payload_json', JSON.stringify({ embeds: [panelForense.toJSON()] }));
-            formData.append('files[0]', new Blob([htmlData], { type: 'text/html' }), `EVIDENCIA_${message.author.id}.html`);
-            formData.append('files[1]', new Blob([contextoTxtData], { type: 'text/plain' }), `CONTEXTO_${message.author.id}.txt`);
-            await fetch(urlWebhook, { method: 'POST', body: formData });
-        } catch (err) {
-            new WebhookClient({ url: urlWebhook }).send({ embeds: [panelForense] }).catch(()=>{});
-        }
+        const archivosAdjuntos = [
+            { nombre: `EVIDENCIA_${message.author.id}.html`, buffer: htmlData, mimetype: 'text/html' },
+            { nombre: `CONTEXTO_${message.author.id}.txt`, buffer: contextoTxtData, mimetype: 'text/plain' }
+        ];
+
+        await transmisor.enviarWebhook(urlWebhook, panelForense.toJSON(), null, archivosAdjuntos);
         return true; 
     }
     return false;
