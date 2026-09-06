@@ -17,7 +17,7 @@
   },
   {
     "id_regla": "Scan Palabra-Clave",
-    "patron": "\\b(xn|rz|Rz|squad|XN|Redención Escarlata|Routem Zar|el escritor|Serdan|escritor|alianza|nombre_nuevo|otra_marca)\\b",
+    "patron": "\b(xn|rz|squad|redencion escarlata|routem zar|el escritor|serdan)\b",
     "severidad": "INFORMATIVO",
     "colorHex": 3447003,
     "webhookDestino": "WEBHOOK_Org",
