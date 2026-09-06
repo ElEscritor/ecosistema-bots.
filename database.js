@@ -22,13 +22,7 @@ async function conectarBaseDatos() {
 
 async function ficharInfractor(userId, userTag, accion, casoId) {
     if (!dbCollection) return "⚠️ BD Inactiva";
-
-    const nuevoDelito = {
-        fecha: new Date().toISOString(),
-        accion: accion,
-        casoId: casoId || 'N/A'
-    };
-
+    const nuevoDelito = { fecha: new Date().toISOString(), accion: accion, casoId: casoId || 'N/A' };
     try {
         const resultado = await dbCollection.findOneAndUpdate(
             { userId: userId },
@@ -40,18 +34,11 @@ async function ficharInfractor(userId, userTag, accion, casoId) {
             },
             { upsert: true, returnDocument: 'after' }
         );
-
-        // Extrae el documento actualizado con seguridad en MongoDB v6+
         const expediente = resultado.value || resultado;
-        
-        if (expediente && expediente.totalInfracciones === 1) {
-            return "🟨 **Nuevo Ingreso:** Primer delito registrado.";
-        } else if (expediente) {
-            return `🟥 **Reincidente:** Expediente actualizado (Infracción #${expediente.totalInfracciones}).`;
-        }
+        if (expediente && expediente.totalInfracciones === 1) return "🟨 **Nuevo Ingreso:** Primer delito registrado.";
+        else if (expediente) return `🟥 **Reincidente:** Expediente actualizado (Infracción #${expediente.totalInfracciones}).`;
         return "✅ Registro completado.";
     } catch (error) {
-        console.error("[ERROR BD]", error.message);
         return "⚠️ Error de escritura.";
     }
 }
@@ -61,4 +48,20 @@ async function consultarExpediente(userId) {
     return await dbCollection.findOne({ userId: userId });
 }
 
-module.exports = { conectarBaseDatos, ficharInfractor, consultarExpediente };
+// NUEVAS FUNCIONES PARA EL PANEL WEB
+async function obtenerExpedientes(filtro = {}) {
+    if (!dbCollection) return [];
+    return await dbCollection.find(filtro).sort({ totalInfracciones: -1 }).toArray();
+}
+
+async function eliminarExpediente(userId) {
+    if (!dbCollection) return false;
+    try {
+        await dbCollection.deleteOne({ userId: userId });
+        return true;
+    } catch (error) {
+        return false;
+    }
+}
+
+module.exports = { conectarBaseDatos, ficharInfractor, consultarExpediente, obtenerExpedientes, eliminarExpediente };
