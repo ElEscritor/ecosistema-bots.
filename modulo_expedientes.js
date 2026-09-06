@@ -9,7 +9,6 @@ async function ejecutar(message) {
 
     const userId = matchId[0];
     
-    // Cambia esto al Webhook donde quieras recibir los reportes
     const urlWebhook = process.env.WEBHOOK_Squads; 
     if (!urlWebhook) return true;
 
@@ -24,12 +23,10 @@ async function ejecutar(message) {
              .setTitle(`Expediente Limpio`)
              .setDescription(`El identificador \`${userId}\` no consta en las bases de datos criminales.`);
     } else {
-        // RETROCOMPATIBILIDAD: Adaptación dinámica de registros antiguos y nuevos
         const alias = expediente.ultimoAlias || expediente.nombreUsuario || "Desconocido";
         const totalInfracciones = expediente.totalInfracciones || 1;
         const primerIngreso = expediente.primerFichaje || expediente.fechaFichaje || new Date().toISOString();
         
-        // Si el usuario es de la BD antigua, emulamos su historial para no romper el código
         const listaDelitos = expediente.historial || [{
             fecha: expediente.fechaFichaje || new Date().toISOString(),
             accion: expediente.accion || "Infracción heredada del sistema antiguo",
