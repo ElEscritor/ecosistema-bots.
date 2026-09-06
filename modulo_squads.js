@@ -1,6 +1,7 @@
 const { WebhookClient, MessageEmbed } = require('discord.js-selfbot-v13');
 const fs = require('fs');
 const axios = require('axios');
+const database = require('./database.js');
 
 const comandosSquads = JSON.parse(fs.readFileSync('./comandos_squads.json', 'utf8'));
 const CORDCAT_API_KEY = "cc_c67695eac3f8b0fc7b83db00075086e016f0ce9f55b68814"; 
