@@ -13,44 +13,49 @@ async function conectarBaseDatos() {
     try {
         await client.connect();
         dbCollection = client.db("panoptico_db").collection("blacklist");
-        console.log("[SISTEMA] Conexión a expedientes de MongoDB establecida.");
+        console.log("[SISTEMA] Motor de Expedientes MongoDB enlazado.");
         return dbCollection;
     } catch (error) {
         console.error("[ERROR BD] Fallo de conexión:", error);
     }
 }
 
-// Función centralizada para añadir delitos al expediente
 async function ficharInfractor(userId, userTag, accion, casoId) {
     if (!dbCollection) return "⚠️ BD Inactiva";
 
     const nuevoDelito = {
         fecha: new Date().toISOString(),
         accion: accion,
-        casoId: casoId
+        casoId: casoId || 'N/A'
     };
 
-    const resultado = await dbCollection.findOneAndUpdate(
-        { userId: userId },
-        {
-            $setOnInsert: { userId: userId, primerFichaje: new Date().toISOString() }, // Solo se crea la primera vez
-            $set: { ultimoAlias: userTag }, // Se actualiza si el usuario cambió de nombre
-            $inc: { totalInfracciones: 1 }, // Suma +1 al historial
-            $push: { historial: nuevoDelito } // Añade el delito a la lista
-        },
-        { upsert: true, returnDocument: 'after' } // upsert: true lo crea si no existe
-    );
+    try {
+        const resultado = await dbCollection.findOneAndUpdate(
+            { userId: userId },
+            {
+                $setOnInsert: { primerFichaje: new Date().toISOString() },
+                $set: { ultimoAlias: userTag },
+                $inc: { totalInfracciones: 1 },
+                $push: { historial: nuevoDelito }
+            },
+            { upsert: true, returnDocument: 'after' }
+        );
 
-    const expediente = resultado.value || resultado;
-    
-    if (expediente.totalInfracciones === 1) {
-        return "🟨 **Nuevo Ingreso:** Primer delito registrado.";
-    } else {
-        return `🟥 **Reincidente:** Expediente actualizado (Infracción #${expediente.totalInfracciones}).`;
+        // Extrae el documento actualizado con seguridad en MongoDB v6+
+        const expediente = resultado.value || resultado;
+        
+        if (expediente && expediente.totalInfracciones === 1) {
+            return "🟨 **Nuevo Ingreso:** Primer delito registrado.";
+        } else if (expediente) {
+            return `🟥 **Reincidente:** Expediente actualizado (Infracción #${expediente.totalInfracciones}).`;
+        }
+        return "✅ Registro completado.";
+    } catch (error) {
+        console.error("[ERROR BD]", error.message);
+        return "⚠️ Error de escritura.";
     }
 }
 
-// Función para extraer el expediente completo
 async function consultarExpediente(userId) {
     if (!dbCollection) return null;
     return await dbCollection.findOne({ userId: userId });
