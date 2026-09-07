@@ -1,6 +1,63 @@
-// web/servidor.js (Fragmento de la ruta app.get('/panel', ...))
+const express = require('express');
+const fs = require('fs');
+const path = require('path');
+const database = require('../database.js');
 
-// ... código anterior de autenticación y consulta ...
+function iniciar() {
+    const app = express();
+    const PORT = process.env.PORT || 3000;
+
+    app.use(express.urlencoded({ extended: true }));
+
+    const bloqueoSeguridad = (req, res, next) => {
+        const b64auth = (req.headers.authorization || '').split(' ')[1] || '';
+        const [login, password] = Buffer.from(b64auth, 'base64').toString().split(':');
+        const adminPass = process.env.PANEL_PASSWORD;
+
+        if (!adminPass) return res.status(500).send('ERROR: Configura PANEL_PASSWORD en Render.');
+        if (login === 'admin' && password === adminPass) return next();
+        
+        res.set('WWW-Authenticate', 'Basic realm="Acceso Restringido"');
+        res.status(401).send('Acceso denegado.');
+    };
+
+    app.get('/', (req, res) => res.json({ estado: "operativo", nucleo: "Servidor-Web-Aislado" }));
+
+    app.post('/panel/eliminar', bloqueoSeguridad, async (req, res) => {
+        const { userId } = req.body;
+        if (userId) await database.eliminarExpediente(userId);
+        res.redirect('/panel'); 
+    });
+
+    app.get('/panel/exportar', bloqueoSeguridad, async (req, res) => {
+        try {
+            const query = req.query.q || '';
+            let filtro = query ? { $or: [{ userId: new RegExp(query, 'i') }, { ultimoAlias: new RegExp(query, 'i') }] } : {};
+            const infractores = await database.obtenerExpedientes(filtro);
+            
+            let csv = 'ID_Sujeto,Alias,Total_Infracciones,Fecha_Primer_Ingreso,Ultima_Accion_Registrada\n';
+            infractores.forEach(inf => {
+                const alias = (inf.ultimoAlias || inf.nombreUsuario || 'Desconocido').replace(/,/g, '');
+                const total = inf.totalInfracciones || 1;
+                const fecha = new Date(inf.primerFichaje || inf.fechaFichaje).toLocaleDateString('es-ES');
+                const ultimaAccion = (inf.historial?.slice(-1)[0]?.accion || inf.accion || "Desconocida").replace(/,/g, '');
+                csv += `${inf.userId},${alias},${total},${fecha},${ultimaAccion}\n`;
+            });
+
+            res.header('Content-Type', 'text/csv');
+            res.attachment(`Panoptico_Registros_${new Date().toISOString().split('T')[0]}.csv`);
+            res.send(csv);
+        } catch (error) { res.status(500).send('Error exportando datos.'); }
+    });
+
+    app.get('/panel', bloqueoSeguridad, async (req, res) => {
+        try {
+            const query = req.query.q || '';
+            let filtro = query ? { $or: [{ userId: new RegExp(query, 'i') }, { ultimoAlias: new RegExp(query, 'i') }] } : {};
+            
+            // Extracción de la base de datos (Esto faltaba en tu código)
+            const infractores = await database.obtenerExpedientes(filtro);
+            
             let filasHTML = '';
             infractores.forEach(inf => {
                 const alias = inf.ultimoAlias || inf.nombreUsuario || 'Desconocido';
@@ -8,7 +65,7 @@
                 const fecha = new Date(inf.primerFichaje || inf.fechaFichaje).toLocaleDateString('es-ES');
                 const ultimaAccion = inf.historial?.slice(-1)[0]?.accion || inf.accion || "Desconocida";
 
-                // Serializar el historial y protegerlo en Base64 para evitar conflictos de comillas en HTML
+                // Empaquetado en Base64 para el Modal HTML
                 const historialData = JSON.stringify(inf.historial || [{ 
                     fecha: inf.primerFichaje || new Date().toISOString(), 
                     accion: inf.accion || 'Registro heredado', 
@@ -32,4 +89,22 @@
                     </tr>
                 `;
             });
-// ... resto del archivo servidor.js ...
+
+            const htmlPath = path.join(__dirname, 'panel.html');
+            let plantillaHTML = fs.readFileSync(htmlPath, 'utf8');
+            
+            plantillaHTML = plantillaHTML.replace('{{FILAS_TABLA}}', filasHTML);
+            plantillaHTML = plantillaHTML.replace(/{{QUERY}}/g, query);
+            plantillaHTML = plantillaHTML.replace('{{TOTAL_RESULTADOS}}', infractores.length);
+
+            res.send(plantillaHTML);
+        } catch (error) { 
+            console.error(error);
+            res.status(500).send('Error cargando la base de datos.'); 
+        }
+    });
+
+    app.listen(PORT, () => console.log(`[LATIDO] Servidor Web UI activo en puerto ${PORT}`));
+}
+
+module.exports = { iniciar };
