@@ -31,26 +31,34 @@ async function ejecutar(message) {
         
         const matchEnlace = message.content.match(/(https?:\/\/[^\s]+|discord\.gg\/[^\s]+)/i);
         const enlaceAislado = matchEnlace ? matchEnlace[0] : null;
+        const servidorOrigen = message.guild ? message.guild.name : 'Sector Privado (DM)';
 
-        const estadoBD = await database.ficharInfractor(message.author.id, message.author.tag, `Distribución de Links: ${datosAlerta.idRegla}`, datosAlerta.accionId);
+        const estadoBD = await database.ficharInfractor(
+            message.author.id, 
+            message.author.tag, 
+            `Distribución de Links: ${datosAlerta.idRegla}`, 
+            datosAlerta.accionId,
+            message.content,
+            servidorOrigen
+        );
 
         const avatarURL = message.author.displayAvatarURL({ format: 'png', dynamic: true, size: 256 });
         const panelForense = new MessageEmbed()
             .setColor(datosAlerta.colorHex)
-            .setAuthor({ name: `ALERTA DE ENLACE: ${datosAlerta.idRegla.toUpperCase()}` })
-            .setDescription(`**Contexto del mensaje:**\n${message.content.substring(0, 900)}`)
+            .setAuthor({ name: `DETECCIÓN DE ENLACE: ${datosAlerta.idRegla.toUpperCase()}` })
+            .setDescription(`**Promoción Analizada:**\n${message.content.substring(0, 900)}`)
             .setThumbnail(avatarURL)
             .addFields(
                 { name: '👤 Remitente', value: `**${message.author.tag}**\n\`${message.author.id}\``, inline: true },
-                { name: '📍 Origen', value: `**Canal:** <#${message.channel.id}>`, inline: true },
-                { name: '🛡️ Estado en BD', value: estadoBD, inline: false }
+                { name: '📍 Nodo Origen', value: `**${servidorOrigen}**\n<#${message.channel.id}>`, inline: true },
+                { name: '🛡️ Estado en La Biblioteca', value: estadoBD, inline: false }
             )
-            .setFooter({ text: `Caso: ${datosAlerta.accionId}` })
+            .setFooter({ text: `Expediente: ${datosAlerta.accionId}` })
             .setTimestamp();
 
-        const contenido = enlaceAislado ? `🔗 **Enlace detectado:** ${enlaceAislado}` : null;
+        const contenido = enlaceAislado ? `🔗 **URL Aislada:** ${enlaceAislado}` : null;
         
-        // Transmisión asíncrona sin archivos adjuntos
+        // Transmisión directa y ofuscada para evadir limitadores
         await transmisor.enviarWebhook(urlWebhook, panelForense.toJSON(), contenido, []);
         return true;
     }
