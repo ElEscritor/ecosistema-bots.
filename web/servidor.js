@@ -7,104 +7,104 @@ function iniciar() {
     const app = express();
     const PORT = process.env.PORT || 3000;
 
+    app.use(express.json());
     app.use(express.urlencoded({ extended: true }));
 
     const bloqueoSeguridad = (req, res, next) => {
         const b64auth = (req.headers.authorization || '').split(' ')[1] || '';
         const [login, password] = Buffer.from(b64auth, 'base64').toString().split(':');
         const adminPass = process.env.PANEL_PASSWORD;
-
-        if (!adminPass) return res.status(500).send('ERROR: Configura PANEL_PASSWORD en Render.');
+        if (!adminPass) return res.status(500).send('ERROR: PANEL_PASSWORD no configurado.');
         if (login === 'admin' && password === adminPass) return next();
-        
-        res.set('WWW-Authenticate', 'Basic realm="Acceso Restringido"');
+        res.set('WWW-Authenticate', 'Basic realm="La Biblioteca - Acceso Restringido"');
         res.status(401).send('Acceso denegado.');
     };
 
-    app.get('/', (req, res) => res.json({ estado: "operativo", nucleo: "Servidor-Web-Aislado" }));
-
-    app.post('/panel/eliminar', bloqueoSeguridad, async (req, res) => {
-        const { userId } = req.body;
-        if (userId) await database.eliminarExpediente(userId);
-        res.redirect('/panel'); 
+    // Ruta Principal que sirve el HTML de La Biblioteca
+    app.get('/panel', bloqueoSeguridad, (req, res) => {
+        res.sendFile(path.join(__dirname, 'panel.html'));
     });
 
-    app.get('/panel/exportar', bloqueoSeguridad, async (req, res) => {
+    // API: Datos del Dashboard (Gráficos)
+    app.get('/api/stats', bloqueoSeguridad, async (req, res) => {
         try {
-            const query = req.query.q || '';
-            let filtro = query ? { $or: [{ userId: new RegExp(query, 'i') }, { ultimoAlias: new RegExp(query, 'i') }] } : {};
-            const infractores = await database.obtenerExpedientes(filtro);
-            
-            let csv = 'ID_Sujeto,Alias,Total_Infracciones,Fecha_Primer_Ingreso,Ultima_Accion_Registrada\n';
+            const infractores = await database.obtenerExpedientes();
+            let comandos = 0, raids = 0, orgs = 0, links = 0;
+            let totalInfracciones = 0;
+
             infractores.forEach(inf => {
-                const alias = (inf.ultimoAlias || inf.nombreUsuario || 'Desconocido').replace(/,/g, '');
-                const total = inf.totalInfracciones || 1;
-                const fecha = new Date(inf.primerFichaje || inf.fechaFichaje).toLocaleDateString('es-ES');
-                const ultimaAccion = (inf.historial?.slice(-1)[0]?.accion || inf.accion || "Desconocida").replace(/,/g, '');
-                csv += `${inf.userId},${alias},${total},${fecha},${ultimaAccion}\n`;
+                if (inf.historial) {
+                    inf.historial.forEach(delito => {
+                        totalInfracciones++;
+                        const accion = delito.accion.toLowerCase();
+                        if (accion.includes('comando')) comandos++;
+                        else if (accion.includes('raid') || accion.includes('dox') || accion.includes('nuke')) raids++;
+                        else if (accion.includes('link') || accion.includes('distribución')) links++;
+                        else orgs++;
+                    });
+                }
             });
 
-            res.header('Content-Type', 'text/csv');
-            res.attachment(`Panoptico_Registros_${new Date().toISOString().split('T')[0]}.csv`);
-            res.send(csv);
-        } catch (error) { res.status(500).send('Error exportando datos.'); }
+            res.json({
+                totalIds: infractores.length,
+                totalCapturas: totalInfracciones,
+                distribucion: [comandos, raids, orgs, links]
+            });
+        } catch (error) { res.status(500).json({ error: 'Fallo al procesar métricas' }); }
     });
 
-    app.get('/panel', bloqueoSeguridad, async (req, res) => {
+    // API: Obtener toda la Blacklist
+    app.get('/api/blacklist', bloqueoSeguridad, async (req, res) => {
         try {
-            const query = req.query.q || '';
-            let filtro = query ? { $or: [{ userId: new RegExp(query, 'i') }, { ultimoAlias: new RegExp(query, 'i') }] } : {};
-            
-            // Extracción de la base de datos (Esto faltaba en tu código)
-            const infractores = await database.obtenerExpedientes(filtro);
-            
-            let filasHTML = '';
-            infractores.forEach(inf => {
-                const alias = inf.ultimoAlias || inf.nombreUsuario || 'Desconocido';
-                const total = inf.totalInfracciones || 1;
-                const fecha = new Date(inf.primerFichaje || inf.fechaFichaje).toLocaleDateString('es-ES');
-                const ultimaAccion = inf.historial?.slice(-1)[0]?.accion || inf.accion || "Desconocida";
+            const infractores = await database.obtenerExpedientes();
+            res.json(infractores);
+        } catch (error) { res.status(500).json({ error: 'Fallo al leer la blacklist' }); }
+    });
 
-                // Empaquetado en Base64 para el Modal HTML
-                const historialData = JSON.stringify(inf.historial || [{ 
-                    fecha: inf.primerFichaje || new Date().toISOString(), 
-                    accion: inf.accion || 'Registro heredado', 
-                    casoId: inf.casoId || 'N/A' 
-                }]);
-                const encodedHistorial = Buffer.from(historialData).toString('base64');
+    // API: Actualizar Notas de Perfilado (Expedientes)
+    app.post('/api/expediente/nota', bloqueoSeguridad, async (req, res) => {
+        try {
+            const { userId, nota } = req.body;
+            // Se requiere actualizar database.js para soportar la inyección de notas personalizadas
+            await database.actualizarNota(userId, nota); 
+            res.json({ success: true });
+        } catch (error) { res.status(500).json({ error: 'Fallo al guardar la nota' }); }
+    });
 
-                filasHTML += `
-                    <tr>
-                        <td><a href="#" class="id-link" data-historial="${encodedHistorial}" data-userid="${inf.userId}" data-alias="${alias}">${inf.userId}</a></td>
-                        <td class="alias-text">${alias}</td>
-                        <td class="infracciones-count">${total}</td>
-                        <td>${fecha}</td>
-                        <td class="ultima-actividad">${ultimaAccion}</td>
-                        <td style="text-align: right;">
-                            <form method="POST" action="/panel/eliminar" style="margin: 0;">
-                                <input type="hidden" name="userId" value="${inf.userId}">
-                                <button type="submit" class="btn btn-purge" onclick="return confirm('ATENCIÓN: ¿Borrar expediente de ${alias}?')">🗑️ Purga</button>
-                            </form>
-                        </td>
-                    </tr>
-                `;
+    // API: Exportación JSON con formato estandarizado UBFB[cite: 4]
+    app.get('/panel/exportar/ubfb', bloqueoSeguridad, async (req, res) => {
+        try {
+            const infractores = await database.obtenerExpedientes();
+            
+            const ubfbFormat = infractores.map(inf => {
+                let lastAction = "Desconocida";
+                if (inf.historial && inf.historial.length > 0) {
+                    lastAction = inf.historial[inf.historial.length - 1].accion;
+                }
+                
+                // Mapeo exacto basado en la estructura UBFB[cite: 4]
+                return {
+                    id: inf.userId,
+                    reason: lastAction,
+                    punishmentDays: 365,
+                    status: "Activo",
+                    authorId: "0",
+                    authorUsername: "La Biblioteca (Panóptico)",
+                    intermediaryId: "0",
+                    intermediaryUsername: "La Biblioteca (Panóptico)",
+                    proofs: [],
+                    createdAt: inf.primerFichaje || new Date().toISOString(),
+                    updatedAt: new Date().toISOString()
+                };
             });
 
-            const htmlPath = path.join(__dirname, 'panel.html');
-            let plantillaHTML = fs.readFileSync(htmlPath, 'utf8');
-            
-            plantillaHTML = plantillaHTML.replace('{{FILAS_TABLA}}', filasHTML);
-            plantillaHTML = plantillaHTML.replace(/{{QUERY}}/g, query);
-            plantillaHTML = plantillaHTML.replace('{{TOTAL_RESULTADOS}}', infractores.length);
-
-            res.send(plantillaHTML);
-        } catch (error) { 
-            console.error(error);
-            res.status(500).send('Error cargando la base de datos.'); 
-        }
+            res.header('Content-Type', 'application/json');
+            res.attachment(`UBFB_Blacklist_Export_${new Date().toISOString().split('T')[0]}.json`);
+            res.send(JSON.stringify(ubfbFormat, null, 2));
+        } catch (error) { res.status(500).send('Error procesando el JSON UBFB.'); }
     });
 
-    app.listen(PORT, () => console.log(`[LATIDO] Servidor Web UI activo en puerto ${PORT}`));
+    app.listen(PORT, () => console.log(`[LA BIBLIOTECA] Interfaz C4ISR activa en puerto ${PORT}`));
 }
 
 module.exports = { iniciar };
