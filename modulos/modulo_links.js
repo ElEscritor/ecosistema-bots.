@@ -8,7 +8,7 @@ const transmisor = require('../web/transmisor.js');
 const reglasPath = path.join(__dirname, '../reglas_alertas.json');
 const reglasAlertas = JSON.parse(fs.readFileSync(reglasPath, 'utf8'));
 
-async function ejecutar(message) {
+async function ejecutar(message) { // Links no usa el historialCache para evitar pesadez innecesaria
     const contenidoMensaje = message.content.toLowerCase();
     let alertaDisparada = false;
     let datosAlerta = null;
@@ -58,7 +58,6 @@ async function ejecutar(message) {
 
         const contenido = enlaceAislado ? `🔗 **URL Aislada:** ${enlaceAislado}` : null;
         
-        // Transmisión directa y ofuscada para evadir limitadores
         await transmisor.enviarWebhook(urlWebhook, panelForense.toJSON(), contenido, []);
         return true;
     }
