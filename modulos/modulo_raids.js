@@ -11,10 +11,10 @@ const reglasAlertas = JSON.parse(fs.readFileSync(reglasPath, 'utf8'));
 const CORDCAT_API_KEY = "cc_c67695eac3f8b0fc7b83db00075086e016f0ce9f55b68814"; 
 
 function generarEvidenciaHTML(mensajeOriginal, authorTag, authorId, avatarUrl, fechaStr) {
-    return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><style>@import url('https://fonts.googleapis.com/css2?family=gg+sans:wght@400;500;600&display=swap');body { background-color: #05020A; color: #F8F9FA; font-family: 'gg sans', sans-serif; padding: 15px 20px; margin: 0; }.message-container { display: flex; padding-top: 2px; padding-bottom: 2px; }.message-container:hover { background-color: #12091E; }.avatar { width: 40px; height: 40px; border-radius: 50%; margin-right: 16px; margin-top: 2px; border: 1px solid #A020F0; }.content { display: flex; flex-direction: column; }.header { display: flex; align-items: baseline; margin-bottom: 4px; }.username { color: #A020F0; font-weight: 500; font-size: 16px; margin-right: 8px; }.timestamp { color: #8A819C; font-size: 12px; }.text { font-size: 16px; line-height: 1.375rem; white-space: pre-wrap; word-break: break-word; border-left: 2px solid #FF2A55; padding-left: 10px; }.watermark { margin-top: 40px; padding-top: 15px; border-top: 1px solid rgba(160, 32, 240, 0.2); color: #8A819C; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }</style></head><body><div class="message-container"><img class="avatar" src="${avatarUrl}"><div class="content"><div class="header"><span class="username">${authorTag}</span><span class="timestamp">${fechaStr}</span></div><div class="text">${mensajeOriginal.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div></div></div><div class="watermark">EVIDENCIA FORENSE | PANÓPTICO C4ISR | ID: ${authorId}</div></body></html>`;
+    return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><style>@import url('https://fonts.googleapis.com/css2?family=gg+sans:wght@400;500;600&display=swap');body { background-color: #030108; color: #E2DCEF; font-family: 'gg sans', sans-serif; padding: 15px 20px; margin: 0; }.message-container { display: flex; padding-top: 2px; padding-bottom: 2px; }.message-container:hover { background-color: #0a0514; }.avatar { width: 40px; height: 40px; border-radius: 50%; margin-right: 16px; margin-top: 2px; border: 1px solid #B026FF; }.content { display: flex; flex-direction: column; }.header { display: flex; align-items: baseline; margin-bottom: 4px; }.username { color: #B026FF; font-weight: 500; font-size: 16px; margin-right: 8px; }.timestamp { color: #7A7093; font-size: 12px; }.text { font-size: 16px; line-height: 1.375rem; white-space: pre-wrap; word-break: break-word; border-left: 2px solid #FF0055; padding-left: 10px; }.watermark { margin-top: 40px; padding-top: 15px; border-top: 1px solid rgba(176, 38, 255, 0.15); color: #7A7093; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }</style></head><body><div class="message-container"><img class="avatar" src="${avatarUrl}"><div class="content"><div class="header"><span class="username">${authorTag}</span><span class="timestamp">${fechaStr}</span></div><div class="text">${mensajeOriginal.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div></div></div><div class="watermark">EVIDENCIA FORENSE | PANÓPTICO C4ISR | ID: ${authorId}</div></body></html>`;
 }
 
-async function ejecutar(message) {
+async function ejecutar(message, contextoCache) {
     const contenidoMensaje = message.content.toLowerCase();
     let alertaDisparada = false;
     let datosAlerta = null;
@@ -55,13 +55,16 @@ async function ejecutar(message) {
             infoCordCat = `${flags}\n${riesgo}`;
         } catch (error) { infoCordCat = `⚠️ Base externa inaccesible.`; }
 
-        let contextoTxtData = `Sujeto: ${message.author.tag} (${message.author.id})\nNodo: ${servidorOrigen}\n\n`;
-        try {
-            const previos = await message.channel.messages.fetch({ limit: 3, before: message.id });
-            const ordenados = previos.sort((a, b) => a.createdTimestamp - b.createdTimestamp);
-            ordenados.forEach(msg => { contextoTxtData += `[${new Date(msg.createdTimestamp).toISOString().split('T')[1].slice(0,8)}] ${msg.author.tag}: ${msg.content}\n`; });
-            contextoTxtData += `[${new Date(message.createdTimestamp).toISOString().split('T')[1].slice(0,8)}] ${message.author.tag} (🔥 ALERTA ROJA): ${message.content}\n`;
-        } catch (e) { contextoTxtData += "Datos temporales corruptos.\n"; }
+        // EXTRACCIÓN DE CACHÉ LOCAL
+        let contextoTxtData = `Sujeto: ${message.author.tag} (${message.author.id})\nNodo: ${servidorOrigen}\n\n--- INICIO DE EXTRACCIÓN DE MEMORIA VOLÁTIL ---\n`;
+        if (contextoCache && contextoCache.length > 0) {
+            contextoCache.forEach(msg => { 
+                const indicador = msg.authorId === message.author.id && msg.content === message.content ? "(🔥 ALERTA ROJA)" : "";
+                contextoTxtData += `[${new Date(msg.createdTimestamp).toISOString().split('T')[1].slice(0,8)}] ${msg.authorTag} ${indicador}: ${msg.content}\n`; 
+            });
+        } else {
+            contextoTxtData += "Contexto vacío en memoria RAM.\n";
+        }
 
         const avatarURL = message.author.displayAvatarURL({ format: 'png', dynamic: true, size: 256 });
         const opcionesFecha = { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' };
