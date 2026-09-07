@@ -1,5 +1,4 @@
 const express = require('express');
-const fs = require('fs');
 const path = require('path');
 const database = require('../database.js');
 
@@ -15,19 +14,19 @@ function iniciar() {
         const [login, password] = Buffer.from(b64auth, 'base64').toString().split(':');
         const adminPass = process.env.PANEL_PASSWORD;
 
-        if (!adminPass) return res.status(500).send('ERROR: Configura PANEL_PASSWORD en Render.');
+        if (!adminPass) return res.status(500).send('ERROR: PANEL_PASSWORD no configurado en el entorno.');
         if (login === 'admin' && password === adminPass) return next();
         
-        res.set('WWW-Authenticate', 'Basic realm="La Biblioteca"');
-        res.status(401).send('Acceso denegado.');
+        res.set('WWW-Authenticate', 'Basic realm="La Biblioteca - C4ISR"');
+        res.status(401).send('Acceso denegado. Se requiere autorización táctica.');
     };
 
-    // Servir la interfaz gráfica principal
+    // Renderizado de la Interfaz SPA
     app.get(['/', '/panel'], bloqueoSeguridad, (req, res) => {
         res.sendFile(path.join(__dirname, 'panel.html'));
     });
 
-    // API: Suministro de datos globales para el Dashboard y las Tablas
+    // API: Telemetría Global
     app.get('/api/datos', bloqueoSeguridad, async (req, res) => {
         try {
             const infractores = await database.obtenerExpedientes();
@@ -35,59 +34,62 @@ function iniciar() {
         } catch (error) { res.status(500).json({ error: 'Fallo al leer la base de datos' }); }
     });
 
-    // API: Inyección de notas OSINT desde el panel frontal
+    // API: Inyección de OSINT
     app.post('/api/notas', bloqueoSeguridad, async (req, res) => {
         try {
             const { userId, nota } = req.body;
             await database.actualizarNotaOSINT(userId, nota);
             res.json({ success: true });
-        } catch (error) { res.status(500).json({ error: 'Fallo al guardar la nota' }); }
+        } catch (error) { res.status(500).json({ error: 'Fallo al sincronizar inteligencia' }); }
     });
 
-    // API: Eliminación de expedientes
+    // API: Purga de Expedientes
     app.post('/api/eliminar', bloqueoSeguridad, async (req, res) => {
         try {
             const { userId } = req.body;
             await database.eliminarExpediente(userId);
             res.json({ success: true });
-        } catch (error) { res.status(500).json({ error: 'Fallo al eliminar expediente' }); }
+        } catch (error) { res.status(500).json({ error: 'Fallo al purgar datos' }); }
     });
 
-    // API: Motor de Exportación UBFB-JSON
-    app.get('/panel/exportar/ubfb', bloqueoSeguridad, async (req, res) => {
+    // API: Exportación Agnóstica de Seguridad
+    app.get('/api/exportar', bloqueoSeguridad, async (req, res) => {
         try {
             const infractores = await database.obtenerExpedientes();
             
-            const exportacionUBFB = infractores.map(inf => {
-                let razonPrincipal = "Comportamiento Hostil";
+            const exportacionEstandar = infractores.map(inf => {
+                let categoria = "Comportamiento Hostil";
+                let evidencia = "Evidencia no disponible";
+                let nodoOrigen = "Desconocido";
+                
                 if (inf.historial && inf.historial.length > 0) {
-                    const ultimaAccion = inf.historial[inf.historial.length - 1].accion.toLowerCase();
-                    if (ultimaAccion.includes('raid') || ultimaAccion.includes('nuke')) razonPrincipal = "Raider";
-                    else if (ultimaAccion.includes('link')) razonPrincipal = "Spam al md";
-                    else if (ultimaAccion.includes('dox')) razonPrincipal = "Dox";
-                    else if (ultimaAccion.includes('estafa')) razonPrincipal = "Estafa";
-                    else if (ultimaAccion.includes('squad')) razonPrincipal = "Miembro de una squad";
+                    const ultimo = inf.historial[inf.historial.length - 1];
+                    const accion = ultimo.accion.toLowerCase();
+                    evidencia = ultimo.mensajeOriginal || evidencia;
+                    nodoOrigen = ultimo.servidor || nodoOrigen;
+
+                    if (accion.includes('raid') || accion.includes('nuke')) categoria = "Ataque Masivo / Raider";
+                    else if (accion.includes('link') || accion.includes('distribución')) categoria = "Spam / Distribución Maliciosa";
+                    else if (accion.includes('dox') || accion.includes('ip')) categoria = "Doxing / Exposición de Datos";
+                    else if (accion.includes('squad') || accion.includes('comando')) categoria = "Ejecución de Carga Táctica";
+                    else if (accion.includes('palabra-clave')) categoria = "Mención de Organización (OSINT)";
                 }
                 
                 return {
-                    id: inf.userId,
-                    reason: razonPrincipal,
-                    punishmentDays: razonPrincipal === "Dox" ? null : 180,
-                    status: "Activo",
-                    authorId: "0",
-                    authorUsername: "La Biblioteca (Inteligencia)",
-                    intermediaryId: "0",
-                    intermediaryUsername: "Sistema Automatizado",
-                    proofs: [],
-                    createdAt: inf.primerFichaje || new Date().toISOString(),
-                    updatedAt: new Date().toISOString()
+                    subject_id: inf.userId,
+                    known_alias: inf.ultimoAlias || inf.nombreUsuario || "Desconocido",
+                    threat_category: categoria,
+                    raw_intercepted_payload: evidencia,
+                    origin_node: nodoOrigen,
+                    osint_notes: inf.notaOSINT || "",
+                    timestamp_utc: inf.primerFichaje || new Date().toISOString()
                 };
             });
 
             res.header('Content-Type', 'application/json');
-            res.attachment(`UBFB_Blacklist_${new Date().toISOString().split('T')[0]}.json`);
-            res.send(JSON.stringify(exportacionUBFB, null, 2));
-        } catch (error) { res.status(500).send('Error procesando el JSON UBFB.'); }
+            res.attachment(`Blacklist_Intelligence_${new Date().toISOString().split('T')[0]}.json`);
+            res.send(JSON.stringify(exportacionEstandar, null, 2));
+        } catch (error) { res.status(500).send('Error procesando el paquete de exportación.'); }
     });
 
     app.listen(PORT, () => console.log(`[LA BIBLIOTECA] C4ISR operativo en puerto ${PORT}`));
