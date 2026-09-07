@@ -2,6 +2,7 @@ const { MessageEmbed } = require('discord.js-selfbot-v13');
 const fs = require('fs');
 const path = require('path');
 
+const database = require('../database.js');
 const transmisor = require('../web/transmisor.js');
 
 const reglasPath = path.join(__dirname, '../reglas_alertas.json');
@@ -33,6 +34,19 @@ async function ejecutar(message) {
         const urlWebhook = process.env[datosAlerta.webhookDestino];
         if (!urlWebhook) return true;
 
+        const servidorOrigen = message.guild ? message.guild.name : 'Sector Privado (DM)';
+        const casoIdGenerado = 'OSINT_' + Math.random().toString(36).substring(2, 9).toUpperCase();
+
+        // Ingesta silenciosa en el expediente OSINT (Se anexa a La Biblioteca)
+        await database.ficharInfractor(
+            message.author.id,
+            message.author.tag,
+            `Mención Organizacional (OSINT): ${mencionesDetectadas.join(', ')}`,
+            casoIdGenerado,
+            message.content,
+            servidorOrigen
+        );
+
         let contextoDialogo = "";
         try {
             const historial = await message.channel.messages.fetch({ limit: 2, before: message.id });
@@ -42,32 +56,28 @@ async function ejecutar(message) {
                 const nombreLimpio = msg.author.username.replace(/_/g, '\\_');
                 contextoDialogo += `**${nombreLimpio}**: ${msg.content}\n`;
             });
-        } catch (e) {
-            // Se ignora la extracción si el historial es inaccesible
-        }
+        } catch (e) { } // Operación pasiva tolerante a fallos
         
         const autorLimpio = message.author.username.replace(/_/g, '\\_');
         contextoDialogo += `**${autorLimpio}**: ${message.content} 🎯`;
 
         const creacionCuentaUnix = Math.floor(message.author.createdTimestamp / 1000);
         const avatarURL = message.author.displayAvatarURL({ format: 'png', dynamic: true, size: 128 });
-        const nombreServidor = message.guild ? message.guild.name : 'Sector Privado (DM)';
         
         const panelObservacion = new MessageEmbed()
-            .setColor(datosAlerta.colorHex || '#3498db') 
+            .setColor(datosAlerta.colorHex || '#9D4EDD') 
             .setAuthor({ name: `Radar de Organización: ${message.author.tag}`, iconURL: avatarURL })
-            .setDescription(`Se ha detectado mención a: **${mencionesDetectadas.join(', ')}**\n\n**Transcripción del Diálogo:**\n> ${contextoDialogo.replace(/\n/g, '\n> ')}`)
+            .setDescription(`Firma de red detectada: **${mencionesDetectadas.join(', ')}**\n\n**Transcripción del Segmento:**\n> ${contextoDialogo.replace(/\n/g, '\n> ')}`)
             .addFields(
-                { name: '👤 ID Sujeto', value: `\`${message.author.id}\``, inline: true },
-                { name: '📅 Registro', value: `<t:${creacionCuentaUnix}:R>`, inline: true },
-                { name: '📍 Coordenada', value: `[Saltar al mensaje](${message.url})`, inline: true },
-                { name: '🌍 Servidor', value: `**${nombreServidor}**`, inline: true },
-                { name: '📡 Canal', value: `**<#${message.channel.id}>**`, inline: true }
+                { name: '👤 Identidad Base', value: `\`${message.author.id}\``, inline: true },
+                { name: '📅 Creación', value: `<t:${creacionCuentaUnix}:R>`, inline: true },
+                { name: '📍 Rastro', value: `[Cruce de Señal](${message.url})`, inline: true },
+                { name: '🌍 Red Origen', value: `**${servidorOrigen}**`, inline: true },
+                { name: '📡 Vector Local', value: `**<#${message.channel.id}>**`, inline: true }
             )
-            .setFooter({ text: `ID: ${message.author.id} • Monitoreo Pasivo` })
+            .setFooter({ text: `ID: ${message.author.id} • Monitoreo Pasivo • OSINT` })
             .setTimestamp();
 
-        // Enlace pasivo hacia el proxy transmisor
         await transmisor.enviarWebhook(urlWebhook, panelObservacion.toJSON(), null, []);
         return true; 
     }
