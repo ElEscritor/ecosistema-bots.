@@ -4,9 +4,9 @@ const path = require('path');
 
 // 1. INICIALIZACIÓN DE LA INFRAESTRUCTURA BASE
 const database = require('./database.js');
-const servidorWeb = require('./web/servidor.js'); // Despliegue del panel forense aislado
+const servidorWeb = require('./web/servidor.js'); 
 
-// 2. IMPORTACIÓN DINÁMICA DE MÓDULOS (Nuevas rutas absolutas)
+// 2. IMPORTACIÓN DINÁMICA DE MÓDULOS DE INTELIGENCIA
 const moduloSquads = require('./modulos/modulo_squads.js');
 const moduloRaids = require('./modulos/modulo_raids.js');
 const moduloLinks = require('./modulos/modulo_links.js');
@@ -21,7 +21,9 @@ const memoriaCooldown = new Set();
 const hashMensajesRecientes = new Set();
 const tokens = [];
 
-// Extracción masiva de tokens desde el entorno
+// 4. MEMORIA CACHÉ LOCAL (Evade Rate Limits y Baneos de Discord)
+const cacheHistorialCanales = new Map();
+
 for (let i = 1; i <= 10; i++) {
     if (process.env[`TOKEN_EXPLORADOR_${i}`]) {
         tokens.push(process.env[`TOKEN_EXPLORADOR_${i}`]);
@@ -35,7 +37,15 @@ if (tokens.length === 0) {
 
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
-// 4. PROTOCOLO DE DESPLIEGUE EN CASCADA
+// Mantenimiento de Memoria: Limpia canales inactivos para evitar fugas de RAM (Memory Leaks)
+setInterval(() => {
+    if (cacheHistorialCanales.size > 1000) {
+        cacheHistorialCanales.clear();
+        console.log("[SISTEMA] Vaciado cíclico de memoria caché de canales ejecutado.");
+    }
+}, 3600000); // Se ejecuta cada 1 hora
+
+// 5. PROTOCOLO DE DESPLIEGUE EN CASCADA
 async function iniciarEnjambre() {
     await database.conectarBaseDatos();
     servidorWeb.iniciar(); 
@@ -52,6 +62,20 @@ async function iniciarEnjambre() {
             if (message.author.id === explorador.user.id || message.author.bot || message.system) return;
             if (whitelistUsuarios.includes(message.author.id)) return;
             
+            // Ingesta continua en Memoria Volátil Local (Caché de Contexto)
+            if (!cacheHistorialCanales.has(message.channel.id)) {
+                cacheHistorialCanales.set(message.channel.id, []);
+            }
+            const bufferCanal = cacheHistorialCanales.get(message.channel.id);
+            bufferCanal.push({
+                authorTag: message.author.tag,
+                authorId: message.author.id,
+                content: message.content,
+                createdTimestamp: message.createdTimestamp
+            });
+            // Restricción de memoria: Solo se conservan los 5 mensajes más recientes por canal
+            if (bufferCanal.length > 5) bufferCanal.shift();
+
             // Verificación de Bloqueo por Cooldown
             if (memoriaCooldown.has(message.author.id)) return;
             const firmaMensaje = `${message.author.id}-${message.content}`;
@@ -59,14 +83,16 @@ async function iniciarEnjambre() {
 
             try {
                 let interceptadoPor = null;
+                // Pasamos el buffer local a los módulos para evitar que hagan peticiones HTTP a Discord
+                const contextoLocal = [...bufferCanal]; 
 
                 // Evaluación Asíncrona en Cascada
-                if (await moduloSquads.ejecutar(message)) interceptadoPor = 'SQUADS';
-                else if (await moduloRaids.ejecutar(message)) interceptadoPor = 'RAIDS';
+                if (await moduloSquads.ejecutar(message, contextoLocal)) interceptadoPor = 'SQUADS';
+                else if (await moduloRaids.ejecutar(message, contextoLocal)) interceptadoPor = 'RAIDS';
                 else if (await moduloLinks.ejecutar(message)) interceptadoPor = 'LINKS';
-                else if (await moduloOrg.ejecutar(message)) interceptadoPor = 'ORG';
+                else if (await moduloOrg.ejecutar(message, contextoLocal)) interceptadoPor = 'ORG';
 
-                // Aplicación de Cooldown Selectivo (Exclusivo para Spam y Ataques Críticos)
+                // Aplicación de Cooldown Selectivo
                 if (interceptadoPor) {
                     if (interceptadoPor === 'LINKS' || interceptadoPor === 'SQUADS') {
                         memoriaCooldown.add(message.author.id);
