@@ -18,14 +18,23 @@ async function conectarBaseDatos() {
     } catch (error) { console.error("[ERROR BD]", error); }
 }
 
-async function ficharInfractor(userId, userTag, accion, casoId) {
+// Se añaden los parámetros mensajeCrudo y servidorOrigen para enriquecer la telemetría
+async function ficharInfractor(userId, userTag, accion, casoId, mensajeCrudo = "Evidencia no disponible", servidorOrigen = "Sector Desconocido") {
     if (!dbCollection) return "⚠️ BD Inactiva";
-    const nuevoDelito = { fecha: new Date().toISOString(), accion: accion, casoId: casoId || 'N/A' };
+    
+    const nuevoDelito = { 
+        fecha: new Date().toISOString(), 
+        accion: accion, 
+        casoId: casoId || 'N/A',
+        mensajeOriginal: mensajeCrudo,
+        servidor: servidorOrigen
+    };
+    
     try {
         const resultado = await dbCollection.findOneAndUpdate(
             { userId: userId },
             {
-                $setOnInsert: { primerFichaje: new Date().toISOString() },
+                $setOnInsert: { primerFichaje: new Date().toISOString(), notaOSINT: "" },
                 $set: { ultimoAlias: userTag },
                 $inc: { totalInfracciones: 1 },
                 $push: { historial: nuevoDelito }
@@ -38,7 +47,6 @@ async function ficharInfractor(userId, userTag, accion, casoId) {
     } catch (error) { return "⚠️ Error de escritura."; }
 }
 
-// Funciones para la Web
 async function obtenerExpedientes(filtro = {}) {
     if (!dbCollection) return [];
     return await dbCollection.find(filtro).sort({ totalInfracciones: -1 }).toArray();
@@ -52,4 +60,16 @@ async function eliminarExpediente(userId) {
     } catch (error) { return false; }
 }
 
-module.exports = { conectarBaseDatos, ficharInfractor, obtenerExpedientes, eliminarExpediente };
+// Nueva función para inyectar inteligencia manual desde la web
+async function actualizarNotaOSINT(userId, nota) {
+    if (!dbCollection) return false;
+    try {
+        await dbCollection.updateOne(
+            { userId: userId },
+            { $set: { notaOSINT: nota } }
+        );
+        return true;
+    } catch (error) { return false; }
+}
+
+module.exports = { conectarBaseDatos, ficharInfractor, obtenerExpedientes, eliminarExpediente, actualizarNotaOSINT };
