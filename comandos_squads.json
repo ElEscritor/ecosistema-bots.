@@ -42,6 +42,13 @@
     "webhookDestino": "WEBHOOK_Squads"
   },
   {
+    "comando": ".invite",
+    "descripcion": "Solicitud raidbot  de fluc",
+    "severidad": "CRITICO",
+    "colorHex": 10181046,
+    "webhookDestino": "WEBHOOK_Squads"
+  },
+  {
     "comando": "!nuke",
     "descripcion": "Destruccion masiva",
     "severidad": "CRITICO",
