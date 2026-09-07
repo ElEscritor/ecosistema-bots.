@@ -8,7 +8,7 @@ const transmisor = require('../web/transmisor.js');
 const reglasPath = path.join(__dirname, '../reglas_alertas.json');
 const reglasAlertas = JSON.parse(fs.readFileSync(reglasPath, 'utf8'));
 
-async function ejecutar(message) {
+async function ejecutar(message, contextoCache) {
     const contenidoMensaje = message.content.toLowerCase();
     let mencionesDetectadas = [];
     let datosAlerta = null;
@@ -37,7 +37,6 @@ async function ejecutar(message) {
         const servidorOrigen = message.guild ? message.guild.name : 'Sector Privado (DM)';
         const casoIdGenerado = 'OSINT_' + Math.random().toString(36).substring(2, 9).toUpperCase();
 
-        // Ingesta silenciosa en el expediente OSINT (Se anexa a La Biblioteca)
         await database.ficharInfractor(
             message.author.id,
             message.author.tag,
@@ -47,19 +46,17 @@ async function ejecutar(message) {
             servidorOrigen
         );
 
+        // EXTRACCIÓN DE CACHÉ LOCAL
         let contextoDialogo = "";
-        try {
-            const historial = await message.channel.messages.fetch({ limit: 2, before: message.id });
-            const ordenados = historial.sort((a, b) => a.createdTimestamp - b.createdTimestamp);
-            
-            ordenados.forEach(msg => {
-                const nombreLimpio = msg.author.username.replace(/_/g, '\\_');
-                contextoDialogo += `**${nombreLimpio}**: ${msg.content}\n`;
+        if (contextoCache && contextoCache.length > 0) {
+            contextoCache.forEach(msg => {
+                const nombreLimpio = msg.authorTag.replace(/_/g, '\\_');
+                const marcador = msg.authorId === message.author.id && msg.content === message.content ? "🎯" : "";
+                contextoDialogo += `**${nombreLimpio}**: ${msg.content} ${marcador}\n`;
             });
-        } catch (e) { } // Operación pasiva tolerante a fallos
-        
-        const autorLimpio = message.author.username.replace(/_/g, '\\_');
-        contextoDialogo += `**${autorLimpio}**: ${message.content} 🎯`;
+        } else {
+            contextoDialogo = `**${message.author.tag}**: ${message.content} 🎯`;
+        }
 
         const creacionCuentaUnix = Math.floor(message.author.createdTimestamp / 1000);
         const avatarURL = message.author.displayAvatarURL({ format: 'png', dynamic: true, size: 128 });
