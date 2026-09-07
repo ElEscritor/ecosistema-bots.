@@ -14,84 +14,70 @@ function iniciar() {
         const b64auth = (req.headers.authorization || '').split(' ')[1] || '';
         const [login, password] = Buffer.from(b64auth, 'base64').toString().split(':');
         const adminPass = process.env.PANEL_PASSWORD;
-        if (!adminPass) return res.status(500).send('ERROR: PANEL_PASSWORD no configurado.');
+
+        if (!adminPass) return res.status(500).send('ERROR: Configura PANEL_PASSWORD en Render.');
         if (login === 'admin' && password === adminPass) return next();
-        res.set('WWW-Authenticate', 'Basic realm="La Biblioteca - Acceso Restringido"');
+        
+        res.set('WWW-Authenticate', 'Basic realm="La Biblioteca"');
         res.status(401).send('Acceso denegado.');
     };
 
-    // Ruta Principal que sirve el HTML de La Biblioteca
-    app.get('/panel', bloqueoSeguridad, (req, res) => {
+    // Servir la interfaz gráfica principal
+    app.get(['/', '/panel'], bloqueoSeguridad, (req, res) => {
         res.sendFile(path.join(__dirname, 'panel.html'));
     });
 
-    // API: Datos del Dashboard (Gráficos)
-    app.get('/api/stats', bloqueoSeguridad, async (req, res) => {
-        try {
-            const infractores = await database.obtenerExpedientes();
-            let comandos = 0, raids = 0, orgs = 0, links = 0;
-            let totalInfracciones = 0;
-
-            infractores.forEach(inf => {
-                if (inf.historial) {
-                    inf.historial.forEach(delito => {
-                        totalInfracciones++;
-                        const accion = delito.accion.toLowerCase();
-                        if (accion.includes('comando')) comandos++;
-                        else if (accion.includes('raid') || accion.includes('dox') || accion.includes('nuke')) raids++;
-                        else if (accion.includes('link') || accion.includes('distribución')) links++;
-                        else orgs++;
-                    });
-                }
-            });
-
-            res.json({
-                totalIds: infractores.length,
-                totalCapturas: totalInfracciones,
-                distribucion: [comandos, raids, orgs, links]
-            });
-        } catch (error) { res.status(500).json({ error: 'Fallo al procesar métricas' }); }
-    });
-
-    // API: Obtener toda la Blacklist
-    app.get('/api/blacklist', bloqueoSeguridad, async (req, res) => {
+    // API: Suministro de datos globales para el Dashboard y las Tablas
+    app.get('/api/datos', bloqueoSeguridad, async (req, res) => {
         try {
             const infractores = await database.obtenerExpedientes();
             res.json(infractores);
-        } catch (error) { res.status(500).json({ error: 'Fallo al leer la blacklist' }); }
+        } catch (error) { res.status(500).json({ error: 'Fallo al leer la base de datos' }); }
     });
 
-    // API: Actualizar Notas de Perfilado (Expedientes)
-    app.post('/api/expediente/nota', bloqueoSeguridad, async (req, res) => {
+    // API: Inyección de notas OSINT desde el panel frontal
+    app.post('/api/notas', bloqueoSeguridad, async (req, res) => {
         try {
             const { userId, nota } = req.body;
-            // Se requiere actualizar database.js para soportar la inyección de notas personalizadas
-            await database.actualizarNota(userId, nota); 
+            await database.actualizarNotaOSINT(userId, nota);
             res.json({ success: true });
         } catch (error) { res.status(500).json({ error: 'Fallo al guardar la nota' }); }
     });
 
-    // API: Exportación JSON con formato estandarizado UBFB[cite: 4]
+    // API: Eliminación de expedientes
+    app.post('/api/eliminar', bloqueoSeguridad, async (req, res) => {
+        try {
+            const { userId } = req.body;
+            await database.eliminarExpediente(userId);
+            res.json({ success: true });
+        } catch (error) { res.status(500).json({ error: 'Fallo al eliminar expediente' }); }
+    });
+
+    // API: Motor de Exportación UBFB-JSON
     app.get('/panel/exportar/ubfb', bloqueoSeguridad, async (req, res) => {
         try {
             const infractores = await database.obtenerExpedientes();
             
-            const ubfbFormat = infractores.map(inf => {
-                let lastAction = "Desconocida";
+            const exportacionUBFB = infractores.map(inf => {
+                let razonPrincipal = "Comportamiento Hostil";
                 if (inf.historial && inf.historial.length > 0) {
-                    lastAction = inf.historial[inf.historial.length - 1].accion;
+                    const ultimaAccion = inf.historial[inf.historial.length - 1].accion.toLowerCase();
+                    if (ultimaAccion.includes('raid') || ultimaAccion.includes('nuke')) razonPrincipal = "Raider";
+                    else if (ultimaAccion.includes('link')) razonPrincipal = "Spam al md";
+                    else if (ultimaAccion.includes('dox')) razonPrincipal = "Dox";
+                    else if (ultimaAccion.includes('estafa')) razonPrincipal = "Estafa";
+                    else if (ultimaAccion.includes('squad')) razonPrincipal = "Miembro de una squad";
                 }
                 
-                // Mapeo exacto basado en la estructura UBFB[cite: 4]
                 return {
                     id: inf.userId,
-                    reason: lastAction,
-                    punishmentDays: 365,
+                    reason: razonPrincipal,
+                    punishmentDays: razonPrincipal === "Dox" ? null : 180,
                     status: "Activo",
                     authorId: "0",
-                    authorUsername: "La Biblioteca (Panóptico)",
+                    authorUsername: "La Biblioteca (Inteligencia)",
                     intermediaryId: "0",
-                    intermediaryUsername: "La Biblioteca (Panóptico)",
+                    intermediaryUsername: "Sistema Automatizado",
                     proofs: [],
                     createdAt: inf.primerFichaje || new Date().toISOString(),
                     updatedAt: new Date().toISOString()
@@ -99,12 +85,12 @@ function iniciar() {
             });
 
             res.header('Content-Type', 'application/json');
-            res.attachment(`UBFB_Blacklist_Export_${new Date().toISOString().split('T')[0]}.json`);
-            res.send(JSON.stringify(ubfbFormat, null, 2));
+            res.attachment(`UBFB_Blacklist_${new Date().toISOString().split('T')[0]}.json`);
+            res.send(JSON.stringify(exportacionUBFB, null, 2));
         } catch (error) { res.status(500).send('Error procesando el JSON UBFB.'); }
     });
 
-    app.listen(PORT, () => console.log(`[LA BIBLIOTECA] Interfaz C4ISR activa en puerto ${PORT}`));
+    app.listen(PORT, () => console.log(`[LA BIBLIOTECA] C4ISR operativo en puerto ${PORT}`));
 }
 
 module.exports = { iniciar };
