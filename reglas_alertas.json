@@ -1,7 +1,7 @@
 [
   {
     "id_regla": "Scan Word-Raid",
-    "patron": "(raid|ddos|dox|raidear|IP|nuke|nukear|tirar el server|destruir el servidor)",
+    "patron": "\\b(raid|ddos|dox|doxear|raidear|nuke|nukear|tirar el server|destruir el servidor|botnet|token grabber)\\b",
     "severidad": "CRITICO",
     "colorHex": 16711680,
     "webhookDestino": "WEBHOOK_Raids",
@@ -9,7 +9,7 @@
   },
   {
     "id_regla": "Scan-LinkSend",
-    "patron": "(discord\\.gg\\/[a-zA-Z0-9]+|discord\\.com\\/invite\\/[a-zA-Z0-9]+)",
+    "patron": "(https?:\\/\\/)?(www\\.)?(discord\\.(gg|io|me|li)|discordapp\\.com\\/invite|discord\\.com\\/invite)\\/[a-zA-Z0-9]+",
     "severidad": "ADVERTENCIA",
     "colorHex": 16753920,
     "webhookDestino": "WEBHOOK_Links",
@@ -17,7 +17,7 @@
   },
   {
     "id_regla": "Scan Palabra-Clave",
-    "patron": "(xn|rz|squad|redencion escarlata|routem zar|escritor|Rz|el escritor|serdan|alianza)",
+    "patron": "\\b(xn|rz|squad|redencion escarlata|routem zar|escritor|el escritor|serdan|alianza)\\b",
     "severidad": "INFORMATIVO",
     "colorHex": 3447003,
     "webhookDestino": "WEBHOOK_Org",
