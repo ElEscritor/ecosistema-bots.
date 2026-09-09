@@ -11,6 +11,7 @@ const moduloSquads = require('./modulos/modulo_squads.js');
 const moduloRaids = require('./modulos/modulo_raids.js');
 const moduloLinks = require('./modulos/modulo_links.js');
 const moduloOrg = require('./modulos/modulo_org.js');
+const moduloOsint = require('./modulos/modulo_osint.js'); // NUEVA IMPORTACIÓN
 
 // Resolución de rutas de seguridad
 const whitelistPath = path.join(__dirname, 'whitelist_usuarios.json');
