@@ -4,7 +4,7 @@ const database = require('../database.js');
 
 const app = express();
 const PUERTO = process.env.PORT || 3000;
-const PASSWORD = process.env.PANEL_PASSWORD;
+const PASSWORD = 1930;
 
 // Configuración para procesar JSON y servir la carpeta actual (web) como recursos estáticos
 app.use(express.json());
