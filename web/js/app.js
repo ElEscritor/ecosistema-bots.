@@ -3,12 +3,13 @@
    Archivo: js/app.js
    ========================================================================== */
 
-window.C4ISR_Views = {};
+window.C4ISR_Views = window.C4ISR_Views || {};
 
 const AppController = {
     elements: {
         loginModal: document.getElementById('login-modal'),
         loginForm: document.getElementById('login-form'),
+        loginError: document.getElementById('login-error'),
         passwordInput: document.getElementById('admin-password'),
         appWrapper: document.getElementById('app-wrapper'),
         spaRoot: document.getElementById('spa-root'),
@@ -27,14 +28,31 @@ const AppController = {
     },
 
     bindEvents() {
-        this.elements.loginForm.addEventListener('submit', (e) => {
+        this.elements.loginForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             const password = this.elements.passwordInput.value.trim();
             if (!password) return;
 
-            // APERTURA FORZADA: Guardamos la clave y bajamos el muro sin consultar a la base de datos
-            C4ISR_API.sessionKey = password;
-            this.unlockSystem();
+            const btn = e.target.querySelector('button');
+            const originalText = btn.textContent;
+            btn.textContent = 'AUTENTICANDO...';
+            btn.disabled = true;
+
+            try {
+                const isAuthenticated = await C4ISR_API.authenticate(password);
+                if (isAuthenticated) {
+                    this.unlockSystem();
+                } else {
+                    this.showLoginError("[!] ERROR: CREDENCIALES INVÁLIDAS. ENLACE DENEGADO.");
+                }
+            } catch (error) {
+                console.error("[AppController] Error de conexión:", error);
+                this.showLoginError(`[!] FALLO CRÍTICO: El servidor no responde o MongoDB está inactivo.`);
+            } finally {
+                btn.textContent = originalText;
+                btn.disabled = false;
+                this.elements.passwordInput.value = '';
+            }
         });
 
         this.elements.btnLogout.addEventListener('click', () => {
@@ -51,9 +69,19 @@ const AppController = {
         });
     },
 
+    showLoginError(mensaje) {
+        this.elements.loginError.textContent = mensaje;
+        this.elements.loginError.classList.remove('hidden');
+        this.elements.loginForm.style.transform = 'translateX(-10px)';
+        setTimeout(() => this.elements.loginForm.style.transform = 'translateX(10px)', 50);
+        setTimeout(() => this.elements.loginForm.style.transform = 'translateX(0)', 100);
+    },
+
     unlockSystem() {
         this.elements.loginModal.classList.remove('active');
+        this.elements.loginError.classList.add('hidden');
         this.elements.appWrapper.classList.remove('hidden');
+        
         this.navigate('dashboard');
     },
 
@@ -62,7 +90,7 @@ const AppController = {
         C4ISR_API.sessionKey = null;
         this.elements.appWrapper.classList.add('hidden');
         this.elements.loginModal.classList.add('active');
-        this.elements.passwordInput.value = '';
+        this.elements.passwordInput.focus();
     },
 
     async navigate(viewName) {
@@ -75,19 +103,21 @@ const AppController = {
             this.elements.currentPathDisplay.textContent = activeItem.querySelector('.nav-label').textContent.toUpperCase();
         }
 
-        this.elements.spaRoot.innerHTML = '<div style="color: var(--accent-cyan);">[ SISTEMA ] CARGANDO MÓDULO...</div>';
+        this.elements.spaRoot.innerHTML = '<div style="color: var(--accent-cyan); font-family: var(--font-mono);">[ SISTEMA ] CARGANDO MÓDULO...</div>';
         
         const ViewModule = window.C4ISR_Views[viewName];
         
         if (ViewModule) {
             try {
-                this.elements.spaRoot.innerHTML = ''; 
+                // Si la vista falla al renderizar, el catch atrapará el error de inmediato
                 await ViewModule.render(this.elements.spaRoot);
                 this.currentViewName = viewName;
             } catch (error) {
-                console.error(`Fallo render:`, error);
-                this.elements.spaRoot.innerHTML = `<div class="login-error" style="display:block;">[!] ERROR DE CONEXIÓN A LA BASE DE DATOS.</div>`;
+                console.error(`[AppController] Fallo al renderizar la vista ${viewName}:`, error);
+                this.elements.spaRoot.innerHTML = `<div class="login-error" style="display:block;">[!] ERROR DE SISTEMA: EL MÓDULO DE DATOS SUFRIÓ UN COLAPSO Y NO PUDO RENDERIZAR.</div>`;
             }
+        } else {
+            this.elements.spaRoot.innerHTML = `<div class="login-error" style="display:block;">[!] MÓDULO NO ENCONTRADO O NO INYECTADO: ${viewName.toUpperCase()}</div>`;
         }
     },
 
@@ -112,4 +142,6 @@ const AppController = {
     }
 };
 
-document.addEventListener('DOMContentLoaded', () => AppController.init());
+document.addEventListener('DOMContentLoaded', () => {
+    AppController.init();
+});
