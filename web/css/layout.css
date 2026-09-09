@@ -364,3 +364,68 @@
 .hidden {
     display: none !important;
 }
+
+/* --- ADAPTABILIDAD MÓVIL (PORT) --- */
+@media screen and (max-width: 768px) {
+    .app-wrapper {
+        flex-direction: column;
+    }
+    
+    .tactical-sidebar {
+        width: 100%;
+        height: auto;
+        flex-direction: row;
+        justify-content: space-between;
+        overflow-x: auto;
+        padding: 0.5rem;
+        border-right: none;
+        border-bottom: var(--border-thin);
+    }
+    
+    .sidebar-header {
+        border-bottom: none;
+        padding: 0 1rem;
+    }
+    
+    .logo-text {
+        color: var(--accent-rz);
+        text-shadow: var(--glow-rz);
+        display: none; /* Oculta el texto en móviles para priorizar iconos */
+    }
+    
+    .nav-menu {
+        display: flex;
+        flex-direction: row;
+        padding: 0;
+        overflow-y: hidden;
+    }
+    
+    .nav-item {
+        padding: 0.5rem 1rem;
+        border-left: none;
+        border-bottom: 3px solid transparent;
+    }
+    
+    .nav-item.active {
+        border-left: none;
+        border-bottom: 3px solid var(--accent-rz);
+        box-shadow: inset 0 -5px 10px -5px rgba(255, 42, 109, 0.3);
+    }
+    
+    .nav-label, .system-status {
+        display: none; /* Interfaz de solo iconos en móvil */
+    }
+    
+    .nav-icon {
+        margin-right: 0;
+        font-size: 1.3rem;
+    }
+    
+    .main-content {
+        height: calc(100vh - 70px);
+    }
+    
+    .topbar {
+        padding: 0 1rem;
+    }
+}
