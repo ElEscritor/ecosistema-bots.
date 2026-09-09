@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>La Biblioteca // C4ISR Command Center</title>
+
+    <!-- Tipografías Tácticas (Google Fonts) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+
+    <!-- Dependencias Externas (CDN) -->
+    <!-- ApexCharts para la telemetría C4ISR -->
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+    <!-- DOMPurify para saneamiento forense contra ataques XSS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
+
+    <!-- Hojas de Estilo Estructuradas (CSS Puro) -->
+    <link rel="stylesheet" href="css/variables.css">
+    <link rel="stylesheet" href="css/layout.css">
+    <link rel="stylesheet" href="css/modulos.css">
+</head>
+<body>
+    <!-- PANTALLA DE AUTENTICACIÓN (Bloquea el acceso al sistema) -->
+    <div id="login-modal" class="login-overlay active">
+        <div class="scanlines"></div>
+        <div class="login-panel">
+            <div class="login-header">
+                <h1 class="glitch-title" data-text="C4ISR_TERMINAL">C4ISR_TERMINAL</h1>
+                <p class="login-subtitle">SISTEMA DE VIGILANCIA PASIVA // ACCESO RESTRINGIDO</p>
+            </div>
+            
+            <form id="login-form">
+                <div class="input-group">
+                    <label for="admin-password">AUTH_KEY_</label>
+                    <input type="password" id="admin-password" autocomplete="off" placeholder="Ingrese clave maestra..." required>
+                </div>
+                <button type="submit" class="btn-cyber">INICIALIZAR ENLACE</button>
+            </form>
+            
+            <div id="login-error" class="login-error hidden">
+                [!] ERROR: CREDENCIALES INVÁLIDAS. ENLACE DENEGADO.
+            </div>
+        </div>
+    </div>
+
+    <!-- ESTRUCTURA PRINCIPAL DE LA APLICACIÓN SPA -->
+    <div id="app-wrapper" class="app-wrapper hidden">
+        
+        <!-- BARRA LATERAL TÁCTICA -->
+        <nav class="tactical-sidebar">
+            <div class="sidebar-header">
+                <div class="logo-container">
+                    <span class="logo-icon">👁️</span>
+                </div>
+                <span class="logo-text">PANÓPTICO</span>
+            </div>
+
+            <ul class="nav-menu" id="main-nav">
+                <li class="nav-item active" data-view="dashboard">
+                    <span class="nav-icon">📊</span>
+                    <span class="nav-label">Telemetría</span>
+                </li>
+                <li class="nav-item" data-view="expedientes">
+                    <span class="nav-icon">📂</span>
+                    <span class="nav-label">Expedientes OSINT</span>
+                </li>
+                <li class="nav-item" data-view="links">
+                    <span class="nav-icon">🔗</span>
+                    <span class="nav-label">LinksPortal</span>
+                </li>
+                <li class="nav-item" data-view="blacklist">
+                    <span class="nav-icon">☠️</span>
+                    <span class="nav-label">Blacklist Total</span>
+                </li>
+            </ul>
+
+            <div class="sidebar-footer">
+                <div class="system-status">
+                    <span class="status-dot online"></span>
+                    <span class="status-text">SISTEMA EN LÍNEA</span>
+                </div>
+                <button id="btn-logout" class="btn-logout">
+                    <span class="nav-icon">⏻</span>
+                    <span class="nav-label">Desconectar</span>
+                </button>
+            </div>
+        </nav>
+
+        <!-- CONTENEDOR PRINCIPAL (ZONA DE TRABAJO) -->
+        <main class="main-content">
+            <!-- CABECERA SUPERIOR -->
+            <header class="topbar">
+                <div class="breadcrumbs">
+                    <span class="path-root">C:\SYS\ROOT</span>
+                    <span class="separator">&gt;</span>
+                    <span id="current-path" class="path-current">TELEMETRIA</span>
+                    <span class="cursor-blink">_</span>
+                </div>
+                <div class="topbar-actions">
+                    <span class="terminal-clock" id="system-clock">00:00:00</span>
+                </div>
+            </header>
+
+            <!-- RAÍZ DE LA SPA: AQUÍ SE INYECTA EL DOM DINÁMICO -->
+            <section id="spa-root" class="view-container">
+                <!-- El contenido será cargado por app.js -->
+            </section>
+        </main>
+    </div>
+
+    <!-- Carga de Scripts Modulares de la Arquitectura -->
+    <!-- 1. Vistas (Lógica de renderizado por módulo) -->
+    <script src="js/vistas/dashboard.js"></script>
+    <script src="js/vistas/expedientes.js"></script>
+    <script src="js/vistas/links.js"></script>
+    <script src="js/vistas/blacklist.js"></script>
+    
+    <!-- 2. Core (Motor y conexiones) -->
+    <script src="js/api.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
