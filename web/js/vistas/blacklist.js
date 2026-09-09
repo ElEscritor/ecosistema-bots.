@@ -1,38 +1,51 @@
 /* ==========================================================================
-   VISTA: BLACKLIST TOTAL (REGISTRO DISCIPLINARIO)
+   VISTA: BLACKLIST TOTAL (CON SIMULADOR DISCORD FORENSE Y PAGINACIÓN)
    Archivo: js/vistas/blacklist.js
-   Objetivo: Tabla matriz de infractores, purga permanente y exportación JSON
    ========================================================================== */
-
 window.C4ISR_Views = window.C4ISR_Views || {};
 
 window.C4ISR_Views.blacklist = {
+    // Controladores de estado local para la memoria dinámica
+    fullData: [],
+    filteredData: [],
+    currentPage: 1,
+    pageSize: 15,
+
     async render(container) {
-        // 1. Inyectar esqueleto de la vista con el botón de exportación en la cabecera
+        // 1. Inyectar esqueleto estructural con herramientas de filtrado
         container.innerHTML = `
-            <div class="panel-header" style="margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: center;">
-                <span class="panel-title" style="font-size: 1.2rem; color: var(--accent-red); text-shadow: var(--glow-red);">REGISTRO DISCIPLINARIO (BLACKLIST)</span>
+            <div class="panel-header" style="margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+                <span class="panel-title" style="font-size: 1.2rem; color: var(--accent-red); text-shadow: var(--glow-red);">REGISTRO DISCIPLINARIO FORENSE (BLACKLIST)</span>
                 
                 <button id="btn-export-json" class="btn-export" title="Descargar base de datos forense">
                     <span style="font-size: 1.2rem;">📥</span> EXPORTAR MATRIZ JSON
                 </button>
             </div>
             
+            <div class="toolbar-tactical">
+                <input type="text" id="blacklist-search" class="search-input" placeholder="🔍 Buscar por ID, Alias o palabra clave..." autocomplete="off">
+                
+                <div style="display:flex; gap: 1rem; align-items: center;">
+                    <button id="btn-prev" class="btn-action" title="Página Anterior">◀ ANTERIOR</button>
+                    <span id="page-indicator" style="font-family: var(--font-mono); color: var(--accent-rz); font-weight: bold; min-width: 80px; text-align: center;">PÁG 1 / 1</span>
+                    <button id="btn-next" class="btn-action" title="Página Siguiente">SIGUIENTE ▶</button>
+                </div>
+            </div>
+
             <div class="table-responsive">
                 <table class="matrix-table">
                     <thead>
                         <tr>
                             <th>IDENTIDAD DE RED</th>
-                            <th>REINCIDENCIA</th>
-                            <th>EVIDENCIA (SANEADA)</th>
-                            <th>FECHA INTERCEPCIÓN</th>
-                            <th style="text-align: right;">PROTOCOLO</th>
+                            <th>NIVEL</th>
+                            <th style="width: 50%;">RECREACIÓN FORENSE DEL EVENTO</th>
+                            <th style="text-align: right;">ACCIÓN DE PURGA</th>
                         </tr>
                     </thead>
                     <tbody id="blacklist-tbody">
                         <tr>
-                            <td colspan="5" style="text-align: center; color: var(--accent-cyan); font-family: var(--font-mono); padding: 2rem;">
-                                <span class="cursor-blink">_</span> SINCRONIZANDO CON NÚCLEO...
+                            <td colspan="4" style="text-align: center; color: var(--accent-cyan); font-family: var(--font-mono); padding: 2rem;">
+                                <span class="cursor-blink">_</span> SINCRONIZANDO MATRIZ DE DEFENSA...
                             </td>
                         </tr>
                     </tbody>
@@ -40,133 +53,182 @@ window.C4ISR_Views.blacklist = {
             </div>
         `;
 
-        // 2. Activar listener del botón de exportación antes de la carga asíncrona
-        this.bindExportEvent();
-
-        // 3. Obtener y renderizar los datos de la matriz
+        this.bindEvents();
         await this.loadData();
+    },
+
+    bindEvents() {
+        const searchInput = document.getElementById('blacklist-search');
+        const btnPrev = document.getElementById('btn-prev');
+        const btnNext = document.getElementById('btn-next');
+        const btnExport = document.getElementById('btn-export-json');
+
+        // Búsqueda en tiempo real
+        if (searchInput) {
+            searchInput.addEventListener('input', (e) => {
+                const term = e.target.value.toLowerCase();
+                this.filteredData = this.fullData.filter(item => 
+                    item.username.toLowerCase().includes(term) || 
+                    item.id.includes(term) || 
+                    item.evidencia.toLowerCase().includes(term)
+                );
+                this.currentPage = 1; // Reinicia a la primera página tras filtrar
+                this.renderTable();
+            });
+        }
+
+        // Paginación: Anterior
+        if (btnPrev) {
+            btnPrev.addEventListener('click', () => {
+                if (this.currentPage > 1) {
+                    this.currentPage--;
+                    this.renderTable();
+                }
+            });
+        }
+
+        // Paginación: Siguiente
+        if (btnNext) {
+            btnNext.addEventListener('click', () => {
+                const maxPage = Math.ceil(this.filteredData.length / this.pageSize);
+                if (this.currentPage < maxPage) {
+                    this.currentPage++;
+                    this.renderTable();
+                }
+            });
+        }
+
+        // Exportación de Base de Datos
+        if (btnExport) {
+            btnExport.addEventListener('click', async () => {
+                const originalHTML = btnExport.innerHTML;
+                btnExport.innerHTML = '<span class="cursor-blink">_</span> COMPILANDO...';
+                btnExport.style.pointerEvents = 'none';
+
+                try {
+                    const blob = await C4ISR_API.exportarBaseDatos();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.style.display = 'none';
+                    a.href = url;
+                    const fechaGeneracion = new Date().toISOString().replace(/[:.]/g, '-');
+                    a.download = `BLACKLIST_C4ISR_${fechaGeneracion}.json`;
+                    
+                    document.body.appendChild(a);
+                    a.click();
+                    
+                    window.URL.revokeObjectURL(url);
+                    a.remove();
+                } catch (error) {
+                    console.error("[Blacklist] Fallo en exportación:", error);
+                    alert("[!] C4ISR_SYS_ERROR: Servidor denegó la descarga.");
+                } finally {
+                    btnExport.innerHTML = originalHTML;
+                    btnExport.style.pointerEvents = 'auto';
+                }
+            });
+        }
     },
 
     async loadData() {
         const tbody = document.getElementById('blacklist-tbody');
-        
         try {
             const datos = await C4ISR_API.getDatosGlobales();
-            const blacklist = datos.blacklist || [];
-
-            if (blacklist.length === 0) {
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 3rem;">
-                            [ SISTEMA SEGURO ] NO SE DETECTAN AMENAZAS EN EL REGISTRO ACTUAL.
-                        </td>
-                    </tr>
-                `;
-                return;
-            }
-
-            let filasHTML = '';
-
-            blacklist.forEach(infractor => {
-                // Saneamiento riguroso de cada celda contra XSS
-                const id = DOMPurify.sanitize(infractor.id || 'N/A');
-                const username = DOMPurify.sanitize(infractor.username || 'USUARIO_DESCONOCIDO');
-                const nivelReincidencia = parseInt(infractor.reincidencia) || 1;
-                const evidencia = DOMPurify.sanitize(infractor.evidencia || '[ SIN CONTEXTO CRÍTICO ]');
-                const fecha = DOMPurify.sanitize(infractor.fecha || 'DESCONOCIDA');
-
-                // Lógica térmica para insignias de nivel de amenaza
-                let claseBadge = 'badge-green';
-                let esCritico = '';
-                
-                if (nivelReincidencia === 1) {
-                    claseBadge = 'badge-amber';
-                } else if (nivelReincidencia >= 2) {
-                    claseBadge = 'badge-red';
-                    esCritico = 'critical'; // Activa el hover rojo intenso definido en modulos.css
-                }
-
-                filasHTML += `
-                    <tr id="row-${id}" class="${esCritico}">
-                        <td style="font-family: var(--font-mono);">
-                            <div style="color: var(--text-main); font-weight: bold; font-size: 1rem;">${username}</div>
-                            <div style="color: var(--text-muted); font-size: 0.75rem;">UID: ${id}</div>
-                        </td>
-                        <td>
-                            <span class="badge ${claseBadge}">NIVEL ${nivelReincidencia}</span>
-                        </td>
-                        <td style="max-width: 300px;">
-                            <div style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); font-size: 0.85rem; color: var(--text-main);" title="${evidencia}">
-                                ${evidencia}
-                            </div>
-                        </td>
-                        <td style="color: var(--text-muted); font-family: var(--font-mono); font-size: 0.85rem;">
-                            ${fecha}
-                        </td>
-                        <td style="text-align: right;">
-                            <button class="btn-action btn-purge" data-id="${id}" title="Eliminar registro permanentemente">
-                                PURGAR
-                            </button>
-                        </td>
-                    </tr>
-                `;
-            });
-
-            tbody.innerHTML = filasHTML;
-
-            // 4. Activar listeners de los botones de purga inyectados
-            this.bindPurgeEvents();
-
+            this.fullData = datos.blacklist || [];
+            this.filteredData = [...this.fullData]; // Clon inicial para el filtrado
+            
+            this.renderTable();
         } catch (error) {
-            console.error("[Blacklist] Error al recuperar registros disciplinarios:", error);
+            console.error("[Blacklist] Error de desincronización:", error);
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="5" style="text-align: center; color: var(--accent-red); padding: 2rem; font-weight: bold;">
-                        [!] ERROR DE LECTURA: CORRUPCIÓN EN EL ENLACE CON LA BASE DE DATOS.
+                    <td colspan="4" style="text-align: center; color: var(--accent-red); padding: 2rem; font-weight: bold;">
+                        [!] ERROR DE LECTURA: CORRUPCIÓN EN EL ENLACE DE RED CON EL ENJAMBRE.
                     </td>
                 </tr>
             `;
         }
     },
 
-    bindExportEvent() {
-        const btnExport = document.getElementById('btn-export-json');
-        if (!btnExport) return;
+    renderTable() {
+        const tbody = document.getElementById('blacklist-tbody');
+        const indicator = document.getElementById('page-indicator');
+        
+        if (!tbody || !indicator) return;
 
-        btnExport.addEventListener('click', async () => {
-            const originalHTML = btnExport.innerHTML;
-            btnExport.innerHTML = '<span class="cursor-blink">_</span> COMPILANDO...';
-            btnExport.style.pointerEvents = 'none';
+        if (this.filteredData.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="4" style="text-align: center; color: var(--text-muted); padding: 3rem;">
+                        [ SISTEMA SEGURO ] NO SE DETECTAN AMENAZAS QUE COINCIDAN CON LOS CRITERIOS.
+                    </td>
+                </tr>
+            `;
+            indicator.textContent = `PÁG 0 / 0`;
+            return;
+        }
 
-            try {
-                // Solicita el archivo binario al endpoint
-                const blob = await C4ISR_API.exportarBaseDatos();
-                
-                // Crea una URL temporal en memoria y fuerza la descarga HTML5
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.style.display = 'none';
-                a.href = url;
-                
-                // Generar nombre de archivo con marca de tiempo táctica
-                const fechaGeneracion = new Date().toISOString().replace(/[:.]/g, '-');
-                a.download = `C4ISR_DATABASE_EXPORT_${fechaGeneracion}.json`;
-                
-                document.body.appendChild(a);
-                a.click();
-                
-                // Limpieza de memoria
-                window.URL.revokeObjectURL(url);
-                a.remove();
-                
-            } catch (error) {
-                console.error("[Blacklist] Fallo en exportación de base de datos:", error);
-                alert("[!] C4ISR_SYS_ERROR: La descarga del volcado forense fue rechazada por el servidor.");
-            } finally {
-                btnExport.innerHTML = originalHTML;
-                btnExport.style.pointerEvents = 'auto';
-            }
+        const maxPage = Math.ceil(this.filteredData.length / this.pageSize);
+        indicator.textContent = `PÁG ${this.currentPage} / ${maxPage}`;
+
+        // Cálculo algorítmico del fragmento a mostrar
+        const start = (this.currentPage - 1) * this.pageSize;
+        const end = start + this.pageSize;
+        const paginatedData = this.filteredData.slice(start, end);
+
+        let html = '';
+
+        paginatedData.forEach(infractor => {
+            const id = DOMPurify.sanitize(infractor.id);
+            const username = DOMPurify.sanitize(infractor.username);
+            const evidenciaCruda = DOMPurify.sanitize(infractor.evidencia);
+            const servidorOrigen = DOMPurify.sanitize(infractor.servidor || 'Sector Desconocido');
+            const fechaOriginal = DOMPurify.sanitize(infractor.fecha);
+            
+            // Formateo estético de la fecha para el UI de Discord
+            const dateObj = new Date(fechaOriginal);
+            const fechaFormat = !isNaN(dateObj) ? dateObj.toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' }) : fechaOriginal;
+
+            const nivelReincidencia = parseInt(infractor.reincidencia) || 1;
+            const esCritico = nivelReincidencia >= 2 ? 'critical' : '';
+
+            // Construcción del Simulador Nativo de Discord (Forense)
+            const discordMock = `
+                <div class="discord-mock">
+                    <img src="https://cdn.discordapp.com/embed/avatars/0.png" alt="Avatar Genérico" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\\'http://www.w3.org/2000/svg\\' viewBox=\\'0 0 100 100\\'><circle cx=\\'50\\' cy=\\'50\\' r=\\'50\\' fill=\\'%232c2f33\\'/><text x=\\'50\\' y=\\'55\\' font-size=\\'40\\' fill=\\'%23ffffff\\' text-anchor=\\'middle\\' dominant-baseline=\\'middle\\'>?</text></svg>'">
+                    <div class="discord-mock-content">
+                        <div class="discord-mock-header">
+                            <span class="user">${username}</span>
+                            <span class="date">${fechaFormat} en ${servidorOrigen}</span>
+                        </div>
+                        <div class="discord-mock-body">${evidenciaCruda}</div>
+                    </div>
+                </div>
+            `;
+
+            html += `
+                <tr id="row-${id}" class="${esCritico}">
+                    <td style="font-family: var(--font-mono); min-width: 150px;">
+                        <div style="color: var(--text-main); font-weight: bold; font-size: 1rem;">${username}</div>
+                        <div style="color: var(--text-muted); font-size: 0.75rem;">UID: ${id}</div>
+                    </td>
+                    <td>
+                        <span class="badge badge-red" style="white-space: nowrap;">NIVEL ${nivelReincidencia}</span>
+                    </td>
+                    <td style="min-width: 350px;">
+                        ${discordMock}
+                    </td>
+                    <td style="text-align: right; min-width: 100px;">
+                        <button class="btn-action btn-purge" data-id="${id}" title="Eliminar registro permanentemente">
+                            PURGAR
+                        </button>
+                    </td>
+                </tr>
+            `;
         });
+
+        tbody.innerHTML = html;
+        this.bindPurgeEvents();
     },
 
     bindPurgeEvents() {
@@ -177,7 +239,6 @@ window.C4ISR_Views.blacklist = {
                 const targetId = e.target.getAttribute('data-id');
                 if (!targetId) return;
 
-                // Confirmación de seguridad estricta
                 const hasAuthorization = window.confirm(`[ ADVERTENCIA CRÍTICA ]\n\n¿Autoriza la eliminación permanente del registro UID: ${targetId}?\nEsta acción destruirá la evidencia forense asociada de manera irreversible.`);
                 if (!hasAuthorization) return;
 
@@ -190,7 +251,11 @@ window.C4ISR_Views.blacklist = {
                 try {
                     await C4ISR_API.eliminarInfractor(targetId);
                     
-                    // Efecto visual de desintegración
+                    // Eliminar lógicamente el dato de la memoria
+                    this.fullData = this.fullData.filter(i => i.id !== targetId);
+                    this.filteredData = this.filteredData.filter(i => i.id !== targetId);
+
+                    // Efecto visual y recarga de tabla
                     if (rowEl) {
                         rowEl.style.backgroundColor = 'rgba(255, 51, 51, 0.3)';
                         rowEl.style.boxShadow = 'var(--glow-red)';
@@ -198,17 +263,12 @@ window.C4ISR_Views.blacklist = {
                         rowEl.style.opacity = '0';
                         
                         setTimeout(() => {
-                            rowEl.remove();
-                            // Evaluar si la tabla quedó vacía para mostrar el mensaje de sistema limpio
-                            const tbody = document.getElementById('blacklist-tbody');
-                            if (tbody && tbody.children.length === 0) {
-                                tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 3rem;">[ SISTEMA SEGURO ] NO SE DETECTAN AMENAZAS EN EL REGISTRO ACTUAL.</td></tr>`;
-                            }
+                            this.renderTable(); // Re-renderiza para ajustar paginación automáticamente
                         }, 400);
                     }
                 } catch (error) {
-                    console.error("[Blacklist] Error de desincronización durante la purga:", error);
-                    alert(`[!] C4ISR_SYS_ERROR: Fallo al eliminar el registro ${targetId}. El servidor denegó la petición.`);
+                    console.error("[Blacklist] Error durante la purga:", error);
+                    alert(`[!] Fallo al eliminar el registro. El servidor denegó la petición.`);
                     e.target.textContent = originalText;
                     e.target.disabled = false;
                 }
@@ -217,6 +277,8 @@ window.C4ISR_Views.blacklist = {
     },
 
     destroy() {
-        // Espacio para liberación explícita de listeners globales si se hubieran añadido al document/window
+        // Liberación total de memoria al cambiar de módulo
+        this.fullData = [];
+        this.filteredData = [];
     }
 };
