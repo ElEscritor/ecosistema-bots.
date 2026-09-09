@@ -11,7 +11,7 @@ const moduloSquads = require('./modulos/modulo_squads.js');
 const moduloRaids = require('./modulos/modulo_raids.js');
 const moduloLinks = require('./modulos/modulo_links.js');
 const moduloOrg = require('./modulos/modulo_org.js');
-const moduloOsint = require('./modulos/modulo_osint.js'); // Módulo OSINT pasivo integrado
+const moduloOsint = require('./modulos/modulo_osint.js'); 
 
 // Resolución de rutas de seguridad
 const whitelistPath = path.join(__dirname, 'whitelist_usuarios.json');
@@ -22,10 +22,10 @@ const memoriaCooldown = new Set();
 const hashMensajesRecientes = new Set();
 const tokens = [];
 
-// Mapa para rastrear el estado del enjambre en tiempo real para el Dashboard
+// Mapa de telemetría para monitoreo web en vivo
 const exploradoresActivos = new Map();
 
-// 4. MEMORIA CACHÉ LOCAL
+// 4. MEMORIA CACHÉ LOCAL (Evade Rate Limits y Baneos de Discord)
 const cacheHistorialCanales = new Map();
 
 for (let i = 1; i <= 10; i++) {
@@ -41,12 +41,13 @@ if (tokens.length === 0) {
 
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
+// Mantenimiento de Memoria: Limpia canales inactivos para evitar fugas de RAM (Memory Leaks)
 setInterval(() => {
     if (cacheHistorialCanales.size > 1000) {
         cacheHistorialCanales.clear();
         console.log("[SISTEMA] Vaciado cíclico de memoria caché de canales ejecutado.");
     }
-}, 3600000); 
+}, 3600000); // Se ejecuta cada 1 hora
 
 // 5. PROTOCOLO DE DESPLIEGUE EN CASCADA
 async function iniciarEnjambre() {
@@ -61,19 +62,22 @@ async function iniciarEnjambre() {
         explorador.on('ready', () => {
             console.log(`[PANÓPTICO-${i+1}] Infiltración activa: ${explorador.user.tag}`);
             
-            // Registrar bot activo y notificar al servidor web
+            // Inyectar datos del bot al mapa de telemetría web
             exploradoresActivos.set(explorador.user.id, {
                 tag: explorador.user.tag,
                 id: explorador.user.id,
-                avatar: explorador.user.displayAvatarURL({ format: 'png', size: 64 }) || 'https://cdn.discordapp.com/embed/avatars/0.png'
+                avatar: explorador.user.displayAvatarURL({ format: 'png', size: 64 })
             });
+            // Enviar pulso de vida al servidor web
             servidorWeb.actualizarEnjambre(Array.from(exploradoresActivos.values()));
         });
 
         explorador.on('messageCreate', async (message) => {
+            // Reglas de Inmunidad Absoluta
             if (message.author.id === explorador.user.id || message.author.bot || message.system) return;
             if (whitelistUsuarios.includes(message.author.id)) return;
 
+            // Ingesta continua en Memoria Volátil Local (Caché de Contexto)
             if (!cacheHistorialCanales.has(message.channel.id)) {
                 cacheHistorialCanales.set(message.channel.id, []);
             }
@@ -85,22 +89,27 @@ async function iniciarEnjambre() {
                 createdTimestamp: message.createdTimestamp
             });
 
+            // Restricción de memoria: Solo se conservan los 5 mensajes más recientes por canal
             if (bufferCanal.length > 5) bufferCanal.shift();
 
+            // Verificación de Bloqueo por Cooldown
             if (memoriaCooldown.has(message.author.id)) return;
             const firmaMensaje = `${message.author.id}-${message.content}`;
             if (hashMensajesRecientes.has(firmaMensaje)) return;
 
             try {
                 let interceptadoPor = null;
+                // Pasamos el buffer local a los módulos para evitar que hagan peticiones HTTP a Discord
                 const contextoLocal = [...bufferCanal];
 
+                // Evaluación Asíncrona en Cascada
                 if (await moduloSquads.ejecutar(message, contextoLocal)) interceptadoPor = 'SQUADS';
                 else if (await moduloRaids.ejecutar(message, contextoLocal)) interceptadoPor = 'RAIDS';
                 else if (await moduloLinks.ejecutar(message)) interceptadoPor = 'LINKS';
                 else if (await moduloOrg.ejecutar(message, contextoLocal)) interceptadoPor = 'ORG';
-                else if (await moduloOsint.ejecutar(message, contextoLocal)) interceptadoPor = 'OSINT';
+                else if (await moduloOsint.ejecutar(message, contextoLocal)) interceptadoPor = 'OSINT'; 
 
+                // Aplicación de Cooldown Selectivo
                 if (interceptadoPor) {
                     if (interceptadoPor === 'LINKS' || interceptadoPor === 'SQUADS') {
                         memoriaCooldown.add(message.author.id);
@@ -110,6 +119,7 @@ async function iniciarEnjambre() {
                         setTimeout(() => hashMensajesRecientes.delete(firmaMensaje), 120000);
                     }
                 }
+
             } catch (error) {
                 console.error(`[ESCUDO DEFENSIVO] Fallo detectado en la matriz. Error: ${error.message}`);
             }
@@ -119,11 +129,14 @@ async function iniciarEnjambre() {
             await explorador.login(tokens[i]);
             if (i < tokens.length - 1) await delay(45000);
         } catch (e) {
-            console.error(`[FALLO DE INFILTRACIÓN] El token de la unidad ${i+1} ha sido revocado o es inválido.`);
-            // Si el token falla, nos aseguramos de limpiar su registro del mapa si existía
-            if (explorador.user) {
-                exploradoresActivos.delete(explorador.user.id);
-                servidorWeb.actualizarEnjambre(Array.from(exploradoresActivos.values()));
+            console.error(`[FALLO DE INFILTRACIÓN] El token de la unidad ${i+1} ha sido revocado.`);
+            // Si un token falla, lo eliminamos de la telemetría web para reflejar su caída
+            const targetTokenPart = tokens[i].split('.')[0];
+            for (let [id, botData] of exploradoresActivos.entries()) {
+                if (id === Buffer.from(targetTokenPart, 'base64').toString('ascii')) {
+                    exploradoresActivos.delete(id);
+                    servidorWeb.actualizarEnjambre(Array.from(exploradoresActivos.values()));
+                }
             }
         }
     }
