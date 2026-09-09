@@ -1,9 +1,9 @@
 /* ==========================================================================
-   MOTOR DE COMUNICACIÓN C4ISR (API REST)
+   MOTOR DE COMUNICACIÓN (API REST)
    Archivo: js/api.js
    ========================================================================== */
 
-const C4ISR_API = {
+window.C4ISR_API = {
     sessionKey: null,
 
     getHeaders() {
