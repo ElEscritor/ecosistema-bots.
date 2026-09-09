@@ -1,8 +1,17 @@
 /* ==========================================================================
-   VISTA: EXPEDIENTES OSINT (PERFILADO FORENSE Y BÚSQUEDA TÁCTICA)
+   VISTA: EXPEDIENTES OSINT (AUTO-CARGA Y PUENTE DE MEMORIA)
    Archivo: js/vistas/expedientes.js
    ========================================================================== */
 window.C4ISR_Views = window.C4ISR_Views || {};
+
+function formatDiscordDate(dateString) {
+    const dateObj = new Date(dateString);
+    if (isNaN(dateObj)) return dateString;
+    const now = new Date();
+    const timeString = dateObj.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+    if (dateObj.toDateString() === now.toDateString()) return `Hoy a las ${timeString}`;
+    return dateObj.toLocaleDateString('es-ES') + ` ${timeString}`;
+}
 
 window.C4ISR_Views.expedientes = {
     saveTimeout: null,
@@ -13,21 +22,16 @@ window.C4ISR_Views.expedientes = {
         container.innerHTML = `
             <div class="panel-header" style="margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
                 <span class="panel-title" style="font-size: 1.2rem; color: var(--accent-rz); text-shadow: var(--glow-rz);">BASE DE DATOS DE INTELIGENCIA (OSINT)</span>
-                
                 <div style="display: flex; gap: 1rem; align-items: center;">
-                    <button id="btn-add-target" class="btn-action" style="border-color: var(--accent-rz); color: var(--accent-rz);" title="Inyectar objetivo manual a la base de datos">
-                        + AÑADIR OBJETIVO
-                    </button>
-                    <button id="btn-import-targets" class="btn-action" title="Importar matriz de objetivos desde JSON">
-                        📄 IMPORTAR MATRIZ
-                    </button>
+                    <button id="btn-add-target" class="btn-action" style="border-color: var(--accent-rz); color: var(--accent-rz);">+ AÑADIR OBJETIVO</button>
+                    <button id="btn-import-targets" class="btn-action">📄 IMPORTAR MATRIZ</button>
                 </div>
             </div>
 
             <div style="position: relative; margin-bottom: 2rem; z-index: 50;">
                 <div style="display: flex; gap: 1rem; align-items: center; background: var(--bg-dark); border: var(--border-thin); padding: 0.5rem;">
                     <span style="color: var(--accent-rz); font-family: var(--font-mono); padding-left: 1rem;">[ RASTREO ]</span>
-                    <input type="text" id="osint-search" class="editor-textarea" style="border: none; box-shadow: none; padding: 0.5rem; height: auto;" placeholder="Ingresar UID, Alias o palabra clave para localizar expediente..." autocomplete="off">
+                    <input type="text" id="osint-search" class="editor-textarea" style="border: none; box-shadow: none; padding: 0.5rem; height: auto; font-size: 0.85rem;" placeholder="Ingresar UID, Alias o palabra clave para localizar expediente..." autocomplete="off">
                 </div>
                 <div id="osint-search-results" class="hidden" style="position: absolute; top: 100%; left: 0; width: 100%; max-height: 300px; overflow-y: auto; background: var(--bg-panel); border: var(--border-thin); border-top: none; box-shadow: 0 10px 30px rgba(0,0,0,0.8);"></div>
             </div>
@@ -38,7 +42,7 @@ window.C4ISR_Views.expedientes = {
                         <span class="panel-title" style="color: var(--accent-amber);">VOLCADO FORENSE (HISTORIAL CRUDO)</span>
                         <span id="osint-target-badge" class="badge badge-amber">ESPERANDO...</span>
                     </div>
-                    <div class="osint-content" id="osint-raw-logs" style="background: #1e1f22; padding: 1rem;"></div>
+                    <div class="osint-content" id="osint-raw-logs" style="background: transparent; padding: 1rem;"></div>
                 </div>
                 
                 <div class="osint-panel">
@@ -47,7 +51,7 @@ window.C4ISR_Views.expedientes = {
                         <span id="osint-save-status" class="save-status">[ SINCRONIZADO ]</span>
                     </div>
                     <div style="flex-grow: 1; padding: 0;">
-                        <textarea id="osint-notes-editor" class="editor-textarea" style="color: var(--text-main);" placeholder="[!] Ingrese datos del perfilado de la amenaza. El autoguardado se ejecutará silenciosamente tras 1 segundo de inactividad..."></textarea>
+                        <textarea id="osint-notes-editor" class="editor-textarea" style="color: var(--text-main);" placeholder="[!] Ingrese datos del perfilado de la amenaza. El autoguardado se ejecutará silenciosamente..."></textarea>
                     </div>
                 </div>
             </div>
@@ -56,8 +60,37 @@ window.C4ISR_Views.expedientes = {
         try {
             this.globalData = await C4ISR_API.getDatosGlobales();
             this.bindEvents();
+
+            // Lógica de Puente de Memoria (Redirección desde Blacklist)
+            if (window.C4ISR_TARGET_OVERRIDE) {
+                this.loadTargetWorkspace(window.C4ISR_TARGET_OVERRIDE);
+                window.C4ISR_TARGET_OVERRIDE = null; // Purgar variable tras el consumo
+            } else {
+                // Autocarga de los últimos expedientes por defecto
+                this.showRecentTargets();
+            }
         } catch (error) {
             container.innerHTML = `<div class="login-error" style="display:block;">[!] ERROR CRÍTICO: FALLO DE ENLACE OSINT.</div>`;
+        }
+    },
+
+    showRecentTargets() {
+        const searchResults = document.getElementById('osint-search-results');
+        const usuarios = this.globalData.blacklist || [];
+        
+        // Ordenar por fecha y tomar los 15 más recientes
+        const recientes = [...usuarios].sort((a, b) => new Date(b.fecha) - new Date(a.fecha)).slice(0, 15);
+        
+        if (recientes.length > 0) {
+            searchResults.innerHTML = `<div style="padding: 0.5rem 1rem; color: var(--text-muted); font-size: 0.75rem; border-bottom: 1px solid rgba(255,255,255,0.05); background: var(--bg-dark);">ÚLTIMOS PERFILES ACTUALIZADOS</div>`;
+            searchResults.innerHTML += recientes.map(u => `
+                <div class="nav-item search-item" data-id="${u.id}" style="padding: 0.8rem 1rem; border-bottom: 1px solid rgba(255,255,255,0.05); cursor: pointer;">
+                    <div style="font-weight: bold; color: var(--accent-rz); font-size: 0.9rem;">${DOMPurify.sanitize(u.username)}</div>
+                    <div style="font-size: 0.75rem; color: var(--text-muted);">UID: ${DOMPurify.sanitize(u.id)}</div>
+                </div>
+            `).join('');
+            searchResults.classList.remove('hidden');
+            this.bindSearchItems();
         }
     },
 
@@ -66,44 +99,32 @@ window.C4ISR_Views.expedientes = {
         const searchResults = document.getElementById('osint-search-results');
         const editor = document.getElementById('osint-notes-editor');
         const btnAdd = document.getElementById('btn-add-target');
-        const btnImport = document.getElementById('btn-import-targets');
 
-        // Búsqueda Predictiva
         searchInput.addEventListener('input', (e) => {
             const term = e.target.value.toLowerCase().trim();
-            if (term.length < 2) {
-                searchResults.classList.add('hidden');
+            if (term.length === 0) {
+                this.showRecentTargets();
                 return;
             }
 
             const usuarios = this.globalData.blacklist || [];
             const filtrados = usuarios.filter(u => 
                 (u.username && u.username.toLowerCase().includes(term)) || 
-                (u.id && u.id.includes(term)) ||
-                (u.evidencia && u.evidencia.toLowerCase().includes(term))
-            ).slice(0, 10);
+                (u.id && u.id.includes(term))
+            ).slice(0, 15);
 
             if (filtrados.length > 0) {
                 searchResults.innerHTML = filtrados.map(u => `
-                    <div class="nav-item search-item" data-id="${u.id}" style="padding: 1rem; border-bottom: 1px solid rgba(255,255,255,0.05);">
-                        <div style="font-weight: bold; color: var(--accent-rz);">${DOMPurify.sanitize(u.username)}</div>
-                        <div style="font-size: 0.8rem; color: var(--text-muted);">UID: ${DOMPurify.sanitize(u.id)}</div>
+                    <div class="nav-item search-item" data-id="${u.id}" style="padding: 0.8rem 1rem; border-bottom: 1px solid rgba(255,255,255,0.05); cursor: pointer;">
+                        <div style="font-weight: bold; color: var(--accent-rz); font-size: 0.9rem;">${DOMPurify.sanitize(u.username)}</div>
+                        <div style="font-size: 0.75rem; color: var(--text-muted);">UID: ${DOMPurify.sanitize(u.id)}</div>
                     </div>
                 `).join('');
-                searchResults.classList.remove('hidden');
-
-                document.querySelectorAll('.search-item').forEach(item => {
-                    item.addEventListener('click', () => {
-                        const targetId = item.getAttribute('data-id');
-                        searchInput.value = item.querySelector('div').textContent;
-                        searchResults.classList.add('hidden');
-                        this.loadTargetWorkspace(targetId);
-                    });
-                });
+                this.bindSearchItems();
             } else {
                 searchResults.innerHTML = `<div style="padding: 1rem; color: var(--text-muted);">Sin coincidencias en la matriz.</div>`;
-                searchResults.classList.remove('hidden');
             }
+            searchResults.classList.remove('hidden');
         });
 
         document.addEventListener('click', (e) => {
@@ -112,7 +133,6 @@ window.C4ISR_Views.expedientes = {
             }
         });
 
-        // Autoguardado OSINT
         editor.addEventListener('input', () => {
             if (!this.currentTargetId) return;
             this.updateSaveStatus('saving');
@@ -120,7 +140,6 @@ window.C4ISR_Views.expedientes = {
             this.saveTimeout = setTimeout(() => { this.saveNotes(this.currentTargetId, editor.value); }, 1000);
         });
 
-        // AÑADIR OBJETIVO MANUAL
         btnAdd.addEventListener('click', async () => {
             const newId = prompt("[ LA BIBLIOTECA ]\nIngrese el Discord UID del objetivo a vigilar:");
             if (newId && /^\d{17,20}$/.test(newId)) {
@@ -128,7 +147,6 @@ window.C4ISR_Views.expedientes = {
                     const originalText = btnAdd.innerHTML;
                     btnAdd.innerHTML = "EJECUTANDO...";
                     await C4ISR_API.agregarObjetivoManual(newId);
-                    // Recargar la vista para reflejar los datos actualizados
                     window.AppController.navigate('expedientes'); 
                 } catch (error) {
                     alert("[!] Error crítico de red al inyectar el UID en la base de datos.");
@@ -138,32 +156,19 @@ window.C4ISR_Views.expedientes = {
                 alert("[!] ERROR: Formato de UID inválido. Debe contener entre 17 y 20 dígitos numéricos.");
             }
         });
+    },
 
-        // IMPORTAR MATRIZ MASIVA (JSON)
-        btnImport.addEventListener('click', () => {
-            const input = document.createElement('input');
-            input.type = 'file';
-            input.accept = '.json';
-            input.onchange = async (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-                
-                const reader = new FileReader();
-                reader.onload = async (event) => {
-                    try {
-                        const jsonData = JSON.parse(event.target.result);
-                        btnImport.innerHTML = "PROCESANDO...";
-                        await C4ISR_API.importarMatriz(jsonData);
-                        // Recargar la vista
-                        window.AppController.navigate('expedientes');
-                    } catch(err) {
-                        alert("[!] ERROR: Archivo JSON corrupto o estructura incompatible.");
-                        btnImport.innerHTML = "📄 IMPORTAR MATRIZ";
-                    }
-                };
-                reader.readAsText(file);
-            };
-            input.click();
+    bindSearchItems() {
+        const searchInput = document.getElementById('osint-search');
+        const searchResults = document.getElementById('osint-search-results');
+        
+        document.querySelectorAll('.search-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const targetId = item.getAttribute('data-id');
+                searchInput.value = item.querySelector('div').textContent;
+                searchResults.classList.add('hidden');
+                this.loadTargetWorkspace(targetId);
+            });
         });
     },
 
@@ -186,23 +191,18 @@ window.C4ISR_Views.expedientes = {
 
             const username = DOMPurify.sanitize(user.username);
             const evidenciaCruda = DOMPurify.sanitize(user.evidencia || '[ SIN REGISTROS ACTIVOS ]');
-            const fechaOriginal = DOMPurify.sanitize(user.fecha);
-            const dateObj = new Date(fechaOriginal);
-            const fechaFormat = !isNaN(dateObj) ? dateObj.toLocaleString('es-ES') : fechaOriginal;
+            const fechaFormat = formatDiscordDate(DOMPurify.sanitize(user.fecha));
 
             rawLogsContainer.innerHTML = `
-                <div class="discord-mock" style="border-left: none; background: transparent; padding: 0;">
+                <div class="discord-mock">
                     <img src="https://cdn.discordapp.com/embed/avatars/1.png" alt="Avatar">
                     <div class="discord-mock-content">
                         <div class="discord-mock-header">
-                            <span class="user">${username}</span>
+                            <span class="user role-color">${username}</span>
                             <span class="date">${fechaFormat}</span>
                         </div>
-                        <div class="discord-mock-body" style="color: #dbdee1;">${evidenciaCruda}</div>
+                        <div class="discord-mock-body">${evidenciaCruda}</div>
                     </div>
-                </div>
-                <div style="margin-top: 2rem; border-top: 1px dashed rgba(255,255,255,0.1); padding-top: 1rem; color: var(--text-muted); font-size: 0.75rem; text-align: center;">
-                    [ FIN DEL VOLCADO FORENSE ]
                 </div>
             `;
         }
@@ -221,7 +221,6 @@ window.C4ISR_Views.expedientes = {
         const statusEl = document.getElementById('osint-save-status');
         if (!statusEl) return;
         statusEl.className = 'save-status';
-        
         switch(state) {
             case 'saving': statusEl.textContent = '[ ENCRIPTANDO... ]'; statusEl.style.color = 'var(--accent-amber)'; break;
             case 'saved': statusEl.textContent = '[ SINCRONIZADO ]'; statusEl.style.color = 'var(--accent-green)'; break;
