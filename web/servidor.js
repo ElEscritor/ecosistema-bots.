@@ -4,8 +4,14 @@ const database = require('../database.js');
 
 const app = express();
 const PUERTO = process.env.PORT || 3000;
-const PASSWORD = 1930;
-
+const PASSWORD = process.env.PANEL_PASSWORD;
+function autenticar(req, res, next) {
+    const token = req.headers['x-auth-key'];
+    if (!PASSWORD || token !== PASSWORD) {
+        return res.status(403).json({ error: "Acceso denegado. Credenciales inválidas." });
+    }
+    next();
+}
 // Configuración para procesar JSON y servir la carpeta actual (web) como recursos estáticos
 app.use(express.json());
 app.use(express.static(path.join(__dirname)));
