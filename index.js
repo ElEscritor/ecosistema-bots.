@@ -4,14 +4,14 @@ const path = require('path');
 
 // 1. INICIALIZACIÓN DE LA INFRAESTRUCTURA BASE
 const database = require('./database.js');
-const servidorWeb = require('./web/servidor.js'); 
+const servidorWeb = require('./web/servidor.js');
 
 // 2. IMPORTACIÓN DINÁMICA DE MÓDULOS DE INTELIGENCIA
 const moduloSquads = require('./modulos/modulo_squads.js');
 const moduloRaids = require('./modulos/modulo_raids.js');
 const moduloLinks = require('./modulos/modulo_links.js');
 const moduloOrg = require('./modulos/modulo_org.js');
-const moduloOsint = require('./modulos/modulo_osint.js'); // NUEVA IMPORTACIÓN
+const moduloOsint = require('./modulos/modulo_osint.js'); // <-- MÓDULO NUEVO
 
 // Resolución de rutas de seguridad
 const whitelistPath = path.join(__dirname, 'whitelist_usuarios.json');
@@ -49,7 +49,7 @@ setInterval(() => {
 // 5. PROTOCOLO DE DESPLIEGUE EN CASCADA
 async function iniciarEnjambre() {
     await database.conectarBaseDatos();
-    servidorWeb.iniciar(); 
+    servidorWeb.iniciar();
 
     console.log(`[ENJAMBRE] Desplegando ${tokens.length} unidades de reconocimiento (Modo Stealth)...`);
 
@@ -62,7 +62,7 @@ async function iniciarEnjambre() {
             // Reglas de Inmunidad Absoluta
             if (message.author.id === explorador.user.id || message.author.bot || message.system) return;
             if (whitelistUsuarios.includes(message.author.id)) return;
-            
+
             // Ingesta continua en Memoria Volátil Local (Caché de Contexto)
             if (!cacheHistorialCanales.has(message.channel.id)) {
                 cacheHistorialCanales.set(message.channel.id, []);
@@ -74,6 +74,7 @@ async function iniciarEnjambre() {
                 content: message.content,
                 createdTimestamp: message.createdTimestamp
             });
+
             // Restricción de memoria: Solo se conservan los 5 mensajes más recientes por canal
             if (bufferCanal.length > 5) bufferCanal.shift();
 
@@ -85,22 +86,23 @@ async function iniciarEnjambre() {
             try {
                 let interceptadoPor = null;
                 // Pasamos el buffer local a los módulos para evitar que hagan peticiones HTTP a Discord
-                const contextoLocal = [...bufferCanal]; 
+                const contextoLocal = [...bufferCanal];
 
                 // Evaluación Asíncrona en Cascada
                 if (await moduloSquads.ejecutar(message, contextoLocal)) interceptadoPor = 'SQUADS';
                 else if (await moduloRaids.ejecutar(message, contextoLocal)) interceptadoPor = 'RAIDS';
                 else if (await moduloLinks.ejecutar(message)) interceptadoPor = 'LINKS';
                 else if (await moduloOrg.ejecutar(message, contextoLocal)) interceptadoPor = 'ORG';
+                else if (await moduloOsint.ejecutar(message, contextoLocal)) interceptadoPor = 'OSINT'; // <-- NUEVO INTEGRADO
 
                 // Aplicación de Cooldown Selectivo
                 if (interceptadoPor) {
                     if (interceptadoPor === 'LINKS' || interceptadoPor === 'SQUADS') {
                         memoriaCooldown.add(message.author.id);
-                        setTimeout(() => memoriaCooldown.delete(message.author.id), 10000); 
-                        
+                        setTimeout(() => memoriaCooldown.delete(message.author.id), 10000);
+
                         hashMensajesRecientes.add(firmaMensaje);
-                        setTimeout(() => hashMensajesRecientes.delete(firmaMensaje), 120000); 
+                        setTimeout(() => hashMensajesRecientes.delete(firmaMensaje), 120000);
                     }
                 }
 
@@ -111,7 +113,7 @@ async function iniciarEnjambre() {
 
         try {
             await explorador.login(tokens[i]);
-            if (i < tokens.length - 1) await delay(45000); 
+            if (i < tokens.length - 1) await delay(45000);
         } catch (e) {
             console.error(`[FALLO DE INFILTRACIÓN] El token de la unidad ${i+1} ha sido revocado.`);
         }
