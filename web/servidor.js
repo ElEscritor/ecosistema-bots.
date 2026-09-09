@@ -5,23 +5,41 @@ const database = require('../database.js');
 const app = express();
 const PUERTO = process.env.PORT || 3000;
 
-// SANEAMIENTO ESTRICTO: Elimina espacios invisibles que Render pueda inyectar en la variable
+// FORZADO DE CLAVE: Saneamiento de espacios invisibles y respaldo táctico
 const rawPassword = process.env.PANEL_PASSWORD || "1930";
 const PASSWORD = rawPassword.trim();
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname)));
 
+// 1. ENDPOINT DESACOPLADO: Verifica la contraseña sin tocar MongoDB
+app.post('/api/login', (req, res) => {
+    const { clave } = req.body;
+    
+    console.log(`[C4ISR AUTH] Intento de acceso detectado.`);
+    
+    if (clave && clave.trim() === PASSWORD) {
+        console.log(`[C4ISR AUTH] Acceso autorizado. Nivel de administrador.`);
+        return res.json({ success: true });
+    }
+    
+    console.warn(`[C4ISR AUTH] Acceso denegado. Clave incorrecta.`);
+    return res.status(403).json({ error: "Credenciales inválidas" });
+});
+
+// 2. BARRERA TÁCTICA: Middleware para proteger el resto de operaciones
 function autenticar(req, res, next) {
     const token = req.headers['x-auth-key'];
     if (!token || token !== PASSWORD) {
-        return res.status(403).json({ error: "Acceso denegado. Credenciales inválidas." });
+        return res.status(403).json({ error: "No autorizado." });
     }
     next();
 }
 
+// 3. ENDPOINTS DE DATOS (Protegidos)
 app.get('/api/datos', autenticar, async (req, res) => {
     try {
+        // Carga de la matriz forense
         const expedientes = await database.obtenerExpedientes({});
         const hace24Horas = new Date(Date.now() - 86400000);
         
@@ -61,40 +79,39 @@ app.get('/api/datos', autenticar, async (req, res) => {
 
         res.json(datos);
     } catch (error) {
-        console.error("[API] Fallo de lectura en base de datos:", error);
-        // Retornar un error 500 claro evita que el cliente piense que la contraseña es errónea
-        res.status(500).json({ error: "Desincronización con el clúster MongoDB." });
+        console.error("[API ERROR] Fallo de lectura BD:", error);
+        res.status(500).json({ error: "El motor de base de datos no responde." });
     }
 });
 
 app.post('/api/notas', autenticar, async (req, res) => {
     const { id, nota } = req.body;
-    if (!id) return res.status(400).json({ error: "Identificador de objetivo requerido." });
+    if (!id) return res.status(400).json({ error: "ID requerido." });
     
     try {
         const exito = await database.actualizarNotaOSINT(id, nota);
-        exito ? res.json({ success: true }) : res.status(500).json({ error: "Fallo de encriptación en base de datos." });
+        exito ? res.json({ success: true }) : res.status(500).json({ error: "Fallo al guardar." });
     } catch (error) {
-        res.status(500).json({ error: "Fallo interno al actualizar nota." });
+        res.status(500).json({ error: "Error interno del motor BD." });
     }
 });
 
 app.post('/api/eliminar', autenticar, async (req, res) => {
     const { id } = req.body;
-    if (!id) return res.status(400).json({ error: "Identificador de objetivo requerido." });
+    if (!id) return res.status(400).json({ error: "ID requerido." });
     
     try {
         const exito = await database.eliminarExpediente(id);
-        exito ? res.json({ success: true }) : res.status(500).json({ error: "El clúster rechazó la orden de purga." });
+        exito ? res.json({ success: true }) : res.status(500).json({ error: "Rechazo de orden de purga." });
     } catch (error) {
-        res.status(500).json({ error: "Fallo interno al eliminar expediente." });
+        res.status(500).json({ error: "Error interno del motor BD." });
     }
 });
 
 app.get('/api/exportar', autenticar, async (req, res) => {
     try {
         const cursor = database.obtenerExpedientesCursor({});
-        if (!cursor) throw new Error("Motor BD inactivo");
+        if (!cursor) throw new Error("Motor inactivo");
         
         const todos = await cursor.toArray();
         const jsonData = JSON.stringify(todos, null, 2);
@@ -103,8 +120,7 @@ app.get('/api/exportar', autenticar, async (req, res) => {
         res.setHeader('Content-Disposition', 'attachment; filename=C4ISR_DATABASE.json');
         res.send(jsonData);
     } catch (error) {
-        console.error("[API] Fallo en exportación:", error);
-        res.status(500).send("Fallo irrecuperable al compilar la exportación forense.");
+        res.status(500).send("Fallo al compilar la exportación.");
     }
 });
 
@@ -114,7 +130,7 @@ app.get('*', (req, res) => {
 
 function iniciar() {
     app.listen(PUERTO, () => {
-        console.log(`[C4ISR] Interfaz Web y API operando activamente en el puerto ${PUERTO}`);
+        console.log(`[C4ISR SYSTEM] Panel Web activo en puerto ${PUERTO}`);
     });
 }
 
