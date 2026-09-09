@@ -5,23 +5,35 @@ const database = require('../database.js');
 const app = express();
 const PUERTO = process.env.PORT || 3000;
 
-// SANEAMIENTO TÁCTICO: Elimina espacios en blanco residuales que Render pueda inyectar
-const rawPassword = process.env.PANEL_PASSWORD || "admin";
-const PASSWORD = rawPassword.trim();
+// CREDENCIALES FIJAS DEL SISTEMA TÁCTICO
+const PASSWORD = "1930";
+const USUARIO_MAESTRO = "Admin";
+let estadoEnjambre = []; // Memoria volátil del estado de los bots
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname)));
 
-// MIDDLEWARE DE SEGURIDAD ABSOLUTA
+// Función expuesta para que index.js envíe el pulso de vida de los bots
+function actualizarEnjambre(datos) {
+    estadoEnjambre = datos;
+}
+
+// ENDPOINT DE AUTENTICACIÓN AISLADO
+app.post('/api/login', (req, res) => {
+    const { usuario, clave } = req.body;
+    if (usuario === USUARIO_MAESTRO && clave === PASSWORD) {
+        return res.json({ success: true });
+    }
+    return res.status(403).json({ error: "Credenciales inválidas" });
+});
+
+// BARRERA MIDDLEWARE
 function autenticar(req, res, next) {
     const token = req.headers['x-auth-key'];
-    if (!token || token !== PASSWORD) {
-        return res.status(403).json({ error: "Acceso denegado. Credenciales inválidas." });
-    }
+    if (token !== PASSWORD) return res.status(403).json({ error: "Clave incorrecta" });
     next();
 }
 
-// ENDPOINT PRINCIPAL: Ingesta de Telemetría y Perfilado
 app.get('/api/datos', autenticar, async (req, res) => {
     try {
         const expedientes = await database.obtenerExpedientes({});
@@ -30,24 +42,13 @@ app.get('/api/datos', autenticar, async (req, res) => {
         const datos = {
             total_registros: expedientes.length,
             alertas_recientes: expedientes.filter(e => new Date(e.primerFichaje) > hace24Horas).length,
+            enjambre: estadoEnjambre, // Transmisión del estado de los bots en vivo
             blacklist: [],
             links: []
         };
 
         expedientes.forEach(exp => {
-            const ultimoDelito = exp.historial && exp.historial.length > 0 ? exp.historial[exp.historial.length - 1] : null;
-            
-            // Construcción de la matriz disciplinaria
-            datos.blacklist.push({
-                id: exp.userId,
-                username: exp.ultimoAlias || 'Desconocido',
-                reincidencia: exp.totalInfracciones || 1,
-                evidencia: ultimoDelito ? ultimoDelito.mensajeOriginal : 'Evidencia no disponible',
-                fecha: ultimoDelito ? ultimoDelito.fecha : (exp.primerFichaje || new Date().toISOString()),
-                notas: exp.notasAnalista || ''
-            });
-
-            // Extracción de vectores para el radar LinksPortal
+            // Extracción de Links para el portal LinksPortal
             if (exp.historial) {
                 exp.historial.forEach(delito => {
                     if (delito.accion && delito.accion.includes('Links')) {
@@ -61,68 +62,61 @@ app.get('/api/datos', autenticar, async (req, res) => {
                     }
                 });
             }
-        });
 
+            // FILTRO FORENSE BLACKLIST: Excluir delitos menores (OSINT y Links)
+            if (exp.historial) {
+                const delitosGraves = exp.historial.filter(d => 
+                    !d.accion.includes('Links') && !d.accion.includes('OSINT')
+                );
+                
+                if (delitosGraves.length > 0) {
+                    const ultimoGrave = delitosGraves[delitosGraves.length - 1];
+                    datos.blacklist.push({
+                        id: exp.userId,
+                        username: exp.ultimoAlias || 'Desconocido',
+                        reincidencia: exp.totalInfracciones || 1,
+                        evidencia: ultimoGrave.mensajeOriginal,
+                        fecha: ultimoGrave.fecha,
+                        servidor: ultimoGrave.servidor || 'Desconocido',
+                        avatar: exp.avatar || 'https://cdn.discordapp.com/embed/avatars/0.png'
+                    });
+                }
+            }
+        });
         res.json(datos);
     } catch (error) {
-        console.error("[API C4ISR] Fallo crítico de lectura en MongoDB:", error);
-        res.status(500).json({ error: "Desincronización con el clúster MongoDB." });
+        console.error("[API ERROR] Fallo BD:", error);
+        res.status(500).json({ error: "Fallo BD" });
     }
 });
 
-// ENDPOINT: Operaciones Asíncronas (Notas OSINT)
 app.post('/api/notas', autenticar, async (req, res) => {
-    const { id, nota } = req.body;
-    if (!id) return res.status(400).json({ error: "Identificador de objetivo requerido." });
-    
     try {
-        const exito = await database.actualizarNotaOSINT(id, nota);
-        exito ? res.json({ success: true }) : res.status(500).json({ error: "Fallo de encriptación." });
-    } catch (error) {
-        res.status(500).json({ error: "Fallo interno en base de datos." });
-    }
+        await database.actualizarNotaOSINT(req.body.id, req.body.nota);
+        res.json({ success: true });
+    } catch (error) { res.status(500).json({ error: "Fallo BD" }); }
 });
 
-// ENDPOINT: Protocolo de Purga
 app.post('/api/eliminar', autenticar, async (req, res) => {
-    const { id } = req.body;
-    if (!id) return res.status(400).json({ error: "Identificador de objetivo requerido." });
-    
     try {
-        const exito = await database.eliminarExpediente(id);
-        exito ? res.json({ success: true }) : res.status(500).json({ error: "Rechazo de purga." });
-    } catch (error) {
-        res.status(500).json({ error: "Fallo interno en base de datos." });
-    }
+        await database.eliminarExpediente(req.body.id);
+        res.json({ success: true });
+    } catch (error) { res.status(500).json({ error: "Fallo BD" }); }
 });
 
-// ENDPOINT: Descarga Forense JSON
 app.get('/api/exportar', autenticar, async (req, res) => {
     try {
         const cursor = database.obtenerExpedientesCursor({});
-        if (!cursor) throw new Error("Motor BD inactivo");
-        
         const todos = await cursor.toArray();
-        const jsonData = JSON.stringify(todos, null, 2);
-        
         res.setHeader('Content-Type', 'application/json');
         res.setHeader('Content-Disposition', 'attachment; filename=C4ISR_DATABASE.json');
-        res.send(jsonData);
-    } catch (error) {
-        console.error("[API C4ISR] Fallo en exportación:", error);
-        res.status(500).send("Fallo irrecuperable al compilar la exportación forense.");
-    }
+        res.send(JSON.stringify(todos, null, 2));
+    } catch (error) { res.status(500).send("Fallo exportación"); }
 });
 
-// ENRUTAMIENTO SPA
-app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
-});
+app.get('*', (req, res) => { res.sendFile(path.join(__dirname, 'index.html')); });
 
-function iniciar() {
-    app.listen(PUERTO, () => {
-        console.log(`[C4ISR] Interfaz Web y API operando activamente en el puerto ${PUERTO}`);
-    });
+function iniciar() { 
+    app.listen(PUERTO, () => console.log(`[C4ISR] Servidor activo puerto ${PUERTO}`)); 
 }
-
-module.exports = { iniciar };
+module.exports = { iniciar, actualizarEnjambre };
