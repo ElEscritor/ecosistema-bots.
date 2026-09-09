@@ -1,15 +1,11 @@
 /* ==========================================================================
    MOTOR DE LA SINGLE PAGE APPLICATION (SPA) Y ENRUTADOR
    Archivo: js/app.js
-   Objetivo: Gestión de estado, Login, Navegación y Ciclo de vida del DOM
    ========================================================================== */
 
-// Registro global de las vistas modulares.
-// Cada script en js/vistas/ (dashboard, expedientes, etc.) se registrará aquí.
 window.C4ISR_Views = {};
 
 const AppController = {
-    // Referencias al DOM
     elements: {
         loginModal: document.getElementById('login-modal'),
         loginForm: document.getElementById('login-form'),
@@ -32,7 +28,6 @@ const AppController = {
     },
 
     bindEvents() {
-        // Evento de Autenticación
         this.elements.loginForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             const password = this.elements.passwordInput.value.trim();
@@ -48,11 +43,13 @@ const AppController = {
                 if (isAuthenticated) {
                     this.unlockSystem();
                 } else {
-                    this.showLoginError();
+                    // Solo salta si el backend rechaza la clave explícitamente con un código 403
+                    this.showLoginError("[!] ERROR: CREDENCIALES INVÁLIDAS. ENLACE DENEGADO.");
                 }
             } catch (error) {
-                console.error("[AppController] Error de conexión:", error);
-                this.showLoginError();
+                console.error("[AppController] Interrupción en la transmisión:", error);
+                // Si la base de datos o el servidor caen, te mostrará la alerta real en pantalla
+                this.showLoginError(`[!] FALLO CRÍTICO: ${error.message}. Revisa la consola o base de datos.`);
             } finally {
                 btn.textContent = originalText;
                 btn.disabled = false;
@@ -60,12 +57,10 @@ const AppController = {
             }
         });
 
-        // Evento de Desconexión
         this.elements.btnLogout.addEventListener('click', () => {
             this.lockSystem();
         });
 
-        // Eventos de Navegación del Sidebar
         this.elements.navItems.forEach(item => {
             item.addEventListener('click', () => {
                 const viewName = item.getAttribute('data-view');
@@ -76,9 +71,10 @@ const AppController = {
         });
     },
 
-    showLoginError() {
+    showLoginError(mensajePersonalizado) {
+        this.elements.loginError.textContent = mensajePersonalizado || "[!] ERROR DESCONOCIDO EN EL SISTEMA";
         this.elements.loginError.classList.remove('hidden');
-        // Efecto visual de fallo
+        
         this.elements.loginForm.style.transform = 'translateX(-10px)';
         setTimeout(() => this.elements.loginForm.style.transform = 'translateX(10px)', 50);
         setTimeout(() => this.elements.loginForm.style.transform = 'translateX(0)', 100);
@@ -89,45 +85,34 @@ const AppController = {
         this.elements.loginError.classList.add('hidden');
         this.elements.appWrapper.classList.remove('hidden');
         
-        // Iniciar la vista por defecto (Telemetría / Dashboard)
         this.navigate('dashboard');
     },
 
     lockSystem() {
-        // Destruir la vista actual para liberar memoria
         this.destroyCurrentView();
-        
-        // Purgar credenciales de la memoria
         C4ISR_API.sessionKey = null;
-        
-        // Restaurar DOM
         this.elements.appWrapper.classList.add('hidden');
         this.elements.loginModal.classList.add('active');
         this.elements.passwordInput.focus();
     },
 
     async navigate(viewName) {
-        // 1. Destruir la vista anterior si existe (limpieza de listeners, gráficos, etc.)
         this.destroyCurrentView();
 
-        // 2. Actualizar estado visual de la barra lateral
         this.elements.navItems.forEach(item => item.classList.remove('active'));
         const activeItem = document.querySelector(`.nav-item[data-view="${viewName}"]`);
         if (activeItem) {
             activeItem.classList.add('active');
-            // Actualizar la ruta en el Topbar (Breadcrumb)
             this.elements.currentPathDisplay.textContent = activeItem.querySelector('.nav-label').textContent.toUpperCase();
         }
 
-        // 3. Limpiar el contenedor raíz
         this.elements.spaRoot.innerHTML = '<div style="color: var(--accent-cyan);">[ SISTEMA ] CARGANDO MÓDULO...</div>';
         
-        // 4. Instanciar y renderizar la nueva vista
         const ViewModule = window.C4ISR_Views[viewName];
         
         if (ViewModule) {
             try {
-                this.elements.spaRoot.innerHTML = ''; // Limpiar mensaje de carga
+                this.elements.spaRoot.innerHTML = ''; 
                 await ViewModule.render(this.elements.spaRoot);
                 this.currentViewName = viewName;
             } catch (error) {
@@ -163,7 +148,6 @@ const AppController = {
     }
 };
 
-// Inicializar la aplicación cuando el DOM esté listo
 document.addEventListener('DOMContentLoaded', () => {
     AppController.init();
 });
