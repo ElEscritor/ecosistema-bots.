@@ -5,6 +5,15 @@ const database = require('../database.js');
 const app = express();
 const PUERTO = process.env.PORT || 3000;
 const PASSWORD = process.env.PANEL_PASSWORD;
+
+// Alerta de diagnóstico en consola para verificar el despliegue en Render
+if (!PASSWORD) {
+    console.warn("[ALERTA CRÍTICA] PANEL_PASSWORD no está definida en las variables de entorno del servidor.");
+} else {
+    console.log("[SISTEMA] Autenticación maestra configurada correctamente.");
+}
+
+// Middleware único de autenticación táctica
 function autenticar(req, res, next) {
     const token = req.headers['x-auth-key'];
     if (!PASSWORD || token !== PASSWORD) {
@@ -12,18 +21,10 @@ function autenticar(req, res, next) {
     }
     next();
 }
+
 // Configuración para procesar JSON y servir la carpeta actual (web) como recursos estáticos
 app.use(express.json());
 app.use(express.static(path.join(__dirname)));
-
-// Middleware táctico: Bloquea cualquier petición a la API que no tenga la clave maestra en la cabecera
-function autenticar(req, res, next) {
-    const token = req.headers['x-auth-key'];
-    if (!PASSWORD || token !== PASSWORD) {
-        return res.status(403).json({ error: "Acceso denegado. Credenciales inválidas." });
-    }
-    next();
-}
 
 // ENDPOINT: Recopilación de telemetría y perfiles para el Dashboard y OSINT
 app.get('/api/datos', autenticar, async (req, res) => {
@@ -39,7 +40,6 @@ app.get('/api/datos', autenticar, async (req, res) => {
         };
 
         expedientes.forEach(exp => {
-            // Mapeo forense para la tabla de la Blacklist
             const ultimoDelito = exp.historial && exp.historial.length > 0 ? exp.historial[exp.historial.length - 1] : null;
             
             datos.blacklist.push({
@@ -51,7 +51,6 @@ app.get('/api/datos', autenticar, async (req, res) => {
                 notas: exp.notasAnalista || ''
             });
 
-            // Extracción de vectores para el LinksPortal
             if (exp.historial) {
                 exp.historial.forEach(delito => {
                     if (delito.accion && delito.accion.includes('Links')) {
