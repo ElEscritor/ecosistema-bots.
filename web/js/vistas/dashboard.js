@@ -1,53 +1,47 @@
 /* ==========================================================================
-   VISTA: ANALÍTICA C4ISR (DASHBOARD)
+   VISTA: ANALÍTICA C4ISR (DASHBOARD CON TELEMETRÍA DE ENJAMBRE)
    Archivo: js/vistas/dashboard.js
-   Objetivo: Renderizar telemetría global y gráficos de ApexCharts
    ========================================================================== */
-
 window.C4ISR_Views = window.C4ISR_Views || {};
 
 window.C4ISR_Views.dashboard = {
-    // Almacén de instancias de gráficos para su posterior destrucción
-    charts: {
-        timeline: null,
-        distribution: null
-    },
+    charts: { timeline: null, distribution: null },
 
     async render(container) {
-        // 1. Inyectar el esqueleto HTML del Dashboard
+        // Estructura visual de telemetría y gráficos
         container.innerHTML = `
             <div class="kpi-grid" id="dashboard-kpis">
                 <div style="color: var(--accent-cyan); font-family: var(--font-mono);">[ SISTEMA ] OBTENIENDO TELEMETRÍA...</div>
             </div>
             
+            <div class="panel-header" style="margin-top: 2rem;">
+                <span class="panel-title" style="color: var(--accent-rz); text-shadow: var(--glow-rz);">ENJAMBRE DE RECONOCIMIENTO (ESTADO DE RED)</span>
+            </div>
+            
+            <div class="links-grid" id="dashboard-bots" style="margin-bottom: 2rem;">
+                <!-- Los bots conectados se inyectarán aquí -->
+            </div>
+
             <div class="chart-layout hidden" id="dashboard-charts">
                 <div class="panel-container">
-                    <div class="panel-header">
-                        <span class="panel-title">FLUJO TEMPORAL DE INTERCEPCIONES</span>
-                    </div>
+                    <div class="panel-header"><span class="panel-title">FLUJO TEMPORAL DE INTERCEPCIONES</span></div>
                     <div id="chart-timeline"></div>
                 </div>
-                
                 <div class="panel-container">
-                    <div class="panel-header">
-                        <span class="panel-title">VECTORES DE AMENAZA</span>
-                    </div>
+                    <div class="panel-header"><span class="panel-title">VECTORES DE AMENAZA</span></div>
                     <div id="chart-distribution"></div>
                 </div>
             </div>
         `;
 
         try {
-            // 2. Extraer datos globales desde el backend
             const datos = await C4ISR_API.getDatosGlobales();
             
-            // 3. Renderizar componentes con los datos obtenidos
             this.renderKPIs(datos);
+            this.renderBots(datos.enjambre || []);
             this.renderCharts(datos);
             
-            // 4. Mostrar gráficos una vez procesados
             document.getElementById('dashboard-charts').classList.remove('hidden');
-
         } catch (error) {
             console.error("[Dashboard] Error al cargar telemetría:", error);
             const kpiContainer = document.getElementById('dashboard-kpis');
@@ -57,134 +51,109 @@ window.C4ISR_Views.dashboard = {
         }
     },
 
+    renderBots(bots) {
+        const container = document.getElementById('dashboard-bots');
+        
+        if (bots.length === 0) {
+            container.innerHTML = `
+                <div style="grid-column: 1 / -1; padding: 2rem; text-align: center; border: 1px dashed rgba(255, 42, 109, 0.3); background: var(--bg-panel);">
+                    <div style="color: var(--accent-rz); font-family: var(--font-mono);">[ ADVERTENCIA ] EL ENJAMBRE ESTÁ DESCONECTADO O EN MANTENIMIENTO.</div>
+                </div>
+            `;
+            return;
+        }
+
+        let html = '';
+        bots.forEach(bot => {
+            html += `
+                <div class="link-card" style="display: flex; align-items: center; gap: 1rem; padding: 1rem;">
+                    <img src="${DOMPurify.sanitize(bot.avatar)}" alt="Avatar" style="width: 40px; height: 40px; border-radius: 50%; border: 2px solid var(--accent-green); object-fit: cover;">
+                    <div>
+                        <div style="color: var(--text-main); font-weight: bold; font-family: var(--font-display);">${DOMPurify.sanitize(bot.tag)}</div>
+                        <div style="color: var(--text-muted); font-size: 0.75rem;">UID: ${DOMPurify.sanitize(bot.id)}</div>
+                    </div>
+                    <div style="margin-left: auto; display: flex; align-items: center; gap: 0.5rem; color: var(--accent-green); font-size: 0.8rem; font-weight: bold;">
+                        <span class="status-dot online" style="margin:0;"></span> EN LÍNEA
+                    </div>
+                </div>
+            `;
+        });
+        container.innerHTML = html;
+    },
+
     renderKPIs(datos) {
         const kpiContainer = document.getElementById('dashboard-kpis');
-        if (!kpiContainer) return;
-
-        // Cálculos preventivos en caso de que la estructura de la base de datos varíe
         const totalRegistros = datos.total_registros || 0;
         const totalBlacklist = datos.blacklist ? datos.blacklist.length : 0;
         const totalLinks = datos.links ? datos.links.length : 0;
         const alertasActivas = datos.alertas_recientes || 0;
 
-        // Generar el HTML de las tarjetas
         kpiContainer.innerHTML = `
-            <div class="kpi-card status-cyan">
-                <span class="kpi-icon-bg">👁️</span>
+            <div class="kpi-card" style="border-bottom-color: var(--accent-cyan);">
                 <div class="kpi-label">CAPTURA TOTAL OSINT</div>
                 <div class="kpi-value">${totalRegistros}</div>
             </div>
-            
             <div class="kpi-card status-red">
-                <span class="kpi-icon-bg">☠️</span>
                 <div class="kpi-label">INFRACTORES EN BLACKLIST</div>
                 <div class="kpi-value">${totalBlacklist}</div>
             </div>
-            
             <div class="kpi-card status-amber">
-                <span class="kpi-icon-bg">🔗</span>
                 <div class="kpi-label">ENLACES INTERCEPTADOS</div>
                 <div class="kpi-value">${totalLinks}</div>
             </div>
-            
             <div class="kpi-card ${alertasActivas > 0 ? 'status-amber' : 'status-green'}">
-                <span class="kpi-icon-bg">⚠️</span>
-                <div class="kpi-label">ALERTAS RECIENTES</div>
+                <div class="kpi-label">ALERTAS RECIENTES 24H</div>
                 <div class="kpi-value">${alertasActivas}</div>
             </div>
         `;
     },
 
     renderCharts(datos) {
-        // Configuraciones base comunes para estética Cyber-Abyss
         const baseOptions = {
-            chart: {
-                background: 'transparent',
-                foreColor: '#64748b', // var(--text-muted)
-                toolbar: { show: false },
-                animations: { enabled: true, easing: 'easeinout', speed: 800 }
-            },
+            chart: { background: 'transparent', foreColor: '#64748b', toolbar: { show: false }, animations: { enabled: true } },
             theme: { mode: 'dark' },
             tooltip: { theme: 'dark' },
             dataLabels: { enabled: false },
-            grid: {
-                borderColor: 'rgba(0, 229, 255, 0.05)',
-                strokeDashArray: 4,
-            }
+            grid: { borderColor: 'rgba(255, 42, 109, 0.05)', strokeDashArray: 4 }
         };
 
-        // 1. GRÁFICO DE ÁREA (LÍNEA DE TIEMPO)
-        // Extraemos series de tiempo si el backend lo proporciona, o generamos un placeholder analítico
-        const timelineData = datos.grafico_timeline || [
-            { x: '00:00', y: 12 }, { x: '04:00', y: 5 }, { x: '08:00', y: 45 },
-            { x: '12:00', y: 78 }, { x: '16:00', y: 34 }, { x: '20:00', y: 56 }
-        ];
-
+        // Gráfico Timeline
+        const timelineData = [{ x: '00:00', y: 5 }, { x: '08:00', y: 15 }, { x: '16:00', y: 45 }, { x: '24:00', y: 30 }];
         const optionsTimeline = {
             ...baseOptions,
             chart: { ...baseOptions.chart, type: 'area', height: 300 },
             series: [{ name: 'Intercepciones', data: timelineData }],
-            colors: ['#00e5ff'], // var(--accent-cyan)
+            colors: ['#00e5ff'],
             stroke: { curve: 'smooth', width: 2 },
-            fill: {
-                type: 'gradient',
-                gradient: { shadeIntensity: 1, opacityFrom: 0.4, opacityTo: 0.05, stops: [0, 90, 100] }
-            },
-            xaxis: {
-                type: 'category',
-                axisBorder: { show: false },
-                axisTicks: { show: false }
-            }
+            fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.4, opacityTo: 0.05, stops: [0, 90, 100] } }
         };
-
         this.charts.timeline = new ApexCharts(document.querySelector("#chart-timeline"), optionsTimeline);
         this.charts.timeline.render();
 
-        // 2. GRÁFICO DE DONA (DISTRIBUCIÓN DE VECTORES)
-        // Distribución por defecto basada en los módulos descritos en la arquitectura
-        const distData = datos.grafico_distribucion || [
-            datos.raids || 10, 
-            datos.squads || 15, 
+        // Gráfico Dona con color Rz
+        const distData = [
+            datos.blacklist ? datos.blacklist.length : 10, 
             datos.links ? datos.links.length : 25, 
-            datos.org || 30
+            30 // Asumimos OSINT general para rellenar visualmente si la DB es pequeña
         ];
-
         const optionsDistribution = {
             ...baseOptions,
             chart: { ...baseOptions.chart, type: 'donut', height: 300 },
             series: distData,
-            labels: ['Módulo Raids', 'Módulo Squads', 'LinksPortal', 'Radar Org'],
-            colors: ['#ff3333', '#ffaa00', '#00e5ff', '#00ff66'], // Red, Amber, Cyan, Green
-            stroke: { show: true, colors: ['#0a0f12'], width: 2 }, // Separadores oscuros
+            labels: ['Módulos Ataque/Raids', 'LinksPortal', 'Radar OSINT'],
+            colors: ['#ff3333', '#00e5ff', '#ff2a6d'], // El tercer color es Rz
+            stroke: { show: true, colors: ['#0a0f12'], width: 2 },
             plotOptions: {
-                pie: {
-                    donut: {
-                        size: '75%',
-                        labels: {
-                            show: true,
-                            name: { fontSize: '12px', fontFamily: 'JetBrains Mono' },
-                            value: { fontSize: '24px', fontFamily: 'Share Tech Mono', color: '#e2e8f0' },
-                            total: { show: true, label: 'TOTAL', color: '#00e5ff' }
-                        }
-                    }
-                }
+                pie: { donut: { size: '75%', labels: { show: true, total: { show: true, label: 'TOTAL', color: '#ff2a6d' } } } }
             },
             legend: { position: 'bottom', fontFamily: 'JetBrains Mono' }
         };
-
         this.charts.distribution = new ApexCharts(document.querySelector("#chart-distribution"), optionsDistribution);
         this.charts.distribution.render();
     },
 
     destroy() {
-        // Purga activa de memoria: Destruir instancias de ApexCharts
-        if (this.charts.timeline) {
-            this.charts.timeline.destroy();
-            this.charts.timeline = null;
-        }
-        if (this.charts.distribution) {
-            this.charts.distribution.destroy();
-            this.charts.distribution = null;
-        }
+        if (this.charts.timeline) { this.charts.timeline.destroy(); this.charts.timeline = null; }
+        if (this.charts.distribution) { this.charts.distribution.destroy(); this.charts.distribution = null; }
     }
 };
