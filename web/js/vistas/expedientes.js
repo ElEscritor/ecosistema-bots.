@@ -8,10 +8,8 @@ window.C4ISR_Views.expedientes = {
     saveTimeout: null,
     currentTargetId: null,
     globalData: null,
-    searchResults: [],
 
     async render(container) {
-        // Estructura de alta densidad con buscador predictivo y controles de importación
         container.innerHTML = `
             <div class="panel-header" style="margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
                 <span class="panel-title" style="font-size: 1.2rem; color: var(--accent-rz); text-shadow: var(--glow-rz);">BASE DE DATOS DE INTELIGENCIA (OSINT)</span>
@@ -26,41 +24,32 @@ window.C4ISR_Views.expedientes = {
                 </div>
             </div>
 
-            <!-- Buscador Predictivo -->
             <div style="position: relative; margin-bottom: 2rem; z-index: 50;">
                 <div style="display: flex; gap: 1rem; align-items: center; background: var(--bg-dark); border: var(--border-thin); padding: 0.5rem;">
                     <span style="color: var(--accent-rz); font-family: var(--font-mono); padding-left: 1rem;">[ RASTREO ]</span>
                     <input type="text" id="osint-search" class="editor-textarea" style="border: none; box-shadow: none; padding: 0.5rem; height: auto;" placeholder="Ingresar UID, Alias o palabra clave para localizar expediente..." autocomplete="off">
                 </div>
-                <!-- Contenedor de resultados predictivos -->
                 <div id="osint-search-results" class="hidden" style="position: absolute; top: 100%; left: 0; width: 100%; max-height: 300px; overflow-y: auto; background: var(--bg-panel); border: var(--border-thin); border-top: none; box-shadow: 0 10px 30px rgba(0,0,0,0.8);"></div>
             </div>
 
-            <!-- Layout Dividido: Evidencia Forense (Izq) / Anotaciones (Der) -->
             <div class="osint-layout hidden" id="osint-workspace">
-                
-                <!-- Panel Izquierdo: Recreación de Discord -->
                 <div class="osint-panel">
                     <div class="panel-header" style="margin: 0; border-bottom: var(--border-thin); padding: 1rem; display: flex; justify-content: space-between;">
                         <span class="panel-title" style="color: var(--accent-amber);">VOLCADO FORENSE (HISTORIAL CRUDO)</span>
                         <span id="osint-target-badge" class="badge badge-amber">ESPERANDO...</span>
                     </div>
-                    <div class="osint-content" id="osint-raw-logs" style="background: #1e1f22; padding: 1rem;">
-                        <!-- Los logs simulados de Discord se inyectarán aquí -->
-                    </div>
+                    <div class="osint-content" id="osint-raw-logs" style="background: #1e1f22; padding: 1rem;"></div>
                 </div>
                 
-                <!-- Panel Derecho: Editor OSINT -->
                 <div class="osint-panel">
                     <div class="panel-header" style="margin: 0; border-bottom: var(--border-thin); padding: 1rem; display: flex; justify-content: space-between; align-items: center;">
                         <span class="panel-title" style="color: var(--accent-cyan);">PERFILADO (BLOC DE NOTAS)</span>
                         <span id="osint-save-status" class="save-status">[ SINCRONIZADO ]</span>
                     </div>
                     <div style="flex-grow: 1; padding: 0;">
-                        <textarea id="osint-notes-editor" class="editor-textarea" style="color: var(--text-main);" placeholder="[!] Ingrese datos del perfilado de la amenaza. El autoguardado de La Biblioteca se ejecutará silenciosamente tras 1 segundo de inactividad..."></textarea>
+                        <textarea id="osint-notes-editor" class="editor-textarea" style="color: var(--text-main);" placeholder="[!] Ingrese datos del perfilado de la amenaza. El autoguardado se ejecutará silenciosamente tras 1 segundo de inactividad..."></textarea>
                     </div>
                 </div>
-
             </div>
         `;
 
@@ -68,7 +57,6 @@ window.C4ISR_Views.expedientes = {
             this.globalData = await C4ISR_API.getDatosGlobales();
             this.bindEvents();
         } catch (error) {
-            console.error("[OSINT] Fracaso de inicialización:", error);
             container.innerHTML = `<div class="login-error" style="display:block;">[!] ERROR CRÍTICO: FALLO DE ENLACE OSINT.</div>`;
         }
     },
@@ -78,8 +66,9 @@ window.C4ISR_Views.expedientes = {
         const searchResults = document.getElementById('osint-search-results');
         const editor = document.getElementById('osint-notes-editor');
         const btnAdd = document.getElementById('btn-add-target');
+        const btnImport = document.getElementById('btn-import-targets');
 
-        // Búsqueda Predictiva en Tiempo Real
+        // Búsqueda Predictiva
         searchInput.addEventListener('input', (e) => {
             const term = e.target.value.toLowerCase().trim();
             if (term.length < 2) {
@@ -92,7 +81,7 @@ window.C4ISR_Views.expedientes = {
                 (u.username && u.username.toLowerCase().includes(term)) || 
                 (u.id && u.id.includes(term)) ||
                 (u.evidencia && u.evidencia.toLowerCase().includes(term))
-            ).slice(0, 10); // Límite de seguridad visual
+            ).slice(0, 10);
 
             if (filtrados.length > 0) {
                 searchResults.innerHTML = filtrados.map(u => `
@@ -103,7 +92,6 @@ window.C4ISR_Views.expedientes = {
                 `).join('');
                 searchResults.classList.remove('hidden');
 
-                // Listener para selección de objetivo
                 document.querySelectorAll('.search-item').forEach(item => {
                     item.addEventListener('click', () => {
                         const targetId = item.getAttribute('data-id');
@@ -118,33 +106,64 @@ window.C4ISR_Views.expedientes = {
             }
         });
 
-        // Ocultar buscador al hacer clic fuera
         document.addEventListener('click', (e) => {
             if (!searchInput.contains(e.target) && !searchResults.contains(e.target)) {
                 searchResults.classList.add('hidden');
             }
         });
 
-        // Autoguardado Silencioso (Debounce)
+        // Autoguardado OSINT
         editor.addEventListener('input', () => {
             if (!this.currentTargetId) return;
             this.updateSaveStatus('saving');
-            
             if (this.saveTimeout) clearTimeout(this.saveTimeout);
-            
-            this.saveTimeout = setTimeout(() => {
-                this.saveNotes(this.currentTargetId, editor.value);
-            }, 1000);
+            this.saveTimeout = setTimeout(() => { this.saveNotes(this.currentTargetId, editor.value); }, 1000);
         });
 
-        // Lógica de adición manual (Mock/Preparación para Backend)
-        btnAdd.addEventListener('click', () => {
+        // AÑADIR OBJETIVO MANUAL
+        btnAdd.addEventListener('click', async () => {
             const newId = prompt("[ LA BIBLIOTECA ]\nIngrese el Discord UID del objetivo a vigilar:");
             if (newId && /^\d{17,20}$/.test(newId)) {
-                alert(`[SISTEMA] UID ${newId} programado para inyección. (Requiere actualización de servidor.js para persistencia total).`);
+                try {
+                    const originalText = btnAdd.innerHTML;
+                    btnAdd.innerHTML = "EJECUTANDO...";
+                    await C4ISR_API.agregarObjetivoManual(newId);
+                    // Recargar la vista para reflejar los datos actualizados
+                    window.AppController.navigate('expedientes'); 
+                } catch (error) {
+                    alert("[!] Error crítico de red al inyectar el UID en la base de datos.");
+                    btnAdd.innerHTML = "+ AÑADIR OBJETIVO";
+                }
             } else if (newId) {
-                alert("[!] ERROR: Formato de UID inválido.");
+                alert("[!] ERROR: Formato de UID inválido. Debe contener entre 17 y 20 dígitos numéricos.");
             }
+        });
+
+        // IMPORTAR MATRIZ MASIVA (JSON)
+        btnImport.addEventListener('click', () => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json';
+            input.onchange = async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                
+                const reader = new FileReader();
+                reader.onload = async (event) => {
+                    try {
+                        const jsonData = JSON.parse(event.target.result);
+                        btnImport.innerHTML = "PROCESANDO...";
+                        await C4ISR_API.importarMatriz(jsonData);
+                        // Recargar la vista
+                        window.AppController.navigate('expedientes');
+                    } catch(err) {
+                        alert("[!] ERROR: Archivo JSON corrupto o estructura incompatible.");
+                        btnImport.innerHTML = "📄 IMPORTAR MATRIZ";
+                    }
+                };
+                reader.readAsText(file);
+            };
+            input.click();
         });
     },
 
@@ -165,15 +184,12 @@ window.C4ISR_Views.expedientes = {
             badge.textContent = `OBJETIVO: ${DOMPurify.sanitize(user.username)}`;
             badge.className = `badge badge-red`;
 
-            // Simulador Forense de Discord para el listado masivo
             const username = DOMPurify.sanitize(user.username);
-            const evidenciaCruda = DOMPurify.sanitize(user.evidencia || '[ SIN REGISTROS ]');
+            const evidenciaCruda = DOMPurify.sanitize(user.evidencia || '[ SIN REGISTROS ACTIVOS ]');
             const fechaOriginal = DOMPurify.sanitize(user.fecha);
             const dateObj = new Date(fechaOriginal);
             const fechaFormat = !isNaN(dateObj) ? dateObj.toLocaleString('es-ES') : fechaOriginal;
 
-            // En el futuro, si el backend pasa 'user.historial' como array completo, 
-            // se iterará aquí. Por ahora renderizamos la evidencia principal.
             rawLogsContainer.innerHTML = `
                 <div class="discord-mock" style="border-left: none; background: transparent; padding: 0;">
                     <img src="https://cdn.discordapp.com/embed/avatars/1.png" alt="Avatar">
@@ -189,9 +205,6 @@ window.C4ISR_Views.expedientes = {
                     [ FIN DEL VOLCADO FORENSE ]
                 </div>
             `;
-        } else {
-            workspace.classList.add('hidden');
-            alert("[!] Error de sincronización: Identidad corrupta.");
         }
     },
 
@@ -201,9 +214,7 @@ window.C4ISR_Views.expedientes = {
             this.updateSaveStatus('saved');
             const user = (this.globalData.blacklist || []).find(u => u.id === targetId);
             if (user) user.notas = notesContent;
-        } catch (error) {
-            this.updateSaveStatus('error');
-        }
+        } catch (error) { this.updateSaveStatus('error'); }
     },
 
     updateSaveStatus(state) {
@@ -212,22 +223,10 @@ window.C4ISR_Views.expedientes = {
         statusEl.className = 'save-status';
         
         switch(state) {
-            case 'saving':
-                statusEl.textContent = '[ ENCRIPTANDO... ]';
-                statusEl.style.color = 'var(--accent-amber)';
-                break;
-            case 'saved':
-                statusEl.textContent = '[ SINCRONIZADO ]';
-                statusEl.style.color = 'var(--accent-green)';
-                break;
-            case 'error':
-                statusEl.textContent = '[!] FALLO DE RED';
-                statusEl.style.color = 'var(--accent-red)';
-                break;
-            case 'loaded':
-                statusEl.textContent = '[ LISTO PARA ESCRITURA ]';
-                statusEl.style.color = 'var(--text-muted)';
-                break;
+            case 'saving': statusEl.textContent = '[ ENCRIPTANDO... ]'; statusEl.style.color = 'var(--accent-amber)'; break;
+            case 'saved': statusEl.textContent = '[ SINCRONIZADO ]'; statusEl.style.color = 'var(--accent-green)'; break;
+            case 'error': statusEl.textContent = '[!] FALLO DE RED'; statusEl.style.color = 'var(--accent-red)'; break;
+            case 'loaded': statusEl.textContent = '[ LISTO PARA ESCRITURA ]'; statusEl.style.color = 'var(--text-muted)'; break;
         }
     },
 
