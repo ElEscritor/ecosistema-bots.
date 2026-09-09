@@ -3,13 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>La Biblioteca // Rz Command Center</title>
-    <!-- Tipografías Tácticas (Google Fonts) -->
+    <title>La Biblioteca // Rz</title>
+    
+    <!-- Tipografías Elegantes: Cinzel (Títulos) y Lora (Cuerpo) -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Lora:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
     
-    <!-- Dependencias Externas (CDN) -->
+    <!-- Dependencias Externas -->
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
     
@@ -19,44 +20,42 @@
     <link rel="stylesheet" href="css/modulos.css">
 </head>
 <body>
-    <!-- PANTALLA DE AUTENTICACIÓN (Bloquea el acceso al sistema) -->
+    
+    <!-- PANTALLA DE AUTENTICACIÓN (Estética Elegante de La Biblioteca) -->
     <div id="login-modal" class="login-overlay active">
-        <div class="scanlines"></div>
-        <div class="login-panel">
+        <!-- Eliminado el efecto scanlines y glitch -->
+        <div class="login-panel elegant-panel">
             <div class="login-header">
-                <!-- Título actualizado a La Biblioteca -->
-                <h1 class="glitch-title" data-text="LA_BIBLIOTECA">LA_BIBLIOTECA</h1>
-                <p class="login-subtitle">SISTEMA DE VIGILANCIA PASIVA // ACCESO RESTRINGIDO</p>
+                <h1 class="library-title">LA BIBLIOTECA</h1>
+                <p class="library-subtitle">Archivo Central de Inteligencia // Rz</p>
             </div>
             
             <form id="login-form">
-                <!-- Campo de Usuario añadido -->
                 <div class="input-group">
-                    <label for="admin-username">IDENTIDAD_OPERATIVA_</label>
-                    <input type="text" id="admin-username" autocomplete="off" placeholder="Ingrese usuario (Ej: Admin)" required>
+                    <label for="admin-username">Identificador de Operador</label>
+                    <input type="text" id="admin-username" autocomplete="off" placeholder="Ej: Admin" required>
                 </div>
-                <!-- Campo de Contraseña -->
                 <div class="input-group">
-                    <label for="admin-password">AUTH_KEY_</label>
-                    <input type="password" id="admin-password" autocomplete="off" placeholder="Ingrese clave maestra..." required>
+                    <label for="admin-password">Clave de Acceso</label>
+                    <input type="password" id="admin-password" autocomplete="off" placeholder="Ingrese su clave maestra..." required>
                 </div>
-                <button type="submit" class="btn-cyber">INICIALIZAR ENLACE</button>
+                <button type="submit" class="btn-elegant">ABRIR LOS ARCHIVOS</button>
             </form>
             
             <div id="login-error" class="login-error hidden">
-                [!] ERROR: CREDENCIALES INVÁLIDAS. ENLACE DENEGADO.
+                Acceso denegado. Credenciales no reconocidas en el registro.
             </div>
         </div>
     </div>
 
-    <!-- ESTRUCTURA PRINCIPAL DE LA APLICACIÓN SPA -->
+    <!-- ESTRUCTURA PRINCIPAL DE LA APLICACIÓN -->
     <div id="app-wrapper" class="app-wrapper hidden">
         
-        <!-- BARRA LATERAL TÁCTICA -->
+        <!-- BARRA LATERAL ELEGANTE -->
         <nav class="tactical-sidebar">
             <div class="sidebar-header">
                 <div class="logo-container">
-                    <span class="logo-icon">👁️</span>
+                    <span class="logo-icon">🏛️</span>
                 </div>
                 <span class="logo-text">LA BIBLIOTECA</span>
             </div>
@@ -74,45 +73,45 @@
                     <span class="nav-label">LinksPortal</span>
                 </li>
                 <li class="nav-item" data-view="blacklist">
-                    <span class="nav-icon">☠️</span>
-                    <span class="nav-label">Blacklist Total</span>
+                    <span class="nav-icon">⚖️</span>
+                    <span class="nav-label">Registro Disciplinario</span>
                 </li>
             </ul>
             <div class="sidebar-footer">
                 <div class="system-status">
                     <span class="status-dot online"></span>
-                    <span class="status-text">SISTEMA EN LÍNEA</span>
+                    <span class="status-text">Archivos en línea</span>
                 </div>
                 <button id="btn-logout" class="btn-logout">
-                    <span class="nav-icon">⏻</span>
-                    <span class="nav-label">Desconectar</span>
+                    <span class="nav-icon">🚪</span>
+                    <span class="nav-label">Cerrar Sesión</span>
                 </button>
             </div>
         </nav>
 
-        <!-- CONTENEDOR PRINCIPAL (ZONA DE TRABAJO) -->
+        <!-- ZONA DE TRABAJO -->
         <main class="main-content">
+            <!-- CABECERA SUPERIOR -->
             <header class="topbar">
                 <div class="breadcrumbs">
-                    <span class="path-root">C:\SYS\Rz</span>
-                    <span class="separator">&gt;</span>
-                    <span id="current-path" class="path-current">TELEMETRIA</span>
-                    <span class="cursor-blink">_</span>
+                    <span class="path-root">Archivos Centrales</span>
+                    <span class="separator">/</span>
+                    <span id="current-path" class="path-current">TELEMETRÍA</span>
                 </div>
                 <div class="topbar-actions">
-                    <span class="terminal-clock" id="system-clock">00:00:00</span>
+                    <span class="library-clock" id="system-clock">00:00:00</span>
                 </div>
             </header>
             
-            <!-- RAÍZ DE LA SPA -->
+            <!-- RAÍZ DE LA SPA: INYECCIÓN DINÁMICA -->
             <section id="spa-root" class="view-container">
                 <!-- El contenido será cargado por app.js -->
             </section>
         </main>
     </div>
 
-    <!-- Carga de Scripts Modulares de la Arquitectura -->
-    <!-- 1. Vistas -->
+    <!-- Carga de Scripts Modulares -->
+    <!-- 1. Vistas Visuales -->
     <script src="js/vistas/dashboard.js"></script>
     <script src="js/vistas/expedientes.js"></script>
     <script src="js/vistas/links.js"></script>
@@ -121,5 +120,8 @@
     <!-- 2. Core (Motor y conexiones) -->
     <script src="js/api.js"></script>
     <script src="js/app.js"></script>
+    
+    <!-- 3. SCRIPT DE SEGURIDAD INDEPENDIENTE -->
+    <script src="js/login.js"></script>
 </body>
 </html>
