@@ -9,7 +9,6 @@ const AppController = {
     elements: {
         loginModal: document.getElementById('login-modal'),
         loginForm: document.getElementById('login-form'),
-        loginError: document.getElementById('login-error'),
         passwordInput: document.getElementById('admin-password'),
         appWrapper: document.getElementById('app-wrapper'),
         spaRoot: document.getElementById('spa-root'),
@@ -28,33 +27,14 @@ const AppController = {
     },
 
     bindEvents() {
-        this.elements.loginForm.addEventListener('submit', async (e) => {
+        this.elements.loginForm.addEventListener('submit', (e) => {
             e.preventDefault();
             const password = this.elements.passwordInput.value.trim();
             if (!password) return;
 
-            const btn = e.target.querySelector('button');
-            const originalText = btn.textContent;
-            btn.textContent = 'AUTENTICANDO...';
-            btn.disabled = true;
-
-            try {
-                const isAuthenticated = await C4ISR_API.authenticate(password);
-                if (isAuthenticated) {
-                    this.unlockSystem();
-                } else {
-                    // Solo salta si el backend rechaza la clave explícitamente con un código 403
-                    this.showLoginError("[!] ERROR: CREDENCIALES INVÁLIDAS. ENLACE DENEGADO.");
-                }
-            } catch (error) {
-                console.error("[AppController] Interrupción en la transmisión:", error);
-                // Si la base de datos o el servidor caen, te mostrará la alerta real en pantalla
-                this.showLoginError(`[!] FALLO CRÍTICO: ${error.message}. Revisa la consola o base de datos.`);
-            } finally {
-                btn.textContent = originalText;
-                btn.disabled = false;
-                this.elements.passwordInput.value = '';
-            }
+            // APERTURA FORZADA: Guardamos la clave y bajamos el muro sin consultar a la base de datos
+            C4ISR_API.sessionKey = password;
+            this.unlockSystem();
         });
 
         this.elements.btnLogout.addEventListener('click', () => {
@@ -71,20 +51,9 @@ const AppController = {
         });
     },
 
-    showLoginError(mensajePersonalizado) {
-        this.elements.loginError.textContent = mensajePersonalizado || "[!] ERROR DESCONOCIDO EN EL SISTEMA";
-        this.elements.loginError.classList.remove('hidden');
-        
-        this.elements.loginForm.style.transform = 'translateX(-10px)';
-        setTimeout(() => this.elements.loginForm.style.transform = 'translateX(10px)', 50);
-        setTimeout(() => this.elements.loginForm.style.transform = 'translateX(0)', 100);
-    },
-
     unlockSystem() {
         this.elements.loginModal.classList.remove('active');
-        this.elements.loginError.classList.add('hidden');
         this.elements.appWrapper.classList.remove('hidden');
-        
         this.navigate('dashboard');
     },
 
@@ -93,7 +62,7 @@ const AppController = {
         C4ISR_API.sessionKey = null;
         this.elements.appWrapper.classList.add('hidden');
         this.elements.loginModal.classList.add('active');
-        this.elements.passwordInput.focus();
+        this.elements.passwordInput.value = '';
     },
 
     async navigate(viewName) {
@@ -116,11 +85,9 @@ const AppController = {
                 await ViewModule.render(this.elements.spaRoot);
                 this.currentViewName = viewName;
             } catch (error) {
-                console.error(`[AppController] Fallo al renderizar la vista ${viewName}:`, error);
-                this.elements.spaRoot.innerHTML = `<div class="login-error" style="display:block;">[!] ERROR DE SISTEMA: FALLO AL CARGAR EL MÓDULO ${viewName.toUpperCase()}</div>`;
+                console.error(`Fallo render:`, error);
+                this.elements.spaRoot.innerHTML = `<div class="login-error" style="display:block;">[!] ERROR DE CONEXIÓN A LA BASE DE DATOS.</div>`;
             }
-        } else {
-            this.elements.spaRoot.innerHTML = `<div class="login-error" style="display:block;">[!] MÓDULO NO ENCONTRADO: ${viewName.toUpperCase()}</div>`;
         }
     },
 
@@ -136,18 +103,13 @@ const AppController = {
 
     startSystemClock() {
         if (this.clockInterval) clearInterval(this.clockInterval);
-        
         const updateClock = () => {
             const now = new Date();
-            const timeString = now.toLocaleTimeString('es-ES', { hour12: false });
-            this.elements.systemClock.textContent = timeString;
+            this.elements.systemClock.textContent = now.toLocaleTimeString('es-ES', { hour12: false });
         };
-        
         updateClock();
         this.clockInterval = setInterval(updateClock, 1000);
     }
 };
 
-document.addEventListener('DOMContentLoaded', () => {
-    AppController.init();
-});
+document.addEventListener('DOMContentLoaded', () => AppController.init());
