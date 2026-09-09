@@ -5,41 +5,23 @@ const database = require('../database.js');
 const app = express();
 const PUERTO = process.env.PORT || 3000;
 
-// FORZADO DE CLAVE: Saneamiento de espacios invisibles y respaldo táctico
-const rawPassword = process.env.PANEL_PASSWORD || "1930";
-const PASSWORD = rawPassword.trim();
+// CLAVE FIJADA DIRECTAMENTE (Ignoramos a Render por completo)
+const PASSWORD = "1930";
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname)));
 
-// 1. ENDPOINT DESACOPLADO: Verifica la contraseña sin tocar MongoDB
-app.post('/api/login', (req, res) => {
-    const { clave } = req.body;
-    
-    console.log(`[C4ISR AUTH] Intento de acceso detectado.`);
-    
-    if (clave && clave.trim() === PASSWORD) {
-        console.log(`[C4ISR AUTH] Acceso autorizado. Nivel de administrador.`);
-        return res.json({ success: true });
-    }
-    
-    console.warn(`[C4ISR AUTH] Acceso denegado. Clave incorrecta.`);
-    return res.status(403).json({ error: "Credenciales inválidas" });
-});
-
-// 2. BARRERA TÁCTICA: Middleware para proteger el resto de operaciones
+// Middleware simplificado al máximo
 function autenticar(req, res, next) {
     const token = req.headers['x-auth-key'];
-    if (!token || token !== PASSWORD) {
-        return res.status(403).json({ error: "No autorizado." });
+    if (token !== PASSWORD) {
+        return res.status(403).json({ error: "Clave incorrecta" });
     }
     next();
 }
 
-// 3. ENDPOINTS DE DATOS (Protegidos)
 app.get('/api/datos', autenticar, async (req, res) => {
     try {
-        // Carga de la matriz forense
         const expedientes = await database.obtenerExpedientes({});
         const hace24Horas = new Date(Date.now() - 86400000);
         
@@ -76,51 +58,39 @@ app.get('/api/datos', autenticar, async (req, res) => {
                 });
             }
         });
-
         res.json(datos);
     } catch (error) {
-        console.error("[API ERROR] Fallo de lectura BD:", error);
-        res.status(500).json({ error: "El motor de base de datos no responde." });
+        res.status(500).json({ error: "Fallo BD" });
     }
 });
 
 app.post('/api/notas', autenticar, async (req, res) => {
-    const { id, nota } = req.body;
-    if (!id) return res.status(400).json({ error: "ID requerido." });
-    
     try {
-        const exito = await database.actualizarNotaOSINT(id, nota);
-        exito ? res.json({ success: true }) : res.status(500).json({ error: "Fallo al guardar." });
+        await database.actualizarNotaOSINT(req.body.id, req.body.nota);
+        res.json({ success: true });
     } catch (error) {
-        res.status(500).json({ error: "Error interno del motor BD." });
+        res.status(500).json({ error: "Fallo BD" });
     }
 });
 
 app.post('/api/eliminar', autenticar, async (req, res) => {
-    const { id } = req.body;
-    if (!id) return res.status(400).json({ error: "ID requerido." });
-    
     try {
-        const exito = await database.eliminarExpediente(id);
-        exito ? res.json({ success: true }) : res.status(500).json({ error: "Rechazo de orden de purga." });
+        await database.eliminarExpediente(req.body.id);
+        res.json({ success: true });
     } catch (error) {
-        res.status(500).json({ error: "Error interno del motor BD." });
+        res.status(500).json({ error: "Fallo BD" });
     }
 });
 
 app.get('/api/exportar', autenticar, async (req, res) => {
     try {
         const cursor = database.obtenerExpedientesCursor({});
-        if (!cursor) throw new Error("Motor inactivo");
-        
         const todos = await cursor.toArray();
-        const jsonData = JSON.stringify(todos, null, 2);
-        
         res.setHeader('Content-Type', 'application/json');
         res.setHeader('Content-Disposition', 'attachment; filename=C4ISR_DATABASE.json');
-        res.send(jsonData);
+        res.send(JSON.stringify(todos, null, 2));
     } catch (error) {
-        res.status(500).send("Fallo al compilar la exportación.");
+        res.status(500).send("Fallo exportación");
     }
 });
 
@@ -129,9 +99,6 @@ app.get('*', (req, res) => {
 });
 
 function iniciar() {
-    app.listen(PUERTO, () => {
-        console.log(`[C4ISR SYSTEM] Panel Web activo en puerto ${PUERTO}`);
-    });
+    app.listen(PUERTO, () => console.log(`[C4ISR] Servidor activo puerto ${PUERTO}`));
 }
-
 module.exports = { iniciar };
