@@ -5,29 +5,21 @@ const database = require('../database.js');
 const app = express();
 const PUERTO = process.env.PORT || 3000;
 
-// CONTRASEÑA DE ACCESO DIRECTO (Respaldo táctico de emergencia)
-const PASSWORD = process.env.PANEL_PASSWORD || "1930";
+// SANEAMIENTO ESTRICTO: Elimina espacios invisibles que Render pueda inyectar en la variable
+const rawPassword = process.env.PANEL_PASSWORD || "1930";
+const PASSWORD = rawPassword.trim();
 
-console.log(`[C4ISR DIAGNÓSTICO] Servidor inicializado. Contraseña activa configurada.`);
+app.use(express.json());
+app.use(express.static(path.join(__dirname)));
 
-// Middleware único de autenticación táctica
 function autenticar(req, res, next) {
     const token = req.headers['x-auth-key'];
-    
-    // Depuración en consola para ver exactamente qué contraseña envía el navegador
-    console.log(`[AUTH CHECK] Clave recibida del cliente: "${token}" | Clave esperada: "${PASSWORD}"`);
-
     if (!token || token !== PASSWORD) {
         return res.status(403).json({ error: "Acceso denegado. Credenciales inválidas." });
     }
     next();
 }
 
-// Configuración para procesar JSON y servir la carpeta actual (web) como recursos estáticos
-app.use(express.json());
-app.use(express.static(path.join(__dirname)));
-
-// ENDPOINT: Recopilación de telemetría y perfiles para el Dashboard y OSINT
 app.get('/api/datos', autenticar, async (req, res) => {
     try {
         const expedientes = await database.obtenerExpedientes({});
@@ -48,7 +40,7 @@ app.get('/api/datos', autenticar, async (req, res) => {
                 username: exp.ultimoAlias || 'Desconocido',
                 reincidencia: exp.totalInfracciones || 1,
                 evidencia: ultimoDelito ? ultimoDelito.mensajeOriginal : 'Evidencia no disponible',
-                fecha: ultimoDelito ? ultimoDelito.fecha : exp.primerFichaje,
+                fecha: ultimoDelito ? ultimoDelito.fecha : (exp.primerFichaje || new Date().toISOString()),
                 notas: exp.notasAnalista || ''
             });
 
@@ -57,10 +49,10 @@ app.get('/api/datos', autenticar, async (req, res) => {
                     if (delito.accion && delito.accion.includes('Links')) {
                         const urlMatch = delito.mensajeOriginal.match(/(https?:\/\/[^\s]+|discord\.gg\/[^\s]+)/i);
                         datos.links.push({
-                            serverName: delito.servidor,
+                            serverName: delito.servidor || 'Sector Desconocido',
                             mensaje: delito.mensajeOriginal,
                             url: urlMatch ? urlMatch[0] : '#',
-                            fecha: delito.fecha
+                            fecha: delito.fecha || new Date().toISOString()
                         });
                     }
                 });
@@ -69,30 +61,36 @@ app.get('/api/datos', autenticar, async (req, res) => {
 
         res.json(datos);
     } catch (error) {
-        console.error("[API] Fallo de lectura:", error);
+        console.error("[API] Fallo de lectura en base de datos:", error);
+        // Retornar un error 500 claro evita que el cliente piense que la contraseña es errónea
         res.status(500).json({ error: "Desincronización con el clúster MongoDB." });
     }
 });
 
-// ENDPOINT: Escritura asíncrona de notas de inteligencia
 app.post('/api/notas', autenticar, async (req, res) => {
     const { id, nota } = req.body;
     if (!id) return res.status(400).json({ error: "Identificador de objetivo requerido." });
     
-    const exito = await database.actualizarNotaOSINT(id, nota);
-    exito ? res.json({ success: true }) : res.status(500).json({ error: "Fallo de encriptación en base de datos." });
+    try {
+        const exito = await database.actualizarNotaOSINT(id, nota);
+        exito ? res.json({ success: true }) : res.status(500).json({ error: "Fallo de encriptación en base de datos." });
+    } catch (error) {
+        res.status(500).json({ error: "Fallo interno al actualizar nota." });
+    }
 });
 
-// ENDPOINT: Ejecución de purga de infractores
 app.post('/api/eliminar', autenticar, async (req, res) => {
     const { id } = req.body;
     if (!id) return res.status(400).json({ error: "Identificador de objetivo requerido." });
     
-    const exito = await database.eliminarExpediente(id);
-    exito ? res.json({ success: true }) : res.status(500).json({ error: "El clúster rechazó la orden de purga." });
+    try {
+        const exito = await database.eliminarExpediente(id);
+        exito ? res.json({ success: true }) : res.status(500).json({ error: "El clúster rechazó la orden de purga." });
+    } catch (error) {
+        res.status(500).json({ error: "Fallo interno al eliminar expediente." });
+    }
 });
 
-// ENDPOINT: Volcado binario de la matriz forense (JSON)
 app.get('/api/exportar', autenticar, async (req, res) => {
     try {
         const cursor = database.obtenerExpedientesCursor({});
@@ -105,11 +103,11 @@ app.get('/api/exportar', autenticar, async (req, res) => {
         res.setHeader('Content-Disposition', 'attachment; filename=C4ISR_DATABASE.json');
         res.send(jsonData);
     } catch (error) {
+        console.error("[API] Fallo en exportación:", error);
         res.status(500).send("Fallo irrecuperable al compilar la exportación forense.");
     }
 });
 
-// ENRUTADOR SPA: Cualquier petición ajena a la API redirige al esqueleto visual
 app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
