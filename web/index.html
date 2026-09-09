@@ -5,12 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>La Biblioteca // Archivos Generales Rz</title>
     
-    <!-- Tipografías: Monospace para datos, Cinzel para la elegancia de La Biblioteca -->
+    <!-- Tipografías: Monospace para datos, Cinzel para la elegancia antigua de La Biblioteca -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=JetBrains+Mono:wght@300;400;700&display=swap" rel="stylesheet">
     
-    <!-- Dependencias Externas (CDN) -->
+    <!-- Dependencias Externas -->
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
     
@@ -19,7 +19,7 @@
     <link rel="stylesheet" href="css/layout.css">
     <link rel="stylesheet" href="css/modulos.css">
 
-    <!-- FORZADO DE IDENTIDAD VISUAL Rz (Sobrescribe cualquier rastro azul) -->
+    <!-- FORZADO DE IDENTIDAD VISUAL RZ (Sobrescribe cualquier rastro azul y glitch) -->
     <style>
         :root {
             /* Identidad Rz Central */
@@ -30,8 +30,8 @@
             --accent-cyan: var(--accent-rz) !important; 
             --glow-cyan: var(--glow-rz) !important;
             
-            /* Fondos más sobrios y elegantes */
-            --bg-absolute: #070305 !important; /* Negro con un levísimo tinte cálido */
+            /* Fondos oscuros elegantes */
+            --bg-absolute: #070305 !important; 
             --bg-dark: #0f070a !important;
             --bg-panel: rgba(20, 10, 12, 0.8) !important;
         }
@@ -64,6 +64,10 @@
             border-radius: 4px;
         }
         
+        /* Destruir efectos Glitch antiguos */
+        .scanlines { display: none !important; }
+        .glitch-title::before, .glitch-title::after { display: none !important; }
+        
         .sidebar-header {
             justify-content: center;
         }
@@ -90,7 +94,7 @@
             <form id="login-form">
                 <div class="input-group">
                     <label for="admin-username" style="font-family: 'Cinzel', serif; letter-spacing: 1px;">IDENTIFICADOR</label>
-                    <input type="text" id="admin-username" autocomplete="off" placeholder="Usuario (Ej: Admin)" required>
+                    <input type="text" id="admin-username" autocomplete="off" placeholder="Ej: Admin" required>
                 </div>
                 <div class="input-group">
                     <label for="admin-password" style="font-family: 'Cinzel', serif; letter-spacing: 1px;">CLAVE MAESTRA</label>
@@ -175,7 +179,7 @@
     <script src="js/api.js"></script>
     <script src="js/app.js"></script>
 
-    <!-- MOTOR DE SEGURIDAD ABSOLUTA (Incrustado para evitar fallos de enlace) -->
+    <!-- MOTOR DE SEGURIDAD ABSOLUTA (Incrustado para asegurar la conexión directa con servidor.js) -->
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             const loginForm = document.getElementById('login-form');
@@ -200,7 +204,7 @@
                 btn.disabled = true;
 
                 try {
-                    // Consulta directa al backend
+                    // Consulta directa a la ruta creada en servidor.js
                     const respuesta = await fetch('/api/login', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -208,7 +212,7 @@
                     });
 
                     if (respuesta.ok) {
-                        // ÉXITO: Derrumbar muro y arrancar La Biblioteca
+                        // ÉXITO: Ocultar login y arrancar La Biblioteca
                         errorMsg.classList.add('hidden');
                         modal.classList.remove('active');
                         appWrapper.classList.remove('hidden');
@@ -217,7 +221,6 @@
                         if (window.AppController && typeof window.AppController.start === 'function') {
                             window.AppController.start();
                         } else if (window.AppController && typeof window.AppController.init === 'function') {
-                            // Soporte de retrocompatibilidad por si app.js usa init() en vez de start()
                             window.AppController.init();
                         }
                     } else {
