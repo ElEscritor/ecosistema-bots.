@@ -1,0 +1,134 @@
+/* ==========================================================================
+   SISTEMA DE DISEÑO: CYBER-ABYSS / C4ISR
+   Archivo: css/variables.css
+   ========================================================================== */
+
+:root {
+    /* --- PALETA DE COLORES (Fondos) --- */
+    --bg-absolute: #050505;        /* Negro terminal puro para el fondo raíz */
+    --bg-dark: #0a0f12;            /* Gris ultra oscuro para áreas secundarias y tablas */
+    --bg-panel: rgba(15, 23, 42, 0.6); /* Gris oscuro translúcido para tarjetas y modales */
+    --bg-panel-hover: rgba(15, 23, 42, 0.9);
+
+    /* --- PALETA DE COLORES (Acentos / Energía) --- */
+    --accent-cyan: #00e5ff;        /* Interacciones primarias, navegación y enlaces */
+    --accent-green: #00ff66;       /* Telemetría positiva, estado en línea, confirmaciones */
+    --accent-amber: #ffaa00;       /* Alertas, advertencias, expedientes bajo vigilancia */
+    --accent-red: #ff3333;         /* Purgas, blacklist, desconexión crítica */
+    
+    /* --- PALETA DE COLORES (Textos) --- */
+    --text-main: #e2e8f0;          /* Texto principal, alta legibilidad */
+    --text-muted: #64748b;         /* Texto secundario, rutas, timestamps */
+    --text-cyan: #00e5ff;          /* Texto destacado en cian */
+    --text-green: #00ff66;         /* Texto destacado en verde fósforo */
+
+    /* --- TIPOGRAFÍA --- */
+    --font-mono: 'JetBrains Mono', monospace;   /* Tablas, código, telemetría de datos */
+    --font-display: 'Share Tech Mono', monospace; /* Títulos, cabeceras de panel, logos */
+
+    /* --- EFECTOS Y BORDES --- */
+    --border-thin: 1px solid rgba(0, 229, 255, 0.15);
+    --border-active: 1px solid rgba(0, 229, 255, 0.5);
+    
+    /* Efectos Glow (Resplandor de neón) */
+    --glow-cyan: 0 0 10px rgba(0, 229, 255, 0.3), 0 0 20px rgba(0, 229, 255, 0.1);
+    --glow-green: 0 0 10px rgba(0, 255, 102, 0.3), 0 0 20px rgba(0, 255, 102, 0.1);
+    --glow-amber: 0 0 10px rgba(255, 170, 0, 0.3), 0 0 20px rgba(255, 170, 0, 0.1);
+    --glow-red: 0 0 10px rgba(255, 51, 51, 0.3), 0 0 20px rgba(255, 51, 51, 0.1);
+
+    /* Filtros y Transiciones */
+    --blur-panel: blur(10px);
+    --transition-fast: 0.15s ease-in-out;
+    --transition-normal: 0.3s ease-in-out;
+}
+
+/* ==========================================================================
+   CONFIGURACIÓN GLOBAL BASE
+   ========================================================================== */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background-color: var(--bg-absolute);
+    color: var(--text-main);
+    font-family: var(--font-mono);
+    font-size: 14px;
+    line-height: 1.5;
+    overflow-x: hidden;
+    /* Prevenir selección de texto accidental en el dashboard */
+    user-select: none; 
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* Permitir selección de texto en celdas de tabla y entradas de texto */
+input, textarea, .selectable {
+    user-select: text;
+}
+
+/* ==========================================================================
+   ANIMACIONES GLOBALES (Keyframes)
+   ========================================================================== */
+
+/* Efecto de parpadeo del cursor de la terminal (C:\SYS\ROOT>_) */
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+}
+
+/* Efecto de escaneo de pantalla CTR (Para el modal de Login) */
+@keyframes scanline {
+    0% { transform: translateY(-100%); }
+    100% { transform: translateY(100vh); }
+}
+
+/* Efecto glitch de texto rápido */
+@keyframes glitch-anim {
+    0% { clip: rect(10px, 9999px, 44px, 0); transform: skew(0.6deg); }
+    5% { clip: rect(70px, 9999px, 95px, 0); transform: skew(0.2deg); }
+    10% { clip: rect(29px, 9999px, 83px, 0); transform: skew(0.8deg); }
+    15% { clip: rect(65px, 9999px, 11px, 0); transform: skew(0.3deg); }
+    20% { clip: rect(2px, 9999px, 46px, 0); transform: skew(0.5deg); }
+    25% { clip: rect(80px, 9999px, 8px, 0); transform: skew(0.1deg); }
+    30% { clip: rect(15px, 9999px, 72px, 0); transform: skew(0.7deg); }
+    35% { clip: rect(54px, 9999px, 30px, 0); transform: skew(0.4deg); }
+    40% { clip: rect(93px, 9999px, 60px, 0); transform: skew(0.9deg); }
+    45% { clip: rect(31px, 9999px, 15px, 0); transform: skew(0.2deg); }
+    50% { clip: rect(6px, 9999px, 90px, 0); transform: skew(0.6deg); }
+    55% { clip: rect(85px, 9999px, 22px, 0); transform: skew(0.8deg); }
+    60% { clip: rect(41px, 9999px, 75px, 0); transform: skew(0.3deg); }
+    65% { clip: rect(19px, 9999px, 5px, 0); transform: skew(0.1deg); }
+    70% { clip: rect(68px, 9999px, 40px, 0); transform: skew(0.5deg); }
+    75% { clip: rect(97px, 9999px, 85px, 0); transform: skew(0.7deg); }
+    80% { clip: rect(24px, 9999px, 52px, 0); transform: skew(0.4deg); }
+    85% { clip: rect(59px, 9999px, 18px, 0); transform: skew(0.9deg); }
+    90% { clip: rect(3px, 9999px, 66px, 0); transform: skew(0.2deg); }
+    95% { clip: rect(76px, 9999px, 34px, 0); transform: skew(0.6deg); }
+    100% { clip: rect(48px, 9999px, 98px, 0); transform: skew(0.8deg); }
+}
+
+/* Efecto Fade In para transiciones de la SPA */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Scrollbar personalizada oscura */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+::-webkit-scrollbar-track {
+    background: var(--bg-absolute);
+}
+::-webkit-scrollbar-thumb {
+    background: var(--bg-panel-hover);
+    border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-cyan);
+}

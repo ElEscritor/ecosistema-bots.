@@ -1,1 +1,366 @@
+/* ==========================================================================
+   SISTEMA DE DISEÑO: CYBER-ABYSS / C4ISR
+   Archivo: css/layout.css
+   Objetivo: Estructura base, Layout principal, Sidebar y Login
+   ========================================================================== */
 
+/* --- 1. PANTALLA DE AUTENTICACIÓN (LOGIN) --- */
+
+.login-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background-color: var(--bg-absolute);
+    z-index: 9999;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    transition: opacity var(--transition-normal);
+}
+
+.login-overlay:not(.active) {
+    display: none;
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* Efecto de líneas de escaneo CRT en el login */
+.scanlines {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(
+        to bottom,
+        rgba(255, 255, 255, 0),
+        rgba(255, 255, 255, 0) 50%,
+        rgba(0, 0, 0, 0.2) 50%,
+        rgba(0, 0, 0, 0.2)
+    );
+    background-size: 100% 4px;
+    pointer-events: none;
+    z-index: 1;
+    opacity: 0.3;
+}
+
+.login-panel {
+    position: relative;
+    z-index: 2;
+    background: var(--bg-panel);
+    backdrop-filter: var(--blur-panel);
+    -webkit-backdrop-filter: var(--blur-panel);
+    border: var(--border-thin);
+    padding: 3rem;
+    width: 100%;
+    max-width: 450px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
+}
+
+.login-header {
+    text-align: center;
+    margin-bottom: 2rem;
+}
+
+.glitch-title {
+    font-family: var(--font-display);
+    color: var(--accent-cyan);
+    font-size: 2rem;
+    letter-spacing: 2px;
+    margin-bottom: 0.5rem;
+    position: relative;
+    display: inline-block;
+    text-shadow: var(--glow-cyan);
+}
+
+/* Pseudo-elementos para el efecto Glitch en hover */
+.glitch-title::before, .glitch-title::after {
+    content: attr(data-text);
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: var(--bg-panel);
+}
+.glitch-title::before {
+    left: 2px;
+    text-shadow: -1px 0 red;
+    clip: rect(24px, 550px, 90px, 0);
+    animation: glitch-anim 3s infinite linear alternate-reverse;
+}
+.glitch-title::after {
+    left: -2px;
+    text-shadow: -1px 0 blue;
+    clip: rect(85px, 550px, 140px, 0);
+    animation: glitch-anim 2.5s infinite linear alternate-reverse;
+}
+
+.login-subtitle {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    letter-spacing: 1px;
+}
+
+.input-group {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 1.5rem;
+}
+
+.input-group label {
+    color: var(--accent-cyan);
+    font-size: 0.85rem;
+    margin-bottom: 0.5rem;
+}
+
+.input-group input {
+    background: var(--bg-dark);
+    border: 1px solid var(--text-muted);
+    color: var(--text-main);
+    padding: 0.75rem 1rem;
+    font-family: var(--font-mono);
+    outline: none;
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.input-group input:focus {
+    border-color: var(--accent-cyan);
+    box-shadow: inset 0 0 5px rgba(0, 229, 255, 0.2);
+}
+
+.btn-cyber {
+    width: 100%;
+    background: transparent;
+    border: 1px solid var(--accent-cyan);
+    color: var(--accent-cyan);
+    padding: 0.75rem;
+    font-family: var(--font-mono);
+    font-size: 1rem;
+    font-weight: bold;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    transition: all var(--transition-fast);
+}
+
+.btn-cyber:hover {
+    background: var(--accent-cyan);
+    color: var(--bg-absolute);
+    box-shadow: var(--glow-cyan);
+}
+
+.login-error {
+    margin-top: 1rem;
+    color: var(--accent-red);
+    font-size: 0.85rem;
+    text-align: center;
+    text-shadow: var(--glow-red);
+}
+
+.login-error.hidden {
+    display: none;
+}
+
+/* --- 2. ESTRUCTURA PRINCIPAL DE LA APLICACIÓN --- */
+
+.app-wrapper {
+    display: flex;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+}
+
+.app-wrapper.hidden {
+    display: none;
+}
+
+/* --- 3. BARRA LATERAL TÁCTICA --- */
+
+.tactical-sidebar {
+    width: 250px;
+    background: var(--bg-dark);
+    border-right: var(--border-thin);
+    display: flex;
+    flex-direction: column;
+    z-index: 100;
+}
+
+.sidebar-header {
+    height: 60px;
+    display: flex;
+    align-items: center;
+    padding: 0 1.5rem;
+    border-bottom: var(--border-thin);
+}
+
+.logo-container {
+    margin-right: 10px;
+}
+
+.logo-icon {
+    font-size: 1.5rem;
+    filter: drop-shadow(0 0 5px rgba(0, 229, 255, 0.8));
+}
+
+.logo-text {
+    font-family: var(--font-display);
+    color: var(--text-main);
+    font-size: 1.2rem;
+    letter-spacing: 1.5px;
+    font-weight: bold;
+}
+
+.nav-menu {
+    list-style: none;
+    flex-grow: 1;
+    padding: 1rem 0;
+    overflow-y: auto;
+}
+
+.nav-item {
+    display: flex;
+    align-items: center;
+    padding: 0.8rem 1.5rem;
+    cursor: pointer;
+    color: var(--text-muted);
+    transition: all var(--transition-fast);
+    border-left: 3px solid transparent;
+}
+
+.nav-item:hover {
+    background: var(--bg-panel);
+    color: var(--text-main);
+}
+
+.nav-item.active {
+    background: var(--bg-panel-hover);
+    color: var(--accent-cyan);
+    border-left: 3px solid var(--accent-cyan);
+    box-shadow: inset 5px 0 10px -5px rgba(0, 229, 255, 0.3);
+}
+
+.nav-icon {
+    margin-right: 15px;
+    font-size: 1.1rem;
+}
+
+.nav-label {
+    font-size: 0.95rem;
+    letter-spacing: 0.5px;
+}
+
+.sidebar-footer {
+    padding: 1rem 1.5rem;
+    border-top: var(--border-thin);
+    background: var(--bg-absolute);
+}
+
+.system-status {
+    display: flex;
+    align-items: center;
+    margin-bottom: 1rem;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 8px;
+}
+
+.status-dot.online {
+    background-color: var(--accent-green);
+    box-shadow: var(--glow-green);
+}
+
+.btn-logout {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-family: var(--font-mono);
+    transition: color var(--transition-fast);
+}
+
+.btn-logout:hover {
+    color: var(--accent-red);
+    text-shadow: var(--glow-red);
+}
+.btn-logout:hover .nav-icon {
+    color: var(--accent-red);
+}
+
+/* --- 4. ÁREA PRINCIPAL Y TOPBAR --- */
+
+.main-content {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    overflow: hidden;
+    background: radial-gradient(circle at center, #0a0f12 0%, #050505 100%);
+}
+
+.topbar {
+    height: 60px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 2rem;
+    background: var(--bg-panel);
+    border-bottom: var(--border-thin);
+    backdrop-filter: var(--blur-panel);
+    -webkit-backdrop-filter: var(--blur-panel);
+    z-index: 50;
+}
+
+.breadcrumbs {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+}
+
+.separator {
+    margin: 0 8px;
+    color: var(--accent-cyan);
+}
+
+.path-current {
+    color: var(--accent-cyan);
+    font-weight: bold;
+    text-shadow: 0 0 5px rgba(0, 229, 255, 0.3);
+}
+
+.cursor-blink {
+    color: var(--accent-cyan);
+    animation: blink 1s step-end infinite;
+}
+
+.terminal-clock {
+    color: var(--accent-green);
+    font-size: 0.9rem;
+    text-shadow: var(--glow-green);
+}
+
+/* --- 5. CONTENEDOR DE LA VISTA ACTIVA (SPA ROOT) --- */
+
+.view-container {
+    flex-grow: 1;
+    padding: 2rem;
+    overflow-y: auto;
+    position: relative;
+    /* Animación al cargar cada vista */
+    animation: fadeIn var(--transition-normal);
+}
+
+/* Ocultar elementos genéricos */
+.hidden {
+    display: none !important;
+}
