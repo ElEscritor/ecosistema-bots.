@@ -4,19 +4,20 @@ const database = require('../database.js');
 
 const app = express();
 const PUERTO = process.env.PORT || 3000;
-const PASSWORD = process.env.PANEL_PASSWORD;
 
-// Alerta de diagnóstico en consola para verificar el despliegue en Render
-if (!PASSWORD) {
-    console.warn("[ALERTA CRÍTICA] PANEL_PASSWORD no está definida en las variables de entorno del servidor.");
-} else {
-    console.log("[SISTEMA] Autenticación maestra configurada correctamente.");
-}
+// CONTRASEÑA DE ACCESO DIRECTO (Respaldo táctico de emergencia)
+const PASSWORD = process.env.PANEL_PASSWORD || "1930";
+
+console.log(`[C4ISR DIAGNÓSTICO] Servidor inicializado. Contraseña activa configurada.`);
 
 // Middleware único de autenticación táctica
 function autenticar(req, res, next) {
     const token = req.headers['x-auth-key'];
-    if (!PASSWORD || token !== PASSWORD) {
+    
+    // Depuración en consola para ver exactamente qué contraseña envía el navegador
+    console.log(`[AUTH CHECK] Clave recibida del cliente: "${token}" | Clave esperada: "${PASSWORD}"`);
+
+    if (!token || token !== PASSWORD) {
         return res.status(403).json({ error: "Acceso denegado. Credenciales inválidas." });
     }
     next();
