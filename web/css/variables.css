@@ -1,61 +1,99 @@
 /* ==========================================================================
-   SISTEMA DE DISEÑO: LA BIBLIOTECA (Rz) / C4ISR
+   SISTEMA DE DISEÑO: LA BIBLIOTECA (Rz) — OBSIDIAN TACTICAL UI
    Archivo: css/variables.css
    ========================================================================== */
 
 :root {
-    /* --- PALETA DE COLORES (Fondos) --- */
-    --bg-absolute: #030108;        /* Negro profundo con ligero tinte púrpura/azulado */
-    --bg-dark: #0a0514;            /* Fondo secundario */
-    --bg-panel: rgba(15, 8, 25, 0.7); /* Paneles translúcidos */
-    --bg-panel-hover: rgba(25, 12, 40, 0.9);
+    /* --- SUPERFICIES Y FONDOS (Escala de contraste profesional) --- */
+    --bg-absolute: #09080c;
+    --bg-dark: #110f17;
+    --bg-surface: #171420;
+    --bg-panel: rgba(23, 20, 32, 0.88);
+    --bg-panel-hover: rgba(34, 29, 48, 0.95);
+    --bg-input: #0c0a10;
 
-    /* --- PALETA DE COLORES (Acentos / Energía) --- */
-    --accent-rz: #ff2a6d;          /* ROJO/ROSADO Rz - Color Institucional */
-    --accent-cyan: #00e5ff;        /* Interacciones y escaneos */
-    --accent-green: #00ff66;       /* Telemetría positiva y en línea */
-    --accent-amber: #ffaa00;       /* Advertencias medias */
-    --accent-red: #ff3333;         /* Destrucción / Blacklist crítica */
-    
-    /* --- PALETA DE COLORES (Textos) --- */
-    --text-main: #e2e8f0;          
-    --text-muted: #7A7093;         
-    
-    /* --- TIPOGRAFÍA --- */
-    --font-mono: 'JetBrains Mono', monospace;   
-    --font-display: 'Share Tech Mono', monospace; 
+    /* --- ACENTOS FUNCIONALES Y DE MARCA --- */
+    --accent-rz: #ff2a6d;
+    --accent-rz-Soft: rgba(255, 42, 109, 0.14);
+    --accent-cyan: #ff2a6d; /* Alias de retrocompatibilidad para las vistas JS */
+    --accent-info: #38bdf8;
+    --accent-green: #10b981;
+    --accent-amber: #f59e0b;
+    --accent-red: #ef4444;
 
-    /* --- EFECTOS Y BORDES --- */
-    --border-thin: 1px solid rgba(255, 42, 109, 0.2);
-    --border-active: 1px solid rgba(255, 42, 109, 0.5);
-    
-    /* Efectos Glow (Resplandor) */
-    --glow-rz: 0 0 10px rgba(255, 42, 109, 0.3), 0 0 20px rgba(255, 42, 109, 0.1);
-    --glow-cyan: 0 0 10px rgba(0, 229, 255, 0.3), 0 0 20px rgba(0, 229, 255, 0.1);
-    --glow-red: 0 0 10px rgba(255, 51, 51, 0.3), 0 0 20px rgba(255, 51, 51, 0.1);
+    /* --- JERARQUÍA DE TEXTO --- */
+    --text-main: #f1f5f9;
+    --text-secondary: #cbd5e1;
+    --text-muted: #8b829e;
 
-    /* Transiciones */
-    --blur-panel: blur(10px);
-    --transition-fast: 0.15s ease-in-out;
-    --transition-normal: 0.3s ease-in-out;
+    /* --- TIPOGRAFÍAS --- */
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+    --font-display: 'Cinzel', serif;
+
+    /* --- BORDES Y SOMBRAS --- */
+    --border-subtle: 1px solid rgba(255, 255, 255, 0.07);
+    --border-thin: 1px solid rgba(255, 42, 109, 0.22);
+    --border-active: 1px solid rgba(255, 42, 109, 0.6);
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+
+    /* --- RESPLANDORES CONTROLADOS --- */
+    --glow-rz: 0 0 18px rgba(255, 42, 109, 0.28);
+    --glow-cyan: var(--glow-rz);
+    --glow-green: 0 0 12px rgba(16, 185, 129, 0.3);
+    --glow-red: 0 0 14px rgba(239, 68, 68, 0.35);
+    --shadow-elevated: 0 16px 40px rgba(0, 0, 0, 0.65);
+
+    /* --- TRANSICIONES --- */
+    --blur-panel: blur(14px);
+    --transition-fast: 0.16s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-normal: 0.26s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-* { margin: 0; padding: 0; box-sizing: border-box; }
+*, *::before, *::after {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
 body {
     background-color: var(--bg-absolute);
     color: var(--text-main);
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
     font-size: 14px;
-    line-height: 1.5;
+    line-height: 1.55;
     overflow-x: hidden;
-    user-select: none;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
 }
-input, textarea, .selectable { user-select: text; }
 
-@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
-@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+input, textarea, code, pre, .selectable {
+    user-select: text;
+}
 
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: var(--bg-absolute); }
-::-webkit-scrollbar-thumb { background: rgba(255, 42, 109, 0.3); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--accent-rz); }
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulseDot {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.55; transform: scale(0.92); }
+}
+
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+::-webkit-scrollbar-track {
+    background: var(--bg-absolute);
+}
+::-webkit-scrollbar-thumb {
+    background: rgba(255, 42, 109, 0.3);
+    border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-rz);
+}
