@@ -3,122 +3,65 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>La Biblioteca // Archivos Generales Rz</title>
-    
-    <!-- Tipografías: Monospace para datos, Cinzel para la elegancia antigua de La Biblioteca -->
+    <title>La Biblioteca // Centro de Mando e Inteligencia Rz</title>
+
+    <!-- Tipografías optimizadas: Inter para lectura limpia de UI, JetBrains Mono para telemetría, Cinzel para identidad Rz -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=JetBrains+Mono:wght@300;400;700&display=swap" rel="stylesheet">
-    
-    <!-- Dependencias Externas -->
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+
+    <!-- Librerías Externas -->
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
-    
-    <!-- Hojas de Estilo Estructuradas -->
+
+    <!-- Sistema de Diseño Unificado (Sin parches inline) -->
     <link rel="stylesheet" href="css/variables.css">
     <link rel="stylesheet" href="css/layout.css">
     <link rel="stylesheet" href="css/modulos.css">
-
-    <!-- FORZADO DE IDENTIDAD VISUAL RZ (Sobrescribe cualquier rastro azul y glitch) -->
-    <style>
-        :root {
-            /* Identidad Rz Central */
-            --accent-rz: #ff2a6d !important; /* Rojo/Rosado Rz */
-            --glow-rz: 0 0 15px rgba(255, 42, 109, 0.4), 0 0 30px rgba(255, 42, 109, 0.2) !important;
-            
-            /* Reemplazo táctico del antiguo cian por el color de Rz */
-            --accent-cyan: var(--accent-rz) !important; 
-            --glow-cyan: var(--glow-rz) !important;
-            
-            /* Fondos oscuros elegantes */
-            --bg-absolute: #070305 !important; 
-            --bg-dark: #0f070a !important;
-            --bg-panel: rgba(20, 10, 12, 0.8) !important;
-        }
-
-        /* Estética "La Biblioteca" */
-        .library-title {
-            font-family: 'Cinzel', serif;
-            color: var(--accent-rz);
-            font-size: 2.8rem;
-            letter-spacing: 4px;
-            margin-bottom: 0.2rem;
-            text-align: center;
-            text-shadow: var(--glow-rz);
-            font-weight: 600;
-        }
-
-        .library-subtitle {
-            font-family: 'Cinzel', serif;
-            color: #b0a0a5;
-            font-size: 0.9rem;
-            letter-spacing: 2px;
-            text-align: center;
-            margin-bottom: 2.5rem;
-            text-transform: uppercase;
-        }
-
-        .login-panel {
-            border: 1px solid rgba(255, 42, 109, 0.3) !important;
-            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.9), inset 0 0 20px rgba(255, 42, 109, 0.05) !important;
-            border-radius: 4px;
-        }
-        
-        /* Destruir efectos Glitch antiguos */
-        .scanlines { display: none !important; }
-        .glitch-title::before, .glitch-title::after { display: none !important; }
-        
-        .sidebar-header {
-            justify-content: center;
-        }
-        
-        .logo-text {
-            font-family: 'Cinzel', serif !important;
-            font-size: 1.4rem !important;
-            letter-spacing: 3px !important;
-            color: var(--accent-rz) !important;
-            text-shadow: var(--glow-rz) !important;
-        }
-    </style>
 </head>
 <body>
 
-    <!-- PANTALLA DE AUTENTICACIÓN (Elegante y Estricta) -->
+    <!-- PANTALLA DE AUTENTICACIÓN -->
     <div id="login-modal" class="login-overlay active">
         <div class="login-panel">
             <div class="login-header">
+                <div class="brand-badge">C4ISR // ARCHIVO CENTRAL</div>
                 <h1 class="library-title">LA BIBLIOTECA</h1>
-                <p class="library-subtitle">By RzCentral</p>
+                <p class="library-subtitle">División de Inteligencia RzCentral</p>
             </div>
-            
-            <form id="login-form">
+
+            <form id="login-form" novalidate>
                 <div class="input-group">
-                    <label for="admin-username" style="font-family: 'Cinzel', serif; letter-spacing: 1px;">IDENTIFICADOR</label>
-                    <input type="text" id="admin-username" autocomplete="off" placeholder="Ej: Admin" required>
+                    <label for="admin-username">IDENTIFICADOR DE OPERADOR</label>
+                    <input type="text" id="admin-username" autocomplete="username" placeholder="Ej: Admin" required>
                 </div>
                 <div class="input-group">
-                    <label for="admin-password" style="font-family: 'Cinzel', serif; letter-spacing: 1px;">CLAVE MAESTRA</label>
-                    <input type="password" id="admin-password" autocomplete="off" placeholder="••••••••" required>
+                    <label for="admin-password">CLAVE MAESTRA</label>
+                    <input type="password" id="admin-password" autocomplete="current-password" placeholder="••••••••" required>
                 </div>
-                <button type="submit" class="btn-cyber" style="font-family: 'Cinzel', serif; font-weight: bold; font-size: 1.1rem; padding: 1rem;">
+                <button type="submit" class="btn-cyber">
                     FRANQUEAR ACCESO
                 </button>
             </form>
-            
-            <div id="login-error" class="login-error hidden" style="font-family: 'JetBrains Mono', monospace;">
+
+            <div id="login-error" class="login-error hidden">
                 [!] CREDENCIALES RECHAZADAS.
             </div>
         </div>
     </div>
 
-    <!-- ESTRUCTURA PRINCIPAL DE LA APLICACIÓN SPA -->
+    <!-- ESTRUCTURA PRINCIPAL SPA -->
     <div id="app-wrapper" class="app-wrapper hidden">
-        
+
         <!-- BARRA LATERAL TÁCTICA -->
-        <nav class="tactical-sidebar">
+        <aside class="tactical-sidebar">
             <div class="sidebar-header">
-                <span class="logo-text">LA BIBLIOTECA</span>
+                <div class="sidebar-brand">
+                    <span class="logo-text">LA BIBLIOTECA</span>
+                    <span class="logo-subtext">SISTEMA PANÓPTICO</span>
+                </div>
             </div>
+
             <ul class="nav-menu" id="main-nav">
                 <li class="nav-item active" data-view="dashboard">
                     <span class="nav-icon">📊</span>
@@ -137,111 +80,46 @@
                     <span class="nav-label">Blacklists</span>
                 </li>
             </ul>
+
             <div class="sidebar-footer">
                 <div class="system-status">
                     <span class="status-dot online"></span>
-                    <span class="status-text">SISTEMA EN LÍNEA</span>
+                    <span class="status-text">ENLACE ACTIVO</span>
                 </div>
-                <button id="btn-logout" class="btn-logout">
-                    <span class="nav-icon">🔓</span>
+                <button id="btn-logout" class="btn-logout" type="button">
+                    <span class="nav-icon">🔒</span>
                     <span class="nav-label">Sellar Archivos</span>
                 </button>
             </div>
-        </nav>
+        </aside>
 
-        <!-- CONTENEDOR PRINCIPAL (ZONA DE TRABAJO) -->
+        <!-- ZONA DE TRABAJO PRINCIPAL -->
         <main class="main-content">
             <header class="topbar">
                 <div class="breadcrumbs">
-                    <span class="path-root" style="font-family: 'Cinzel', serif; color: var(--text-muted);">ARCHIVO CENTRAL</span>
+                    <span class="path-root">ARCHIVO CENTRAL</span>
                     <span class="separator">/</span>
-                    <span id="current-path" class="path-current">TELEMETRÍA VIVA</span>
+                    <span id="current-path" class="path-current">TELEMETRÍA</span>
                 </div>
                 <div class="topbar-actions">
+                    <span class="clock-label">UTC/LOCAL</span>
                     <span class="terminal-clock" id="system-clock">00:00:00</span>
                 </div>
             </header>
 
-            <!-- RAÍZ DE LA SPA: AQUÍ SE INYECTA EL DOM DINÁMICO -->
-            <section id="spa-root" class="view-container">
-                <!-- El contenido será cargado por app.js -->
-            </section>
+            <!-- CONTENEDOR DINÁMICO DE VISTAS -->
+            <section id="spa-root" class="view-container"></section>
         </main>
     </div>
 
-    <!-- Carga de Scripts Modulares de la Arquitectura -->
+    <!-- Vistas Modulares -->
     <script src="js/vistas/dashboard.js"></script>
     <script src="js/vistas/expedientes.js"></script>
     <script src="js/vistas/links.js"></script>
     <script src="js/vistas/blacklist.js"></script>
-    
-    <!-- Core y Conexiones -->
+
+    <!-- Motor de API y Enrutador SPA -->
     <script src="js/api.js"></script>
     <script src="js/app.js"></script>
-
-    <!-- MOTOR DE SEGURIDAD ABSOLUTA (Incrustado para asegurar la conexión directa con servidor.js) -->
-    <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            const loginForm = document.getElementById('login-form');
-            const inputUser = document.getElementById('admin-username');
-            const inputPass = document.getElementById('admin-password');
-            const errorMsg = document.getElementById('login-error');
-            const modal = document.getElementById('login-modal');
-            const appWrapper = document.getElementById('app-wrapper');
-
-            if (!loginForm) return;
-
-            loginForm.addEventListener('submit', async (e) => {
-                e.preventDefault(); 
-                
-                const username = inputUser.value.trim();
-                const password = inputPass.value.trim();
-                const btn = e.target.querySelector('button');
-
-                if (!username || !password) return;
-
-                btn.textContent = 'VERIFICANDO...';
-                btn.disabled = true;
-
-                try {
-                    // Consulta directa a la ruta creada en servidor.js
-                    const respuesta = await fetch('/api/login', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ usuario: username, clave: password })
-                    });
-
-                    if (respuesta.ok) {
-                        // ÉXITO: Ocultar login y arrancar La Biblioteca
-                        errorMsg.classList.add('hidden');
-                        modal.classList.remove('active');
-                        appWrapper.classList.remove('hidden');
-                        
-                        if (window.C4ISR_API) window.C4ISR_API.sessionKey = password;
-                        if (window.AppController && typeof window.AppController.start === 'function') {
-                            window.AppController.start();
-                        } else if (window.AppController && typeof window.AppController.init === 'function') {
-                            window.AppController.init();
-                        }
-                    } else {
-                        triggerError('[!] IDENTIFICADOR O CLAVE INCORRECTOS.');
-                    }
-                } catch (error) {
-                    triggerError('[!] ERROR: EL SERVIDOR NO RESPONDE.');
-                } finally {
-                    btn.textContent = 'FRANQUEAR ACCESO';
-                    btn.disabled = false;
-                }
-            });
-
-            function triggerError(mensaje) {
-                errorMsg.textContent = mensaje;
-                errorMsg.classList.remove('hidden');
-                loginForm.style.transform = 'translateX(-10px)';
-                setTimeout(() => loginForm.style.transform = 'translateX(10px)', 50);
-                setTimeout(() => loginForm.style.transform = 'translateX(0)', 100);
-            }
-        });
-    </script>
 </body>
 </html>
