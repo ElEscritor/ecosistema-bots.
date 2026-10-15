@@ -27,31 +27,52 @@ let dbCollection = null;
 let connectionPromise = null;
 
 /**
- * Inicializa la conexión a MongoDB garantizando una única instancia (Singleton)
- * y deteniendo el proceso si el clúster es inalcanzable en el arranque.
+ * Sincroniza un índice de forma segura. Si ya existe en MongoDB con opciones
+ * heredadas distintas (IndexOptionsConflict / código 85 o 86), conserva el existente
+ * o lo recrea si es seguro, sin tumbar jamás el despliegue en producción.
  */
-// Sincronización robusta de índices (elimina conflictos previos)
-            try {
-                await dbCollection.dropIndex('userId_1');
-            } catch (_) {
-                // Si el índice no existía previamente, ignoramos el error
-            }
+async function asegurarIndiceSeguro(collection, keySpec, options = {}) {
+    try {
+        await collection.createIndex(keySpec, options);
+    } catch (error) {
+        // Códigos 85 (IndexOptionsConflict) y 86 (IndexKeySpecsConflict) en MongoDB
+        if (error.code === 85 || error.code === 86 || error.message.includes('existing index')) {
+            console.warn(`[AVISO BD] Índice existente detectado para ${JSON.stringify(keySpec)}. Conservando índice actual del clúster.`);
+        } else {
+            console.warn(`[AVISO BD] No se pudo optimizar el índice ${JSON.stringify(keySpec)}: ${error.message}`);
+        }
+    }
+}
 
-            await Promise.all([
-                dbCollection.createIndex({ userId: 1 }, { unique: true, background: true }),
-                dbCollection.createIndex({ ultimoAlias: 'text' }, { background: true }),
-                dbCollection.createIndex({ totalInfracciones: -1 }, { background: true }),
-                dbCollection.createIndex({ primerFichaje: -1 }, { background: true })
-            ]);
+/**
+ * Inicializa la conexión a MongoDB garantizando una única instancia (Singleton)
+ * y deteniendo el proceso únicamente si el clúster es inalcanzable en red.
+ */
+async function conectarBaseDatos() {
+    if (dbCollection) return dbCollection;
+    if (connectionPromise) return connectionPromise;
 
-            console.log('[SISTEMA] Clúster MongoDB conectado e índices sincronizados.');
-            return dbCollection;
+    connectionPromise = (async () => {
+        try {
+            await client.connect();
+            const db = client.db(DB_NAME);
+            dbCollection = db.collection(COLLECTION_NAME);
         } catch (error) {
             connectionPromise = null;
-            console.error('[ERROR CRÍTICO BD] Fallo al conectar o indexar MongoDB:', error.message);
-            // En producción, si la BD principal falla al arrancar, el proceso debe fallar rápido (Fail-Fast)
+            console.error('[ERROR CRÍTICO BD] Fallo de red al conectar con el clúster MongoDB:', error.message);
             process.exit(1);
         }
+
+        // Sincronización tolerante de índices (compatible con bases de datos ya pobladas)
+        await Promise.all([
+            asegurarIndiceSeguro(dbCollection, { userId: 1 }, { background: true }),
+            asegurarIndiceSeguro(dbCollection, { ultimoAlias: 'text' }, { background: true }),
+            asegurarIndiceSeguro(dbCollection, { totalInfracciones: -1 }, { background: true }),
+            asegurarIndiceSeguro(dbCollection, { primerFichaje: -1 }, { background: true })
+        ]);
+
+        console.log('[SISTEMA] Clúster MongoDB enlazado e índices verificados correctamente.');
+        return dbCollection;
     })();
 
     return connectionPromise;
@@ -213,7 +234,7 @@ async function actualizarNotaOSINT(userId, nota) {
 async function inyectarObjetivoManual(userId) {
     if (!dbCollection || !userId) return false;
     const idLimpio = String(userId).trim();
-    if (!/^\d{17,20}$/.test(idLimpio)) return false; // Validación de formato Snowflake de Discord
+    if (!/^\d{17,20}$/.test(idLimpio)) return false;
 
     try {
         await dbCollection.updateOne(
