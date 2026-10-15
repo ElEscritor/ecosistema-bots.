@@ -1,91 +1,130 @@
+'use strict';
+
 /* ==========================================================================
    MÓDULO DE DEFENSA ACTIVA: INTERCEPTOR DE SQUADS Y COMANDOS HOSTILES
    Archivo: modulos/modulo_squads.js
-   Objetivo: Captura de comandos de destrucción, blindaje heurístico nativo,
-             transcripción clínica y snapshot inmutable de evidencia.
    ========================================================================== */
 
 const { MessageEmbed } = require('discord.js-selfbot-v13');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
-const database = require('../database.js'); //[cite: 3]
-const transmisor = require('../web/transmisor.js'); //[cite: 3]
 
-const CORDCAT_API_KEY = process.env.CORDCAT_API_KEY || "cc_c67695eac3f8b0fc7b83db00075086e016f0ce9f55b68814"; //[cite: 3]
+const database = require('../database.js');
+const transmisor = require('../web/transmisor.js');
 
-/* --- 1. OPTIMIZACIÓN LÉXICA SILENCIOSA (CACHE DE COMANDOS) --- */
-// El catálogo de comandos se carga y estructura una sola vez en el ciclo de vida del proceso
-const comandosPath = path.join(__dirname, '../comandos_squads.json'); //[cite: 3]
-const comandosSquads = JSON.parse(fs.readFileSync(comandosPath, 'utf8')); //[cite: 3]
+const CORDCAT_API_KEY = process.env.CORDCAT_API_KEY || '';
+const HTTP_TIMEOUT_MS = 2500;
 
-/* --- 2. MOTOR DE PRESERVACIÓN FORENSE (SNAPSHOT BASE64) --- */
-async function obtenerAvatarBase64(url) {
+/**
+ * Escapa caracteres especiales de RegExp para construir un matcher exacto de comando.
+ */
+function escaparRegExp(str) {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Carga los comandos de squads ordenándolos de mayor a menor longitud
+ * (para que '.sexopremium' se evalúe antes que '.sexo') y exigiendo fin de palabra o espacio.
+ */
+function cargarComandosSquads() {
+    const comandosPath = path.join(__dirname, '../comandos_squads.json');
     try {
-        const response = await axios.get(url, { responseType: 'arraybuffer', timeout: 2500 });
-        const buffer = Buffer.from(response.data, 'binary').toString('base64');
-        const mimeType = response.headers['content-type'] || 'image/png';
-        return `data:${mimeType};base64,${buffer}`;
+        const raw = fs.readFileSync(comandosPath, 'utf8');
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return [];
+
+        return parsed
+            .filter(c => c && typeof c.comando === 'string' && c.comando.trim().length > 0)
+            .sort((a, b) => b.comando.length - a.comando.length)
+            .map(c => {
+                const cmdLimpio = c.comando.trim();
+                return {
+                    comando: cmdLimpio,
+                    descripcion: String(c.descripcion || 'Comando hostil detectado'),
+                    severidad: String(c.severidad || 'CRITICO').toUpperCase(),
+                    colorHex: Number(c.colorHex) || 10181046,
+                    webhookDestino: String(c.webhookDestino || 'WEBHOOK_Squads'),
+                    // Coincide solo si el mensaje empieza por el comando seguido de espacio o fin de línea
+                    regex: new RegExp(`^${escaparRegExp(cmdLimpio)}(?:\\s+\vert{}$)`, 'i')
+                };
+            });
     } catch (error) {
-        return url; // Retorno de URL original como salvavidas visual
+        console.error('[ERROR MÓDULO SQUADS] Fallo al cargar comandos_squads.json:', error.message);
+        return [];
     }
 }
 
-/* --- 3. CONSTRUCTOR DE EVIDENCIA HTML (CÁPSULA DE TIEMPO DISCORD) --- */
+const comandosSquads = cargarComandosSquads();
+
+function escaparHTML(texto) {
+    if (typeof texto !== 'string') return '';
+    return texto
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+async function obtenerAvatarBase64(url) {
+    try {
+        const response = await axios.get(url, {
+            responseType: 'arraybuffer',
+            timeout: HTTP_TIMEOUT_MS,
+            maxContentLength: 2 * 1024 * 1024
+        });
+        const buffer = Buffer.from(response.data, 'binary').toString('base64');
+        const mimeType = response.headers['content-type'] || 'image/png';
+        return `data:${mimeType};base64,${buffer}`;
+    } catch (_) {
+        return url;
+    }
+}
+
+async function consultarCordCat(userId) {
+    if (!CORDCAT_API_KEY) {
+        return '  [CORDCAT_API_KEY no configurada en el entorno]';
+    }
+    try {
+        const res = await axios.get(`https://api.cordcat.com/v1/users/${userId}`, {
+            headers: { Authorization: `Bearer ${CORDCAT_API_KEY}` },
+            timeout: HTTP_TIMEOUT_MS
+        });
+        const data = res.data || {};
+        const flags = data.flags ? `**Marcadores:** ${data.flags}` : 'Historial Limpio';
+        const riesgo = data.risk_evaluation ? `**Perfil de Riesgo:** ${data.risk_evaluation}` : 'Bajo/Nulo';
+        const vinculadas = Array.isArray(data.linked_accounts) ? `**Alt-Accounts Detectadas:** ${data.linked_accounts.length}` : 'Ninguna';
+        return `  ${flags}\n  ${riesgo}\n${vinculadas}`;
+    } catch (_) {
+        return '  [API Externa fuera de línea]';
+    }
+}
+
 function generarEvidenciaHTML(mensajeCrudo, authorTag, authorId, avatarB64, fechaStr) {
-    const mensajeSeguro = mensajeCrudo.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const mensajeSeguro = escaparHTML(mensajeCrudo);
+    const tagSeguro = escaparHTML(authorTag);
+    const idSeguro = escaparHTML(authorId);
+    const fechaSegura = escaparHTML(fechaStr);
 
     return `<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Evidencia Forense de Comando - ${authorId}</title>
+    <title>Evidencia Forense de Comando - ${idSeguro}</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600&display=swap');
-        body { 
-            background-color: #313338; 
-            color: #dbdee1; 
-            font-family: 'gg sans', 'Noto Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif; 
-            padding: 15px 20px; 
-            margin: 0; 
-        }
-        .message-container { 
-            display: flex; 
-            padding-top: 2px; 
-            padding-bottom: 2px; 
-            margin-top: 17px;
-        }
+        body { background-color: #313338; color: #dbdee1; font-family: 'gg sans', 'Noto Sans', sans-serif; padding: 15px 20px; margin: 0; }
+        .message-container { display: flex; padding: 2px 0; margin-top: 17px; }
         .message-container:hover { background-color: #2e3035; }
-        .avatar { 
-            width: 40px; 
-            height: 40px; 
-            border-radius: 50%; 
-            margin-right: 16px; 
-            margin-top: 2px; 
-            object-fit: cover;
-            background-color: #1e1f22;
-        }
+        .avatar { width: 40px; height: 40px; border-radius: 50%; margin-right: 16px; margin-top: 2px; object-fit: cover; background-color: #1e1f22; }
         .content { display: flex; flex-direction: column; width: 100%; }
         .header { display: flex; align-items: baseline; margin-bottom: 4px; }
         .username { color: #ffffff; font-weight: 500; font-size: 16px; margin-right: 8px; }
         .timestamp { color: #949ba4; font-size: 12px; font-weight: 400; }
-        .text { 
-            font-size: 16px; 
-            line-height: 1.375rem; 
-            white-space: pre-wrap; 
-            word-break: break-word; 
-            color: #dbdee1;
-        }
-        .watermark { 
-            margin-top: 40px; 
-            padding-top: 15px; 
-            border-top: 1px solid rgba(255, 255, 255, 0.05); 
-            color: #7A7093; 
-            font-size: 11px; 
-            text-transform: uppercase; 
-            letter-spacing: 1px; 
-            text-align: left;
-        }
+        .text { font-size: 16px; line-height: 1.375rem; white-space: pre-wrap; word-break: break-word; color: #dbdee1; }
+        .watermark { margin-top: 40px; padding-top: 15px; border-top: 1px solid rgba(255, 255, 255, 0.05); color: #7A7093; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
     </style>
 </head>
 <body>
@@ -93,140 +132,116 @@ function generarEvidenciaHTML(mensajeCrudo, authorTag, authorId, avatarB64, fech
         <img class="avatar" src="${avatarB64}" alt="Avatar">
         <div class="content">
             <div class="header">
-                <span class="username">${authorTag}</span>
-                <span class="timestamp">${fechaStr}</span>
+                <span class="username">${tagSeguro}</span>
+                <span class="timestamp">${fechaSegura}</span>
             </div>
             <div class="text">${mensajeSeguro}</div>
         </div>
     </div>
-    <div class="watermark">EVIDENCIA FORENSE COMANDO SQUAD | C4ISR COMMAND CENTER | UID: ${authorId}</div>
+    <div class="watermark">EVIDENCIA FORENSE COMANDO SQUAD | C4ISR COMMAND CENTER | UID: ${idSeguro}</div>
 </body>
 </html>`;
 }
 
-/* --- 4. PRE-PROCESADOR DE CONTEXTO TEXTUAL (CLÍNICO) --- */
 function compilarContextoClinico(message, contextoCache, servidorOrigen, casoId) {
-    let contextoTxtData = `[ REGISTRO FORENSE DE COMANDOS ]\n`;
-    contextoTxtData += `Sujeto: ${message.author.tag} (${message.author.id})\n`;
-    contextoTxtData += `Servidor Afectado: ${servidorOrigen}\n`;
-    contextoTxtData += `ID de Referencia: ${casoId}\n\n`;
-    contextoTxtData += `--- TRANSCRIPCIÓN DEL CANAL ---\n`;
+    let txt = `[ REGISTRO FORENSE DE COMANDOS ]\n`;
+    txt += `Sujeto: ${message.author.tag} (${message.author.id})\n`;
+    txt += `Servidor Afectado: ${servidorOrigen}\n`;
+    txt += `ID de Referencia: ${casoId}\n\n`;
+    txt += `--- TRANSCRIPCIÓN DEL CANAL ---\n`;
 
-    const traducirVectores = (txt) => {
-        return txt.replace(/<@!?[0-9]+>/g, '[@Usuario]')
-                  .replace(/<#[0-9]+>/g, '[#Canal]')
-                  .replace(/<@&[0-9]+>/g, '[@Rol]');
-    };
+    const traducirVectores = (str) => String(str || '')
+        .replace(/<@!?[0-9]+>/g, '[@Usuario]')
+        .replace(/<#[0-9]+>/g, '[#Canal]')
+        .replace(/<@&[0-9]+>/g, '[@Rol]');
 
-    if (contextoCache && contextoCache.length > 0) {
-        contextoCache.forEach(msg => {
-            const time = new Date(msg.createdTimestamp).toISOString().split('T')[1].slice(0,8);
-            const msgSaneado = traducirVectores(msg.content);
-            contextoTxtData += `[${time}] ${msg.authorTag}: ${msgSaneado}\n`;
-        });
+    if (Array.isArray(contextoCache) && contextoCache.length > 0) {
+        for (const msg of contextoCache) {
+            const time = new Date(msg.createdTimestamp || Date.now()).toISOString().split('T')[1].slice(0, 8);
+            txt += `[${time}] ${msg.authorTag}:${traducirVectores(msg.content)}\n`;
+        }
     } else {
-        contextoTxtData += "[00:00:00] No hay datos residuales en la memoria caché del canal.\n";
+        txt += '[00:00:00] No hay datos residuales en la memoria caché del canal.\n';
     }
 
-    return contextoTxtData;
+    return txt;
 }
 
-/* --- FUNCIÓN PRINCIPAL DE EJECUCIÓN --- */
-async function ejecutar(message, contextoCache) { //[cite: 3]
-    const contenidoMensaje = message.content.toLowerCase(); //[cite: 3]
-    let alertaDisparada = false;
-    let datosAlerta = null;
-    let casoIdGenerado = 'SQD_' + Math.random().toString(36).substring(2, 9).toUpperCase(); //[cite: 3]
+/**
+ * Intercepta comandos de ataque/nuke verificando delimitadores exactos y ejecutando I/O concurrente.
+ */
+async function ejecutar(message, contextoCache) {
+    if (!message?.content || comandosSquads.length === 0) return false;
 
-    // Evaluación ultra-rápida de prefijos
-    for (const cmd of comandosSquads) { //[cite: 3]
-        if (contenidoMensaje.startsWith(cmd.comando.toLowerCase())) { //[cite: 3]
-            alertaDisparada = true;
-            datosAlerta = { 
-                idRegla: cmd.comando, 
-                descripcion: cmd.descripcion, 
-                colorHex: cmd.colorHex, 
-                webhookDestino: cmd.webhookDestino, 
-                severidad: cmd.severidad, 
-                accionId: casoIdGenerado 
-            };
-            break; // Optimización de escape rápido
+    const contenidoTrim = message.content.trim();
+    let comandoDetectado = null;
+
+    for (const cmd of comandosSquads) {
+        if (cmd.regex.test(contenidoTrim)) {
+            comandoDetectado = cmd;
+            break;
         }
     }
 
-    if (alertaDisparada && datosAlerta) {
-        const urlWebhook = process.env[datosAlerta.webhookDestino]; //[cite: 3]
-        if (!urlWebhook) return true;
+    if (!comandoDetectado) return false;
 
-        const servidorOrigen = message.guild ? message.guild.name : 'Sector Privado (DM)'; //[cite: 3]
-        let estadoBD = "Registro Táctico Omitido"; //[cite: 3]
-        
-        // Política de tolerancia cero: Fichaje condicionado a severidad crítica
-        if (datosAlerta.severidad === "CRITICO") { //[cite: 3]
-            estadoBD = await database.ficharInfractor( //[cite: 3]
-                message.author.id, 
-                message.author.tag, 
-                `Ejecución de Comando Crítico: ${datosAlerta.idRegla} (${datosAlerta.descripcion})`, //[cite: 3]
-                datosAlerta.accionId,
-                message.content,
-                servidorOrigen
-            );
-        }
+    const urlWebhook = process.env[comandoDetectado.webhookDestino];
+    if (!urlWebhook) return true;
 
-        /* --- INTEGRACIÓN AVANZADA DE CORDCAT (TIMEOUT Y FALLBACK) --- */
-        let infoCordCat = "Extrayendo metadatos de riesgo...";
-        try {
-            const cordcatRes = await axios.get(`https://api.cordcat.com/v1/users/${message.author.id}`, { 
-                headers: { 'Authorization': `Bearer ${CORDCAT_API_KEY}` }, 
-                timeout: 2500 
-            });
-            const cordData = cordcatRes.data;
-            const flags = cordData.flags ? `**Marcadores:** ${cordData.flags}` : "Historial Limpio";
-            const riesgo = cordData.risk_evaluation ? `**Perfil de Riesgo:** ${cordData.risk_evaluation}` : "Bajo/Nulo";
-            const vinculadas = cordData.linked_accounts ? `**Alt-Accounts Detectadas:** ${cordData.linked_accounts.length}` : "Ninguna";
-            
-            infoCordCat = `  ${flags}\n  ${riesgo}\n  ${vinculadas}`;
-        } catch (error) { 
-            infoCordCat = `  [API Externa fuera de línea]`; 
-        }
+    const casoId = `SQD_${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+    const servidorOrigen = message.guild?.name || 'Sector Privado (DM)';
+    const avatarURLOriginal = message.author.displayAvatarURL({ format: 'png', dynamic: true, size: 256 });
 
-        // Generación de Evidencia Textual (Cero Adornos)
-        const contextoTxtData = compilarContextoClinico(message, contextoCache, servidorOrigen, datosAlerta.accionId);
+    const promesaBD = comandoDetectado.severidad === 'CRITICO'
+        ? database.ficharInfractor(
+            message.author.id,
+            message.author.tag,
+            `Ejecución de Comando Crítico: ${comandoDetectado.comando} (${comandoDetectado.descripcion})`,
+            casoId,
+            message.content,
+            servidorOrigen
+        )
+        : Promise.resolve('Registro Táctico Omitido');
 
-        // Descarga de Avatar y Generación de HTML Inmutable
-        const avatarURLOriginal = message.author.displayAvatarURL({ format: 'png', dynamic: true, size: 256 }); //[cite: 3]
-        const avatarB64 = await obtenerAvatarBase64(avatarURLOriginal);
-        
-        const opcionesFecha = { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }; //[cite: 3]
-        const fechaExactaStr = new Date(message.createdTimestamp).toLocaleString('es-ES', opcionesFecha); //[cite: 3]
+    // Ejecución en paralelo de Base de Datos, API CordCat y descarga de Avatar
+    const [estadoBD, infoCordCat, avatarB64] = await Promise.all([
+        promesaBD,
+        consultarCordCat(message.author.id),
+        obtenerAvatarBase64(avatarURLOriginal)
+    ]);
 
-        const htmlData = generarEvidenciaHTML(message.content, message.author.tag, message.author.id, avatarB64, fechaExactaStr);
+    const opcionesFecha = {
+        timeZone: 'Europe/Madrid',
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit'
+    };
+    const fechaExactaStr = new Date(message.createdTimestamp || Date.now()).toLocaleString('es-ES', opcionesFecha);
 
-        /* --- ARQUITECTURA DE EMBED ANALÍTICO DE SQUADS --- */
-        const panelForense = new MessageEmbed() //[cite: 3]
-            .setColor(datosAlerta.colorHex) //[cite: 3]
-            .setAuthor({ name: `INFRACCIÓN DE COMANDO: ${message.author.tag}`, iconURL: avatarURLOriginal }) 
-            .setTitle(`Evaluación de Severidad: ${datosAlerta.severidad}`)
-            .setDescription(`**Payload Ejecutado:**\n\`\`\`text\n${message.content.substring(0, 800)}\n\`\`\``) 
-            .setThumbnail(avatarURLOriginal) 
-            .addFields(
-                { name: '  Identificador Único', value: `\`${message.author.id}\``, inline: true }, //[cite: 3]
-                { name: '  Localización Exacta', value: `[Rastrear Nodo](${message.url})`, inline: true }, //[cite: 3]
-                { name: '  Sistema Comprometido', value: `**${servidorOrigen}**\n<#${message.channel.id}>`, inline: true }, //[cite: 3]
-                { name: '  Persistencia de Datos', value: estadoBD, inline: false }, //[cite: 3]
-                { name: '  Auditoría de Red Externa', value: infoCordCat, inline: false } //[cite: 3]
-            )
-            .setFooter({ text: `C4ISR Squad Case: ${datosAlerta.accionId} | HORA DE IMPACTO: ${fechaExactaStr}` }); //[cite: 3]
+    const contextoTxtData = compilarContextoClinico(message, contextoCache, servidorOrigen, casoId);
+    const htmlData = generarEvidenciaHTML(message.content, message.author.tag, message.author.id, avatarB64, fechaExactaStr);
 
-        const archivosAdjuntos = [ //[cite: 3]
-            { nombre: `EVIDENCIA_SQUAD_${message.author.id}.html`, buffer: htmlData, mimetype: 'text/html' }, //[cite: 3]
-            { nombre: `CONTEXTO_${message.author.id}.txt`, buffer: contextoTxtData, mimetype: 'text/plain' } //[cite: 3]
-        ];
+    const panelForense = new MessageEmbed()
+        .setColor(comandoDetectado.colorHex)
+        .setAuthor({ name: `INFRACCIÓN DE COMANDO: ${message.author.tag}`, iconURL: avatarURLOriginal })
+        .setTitle(`Evaluación de Severidad: ${comandoDetectado.severidad}`)
+        .setDescription(`**Payload Ejecutado:**\n\`\`\`text\n${message.content.slice(0, 800)}\n\`\`\``)
+        .setThumbnail(avatarURLOriginal)
+        .addFields(
+            { name: 'Identificador Único', value: `\`${message.author.id}\``, inline: true },
+            { name: 'Localización Exacta', value: `[Rastrear Nodo](${message.url})`, inline: true },
+            { name: 'Sistema Comprometido', value: `**${servidorOrigen}**\n<#${message.channel.id}>`, inline: true },
+            { name: 'Persistencia de Datos', value: String(estadoBD), inline: false },
+            { name: 'Auditoría de Red Externa', value: infoCordCat, inline: false }
+        )
+        .setFooter({ text: `C4ISR Squad Case: ${casoId} | HORA DE IMPACTO: ${fechaExactaStr}` });
 
-        await transmisor.enviarWebhook(urlWebhook, panelForense.toJSON(), null, archivosAdjuntos); //[cite: 3]
-        return true; 
-    }
-    return false; //[cite: 3]
+    const archivosAdjuntos = [
+        { nombre: `EVIDENCIA_SQUAD_${message.author.id}.html`, buffer: htmlData, mimetype: 'text/html' },
+        { nombre: `CONTEXTO_${message.author.id}.txt`, buffer: contextoTxtData, mimetype: 'text/plain' }
+    ];
+
+    await transmisor.enviarWebhook(urlWebhook, panelForense.toJSON(), null, archivosAdjuntos);
+    return true;
 }
 
-module.exports = { ejecutar }; //[cite: 3]
+module.exports = { ejecutar };
