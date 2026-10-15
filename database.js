@@ -30,17 +30,13 @@ let connectionPromise = null;
  * Inicializa la conexión a MongoDB garantizando una única instancia (Singleton)
  * y deteniendo el proceso si el clúster es inalcanzable en el arranque.
  */
-async function conectarBaseDatos() {
-    if (dbCollection) return dbCollection;
-    if (connectionPromise) return connectionPromise;
+// Sincronización robusta de índices (elimina conflictos previos)
+            try {
+                await dbCollection.dropIndex('userId_1');
+            } catch (_) {
+                // Si el índice no existía previamente, ignoramos el error
+            }
 
-    connectionPromise = (async () => {
-        try {
-            await client.connect();
-            const db = client.db(DB_NAME);
-            dbCollection = db.collection(COLLECTION_NAME);
-
-            // Creación de índices en paralelo
             await Promise.all([
                 dbCollection.createIndex({ userId: 1 }, { unique: true, background: true }),
                 dbCollection.createIndex({ ultimoAlias: 'text' }, { background: true }),
