@@ -1,27 +1,27 @@
 [
   {
     "etiqueta": "DEMOGRAFÍA_EDAD",
-    "patron": "\\b(tengo|cumplo|cumplí|voy a cumplir)\\s+(\\d{2})\\s+(años|añitos)\\b",
+    "patron": "(?:^|\\s)(tengo|cumplo|cumpl[ií]|voy a cumplir)\\s+(\\d{2})\\s+(a[ñn]os|a[ñn]itos)(?=\\s|[.,;!?]|$)",
     "descripcion": "Captura revelaciones explícitas de edad biológica."
   },
   {
     "etiqueta": "GEOLOCALIZACIÓN_ORIGEN",
-    "patron": "\\b(soy de|vivo en|viajo a|regreso a|mi país es)\\s+([a-zA-ZáéíóúÁÉÍÓÚñÑ\\s]{3,20})\\b",
+    "patron": "(?:^|\\s)(soy de|vivo en|viajo a|regreso a|mi pa[ií]s es)\\s+([a-zA-ZáéíóúÁÉÍÓÚñÑ\\s]{3,20})(?=\\s|[.,;!?]|$)",
     "descripcion": "Rastrea países, ciudades o regiones de residencia."
   },
   {
     "etiqueta": "IDENTIDAD_NOMBRE_REAL",
-    "patron": "\\b(me llamo|mi nombre es|mi verdadero nombre es|todos me dicen)\\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+\\s*[A-ZÁÉÍÓÚÑ]?[a-záéíóúñ]*)\\b",
+    "patron": "(?:^|\\s)(me llamo|mi nombre es|mi verdadero nombre es|todos me dicen)\\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)?)(?=\\s|[.,;!?]|$)",
     "descripcion": "Extrae posibles nombres de pila mediante reconocimiento de mayúsculas tras el detonante."
   },
   {
     "etiqueta": "VINCULACIÓN_REDES",
-    "patron": "\\b(mi (instagram|insta|ig|twitter|x|tiktok|facebook) es|síganme en)\\s+(@[a-zA-Z0-9_.]+)\\b",
+    "patron": "(?:^|\\s)(mi (?:instagram|insta|ig|twitter|x|tiktok|facebook) es|s[ií]ganme en)\\s+(@[a-zA-Z0-9_.]+)",
     "descripcion": "Captura manijas (@handles) de redes sociales externas."
   },
   {
     "etiqueta": "METADATOS_GÉNERO",
-    "patron": "\\b(soy (un chico|una chica|un hombre|una mujer|un niño|una niña))\\b",
+    "patron": "(?:^|\\s)(soy (?:un chico|una chica|un hombre|una mujer|un ni[ñn]o|una ni[ñn]a))(?=\\s|[.,;!?]|$)",
     "descripcion": "Define el género autodeterminado por el objetivo en el chat."
   }
 ]
