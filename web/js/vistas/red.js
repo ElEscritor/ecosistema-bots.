@@ -1,7 +1,7 @@
 'use strict';
 
 /* ==========================================================================
-   VISTA: MAPA DE RED C4ISR v2.0 (FÍSICAS ADAPTATIVAS // SPOTLIGHT // ALTS)
+   VISTA: MAPA DE RED C4ISR v2.5 (FÍSICAS ADAPTATIVAS // ALIANZAS // ALTS)
    Archivo: js/vistas/red.js
    ========================================================================== */
 
@@ -19,8 +19,9 @@ window.C4ISR_Views.red = {
     nodes: new Map(),
     edges: [],
     altEdges: [],
-    adjacency: new Map(), // Map<nodeKey, Set<neighborKey>> para Spotlight instantáneo
-    serverMembers: new Map(), // Map<serverKey, Array<userNode>>
+    allianceEdges: [],
+    adjacency: new Map(),
+    serverMembers: new Map(),
     suspectPairs: [],
     altMapByUser: new Map(),
     particles: [],
@@ -33,12 +34,12 @@ window.C4ISR_Views.red = {
     selectedNode: null,
     highlightedPair: null,
     lastMousePos: { x: 0, y: 0 },
-    screenMousePos: { x: 0, y: 0 },
 
     rightPanelTab: 'inspector',
     physicsEnabled: true,
     showUserLinks: true,
     showAltLinks: true,
+    showAllianceLinks: true,
     onlyBridges: false,
     hideEmptyServers: false,
     searchTerm: '',
@@ -47,13 +48,14 @@ window.C4ISR_Views.red = {
         container.innerHTML = `
             <div class="panel-header" style="margin-bottom: 0.65rem; padding-bottom: 0.55rem;">
                 <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
-                    <span class="panel-title" style="font-size: 1.05rem; color: var(--accent-rz);">TOPOLOGÍA EN TIEMPO REAL // SERVIDORES, ACTIVIDAD Y ALTS</span>
+                    <span class="panel-title" style="font-size: 1.05rem; color: var(--accent-rz);">TOPOLOGÍA EN TIEMPO REAL // SERVIDORES, ALIANZAS Y ALTS</span>
                     <span id="red-stats-badge" class="badge badge-green">SINCRONIZANDO...</span>
                     <span id="red-alts-badge" class="badge badge-amber">0 ALTS DETECTADAS</span>
                 </div>
                 <div style="display: flex; gap: 0.4rem; flex-wrap: wrap;">
                     <button id="btn-toggle-empty-srv" class="btn-action" type="button">OCULTAR SERVERS VACÍOS: OFF</button>
                     <button id="btn-toggle-bridges" class="btn-action" type="button">SOLO PUENTES: OFF</button>
+                    <button id="btn-toggle-alliances" class="btn-action" type="button">ALIANZAS: ON</button>
                     <button id="btn-toggle-chatlinks" class="btn-action" type="button">DIÁLOGO (&lt;30s): ON</button>
                     <button id="btn-toggle-altlinks" class="btn-action" type="button">ENLACES ALTS: ON</button>
                     <button id="btn-toggle-physics" class="btn-action" type="button">FÍSICAS: ON</button>
@@ -63,13 +65,13 @@ window.C4ISR_Views.red = {
 
             <div class="toolbar-tactical" style="margin-bottom: 0.65rem; padding: 0.55rem 0.9rem;">
                 <div style="display: flex; align-items: center; gap: 0.5rem; flex: 1; min-width: 260px;">
-                    <input type="text" id="red-search" class="search-input" style="width: 100%; max-width: 420px;" placeholder="Buscar servidor o usuario por nombre o UID (Enter para enfocar)..." autocomplete="off">
+                    <input type="text" id="red-search" class="search-input" style="width: 100%; max-width: 420px;" placeholder="Buscar servidor, usuario o invitación (Enter para enfocar)..." autocomplete="off">
                 </div>
-                <div style="display: flex; gap: 0.95rem; align-items: center; font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-secondary); flex-wrap: wrap;">
+                <div style="display: flex; gap: 0.9rem; align-items: center; font-family: var(--font-mono); font-size: 0.71rem; color: var(--text-secondary); flex-wrap: wrap;">
                     <span><strong style="color: #ef4444;">&#9679; ROJO:</strong> SERVIDORES</span>
                     <span><strong style="color: #10b981;">&#9679; VERDE:</strong> USUARIOS</span>
+                    <span><strong style="color: #c084fc;">&rarr; PÚRPURA:</strong> VECTOR ALIANZA</span>
                     <span><strong style="color: #fbbf24;">&#9678; ÁMBAR:</strong> MULTI-SERVER</span>
-                    <span><strong style="color: #ff2a6d;">&#9678; ROSA:</strong> FICHADO</span>
                     <span><strong style="color: #fcee0a;">&#10697; MIRA NEÓN:</strong> SOSPECHA ALT</span>
                 </div>
             </div>
@@ -78,15 +80,12 @@ window.C4ISR_Views.red = {
                 <div id="canvas-wrapper" style="position: relative; background: radial-gradient(circle at 50% 50%, #120e1c 0%, #07060a 100%); border: var(--border-thin); border-radius: var(--radius-md); overflow: hidden;">
                     <canvas id="net-canvas" style="width: 100%; height: 100%; display: block; cursor: grab;"></canvas>
 
-                    <!-- HUD Esquina Superior Izquierda: Telemetría de Cámara -->
                     <div id="hud-coords" style="position: absolute; top: 10px; left: 12px; font-family: var(--font-mono); font-size: 0.68rem; color: rgba(255, 42, 109, 0.75); background: rgba(9, 8, 12, 0.75); padding: 4px 8px; border-left: 2px solid var(--accent-rz); pointer-events: none;">
                         C4ISR // GRID-LOCK // ZOOM: 78%
                     </div>
 
-                    <!-- Tooltip Flotante Instantáneo (Hover) -->
-                    <div id="canvas-hover-tooltip" class="hidden" style="position: absolute; pointer-events: none; z-index: 30; background: rgba(11, 9, 16, 0.95); border: 1px solid var(--accent-rz); border-left: 3px solid var(--accent-rz); padding: 6px 10px; border-radius: 4px; font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-main); box-shadow: 0 8px 20px rgba(0,0,0,0.85); max-width: 280px;"></div>
+                    <div id="canvas-hover-tooltip" class="hidden" style="position: absolute; pointer-events: none; z-index: 30; background: rgba(11, 9, 16, 0.95); border: 1px solid var(--accent-rz); border-left: 3px solid var(--accent-rz); padding: 6px 10px; border-radius: 4px; font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-main); box-shadow: 0 8px 20px rgba(0,0,0,0.85); max-width: 290px;"></div>
 
-                    <!-- Ticker de Impulsos en Vivo (Posicionado sin cortes) -->
                     <div id="live-feed-ticker" style="position: absolute; bottom: 12px; left: 12px; right: 12px; max-width: fit-content; font-family: var(--font-mono); font-size: 0.72rem; color: var(--accent-green); background: rgba(9, 8, 12, 0.92); padding: 5px 12px; border: 1px solid rgba(16, 185, 129, 0.4); border-left: 3px solid var(--accent-green); border-radius: 4px; pointer-events: none; box-shadow: 0 4px 12px rgba(0,0,0,0.6);">
                         [RADAR ACTIVO] Escaneando tráfico de la matriz...
                     </div>
@@ -99,7 +98,7 @@ window.C4ISR_Views.red = {
                     </div>
                     <div id="node-inspector-content" class="osint-content" style="font-family: var(--font-mono); font-size: 0.78rem;">
                         <div style="color: var(--text-muted); padding-top: 0.75rem; line-height: 1.5;">
-                            Haz clic sobre cualquier <strong style="color: #ef4444;">Servidor (Rojo)</strong> para listar todos sus usuarios infiltrados, o sobre un <strong style="color: #10b981;">Usuario (Verde)</strong> para auditar su huella horaria de 24h, servidores comunes y cuentas espejo.
+                            Haz clic sobre cualquier <strong style="color: #ef4444;">Servidor (Rojo)</strong> para ver su enlace de invitación cazado, sus alianzas y miembros, o sobre un <strong style="color: #10b981;">Usuario (Verde)</strong> para auditar su huella horaria y cuentas espejo.
                         </div>
                     </div>
                     <div id="alts-radar-content" class="osint-content hidden" style="font-family: var(--font-mono); font-size: 0.78rem;"></div>
@@ -189,6 +188,7 @@ window.C4ISR_Views.red = {
         window.addEventListener('mouseup', this.boundMouseUp);
 
         const btnEmptySrv = document.getElementById('btn-toggle-empty-srv');
+        const btnAlliances = document.getElementById('btn-toggle-alliances');
         const btnPhysics = document.getElementById('btn-toggle-physics');
         const btnChatLinks = document.getElementById('btn-toggle-chatlinks');
         const btnAltLinks = document.getElementById('btn-toggle-altlinks');
@@ -206,6 +206,13 @@ window.C4ISR_Views.red = {
                 this.hideEmptyServers = !this.hideEmptyServers;
                 btnEmptySrv.textContent = `OCULTAR SERVERS VACÍOS: ${this.hideEmptyServers ? 'ON' : 'OFF'}`;
                 this.updateHudCoords();
+            });
+        }
+
+        if (btnAlliances) {
+            btnAlliances.addEventListener('click', () => {
+                this.showAllianceLinks = !this.showAllianceLinks;
+                btnAlliances.textContent = `ALIANZAS: ${this.showAllianceLinks ? 'ON' : 'OFF'}`;
             });
         }
 
@@ -273,7 +280,6 @@ window.C4ISR_Views.red = {
                 this.switchRightTab('inspector');
                 this.renderInspector(hit);
             } else {
-                // Clic en el fondo deselecciona el aislamiento para volver a ver toda la red al 100%
                 this.selectedNode = null;
                 this.highlightedPair = null;
                 this.isDraggingCanvas = true;
@@ -282,7 +288,6 @@ window.C4ISR_Views.red = {
         });
 
         this.canvas.addEventListener('mousemove', (e) => {
-            this.screenMousePos = { x: e.offsetX, y: e.offsetY };
             const pos = this.screenToWorld(e.offsetX, e.offsetY);
             if (this.draggedNode) {
                 this.draggedNode.x = pos.x;
@@ -313,7 +318,6 @@ window.C4ISR_Views.red = {
             const factor = e.deltaY < 0 ? 1.12 : 0.89;
             const newZoom = Math.max(0.15, Math.min(3.8, this.camera.zoom * factor));
 
-            // Zoom centrado exactamente sobre el puntero del ratón
             const wx = (e.offsetX - this.camera.x) / this.camera.zoom;
             const wy = (e.offsetY - this.camera.y) / this.camera.zoom;
             this.camera.zoom = newZoom;
@@ -333,10 +337,14 @@ window.C4ISR_Views.red = {
 
         if (node.type === 'SERVER') {
             const membersCount = (this.serverMembers.get(node.key) || []).length;
+            const inviteTag = node.meta?.inviteUrl
+                ? `<div style="color:#34d399;margin-top:2px;">&#128279; ${DOMPurify.sanitize(node.meta.inviteUrl)}</div>`
+                : '';
             tooltip.style.borderColor = '#ef4444';
             tooltip.innerHTML = `
                 <div style="color:#ef4444;font-weight:700;">[SERVIDOR] ${DOMPurify.sanitize(node.label)}</div>
                 <div style="color:var(--text-secondary);">Usuarios Monitoreados: <b>${membersCount}</b> | Msgs: <b>${node.meta?.mensajesSesion || 0}</b></div>
+                ${inviteTag}
             `;
         } else {
             const statusColor = node.altRole ? '#fcee0a' : (node.fichado ? '#ff2a6d' : '#10b981');
@@ -349,7 +357,7 @@ window.C4ISR_Views.red = {
         }
 
         tooltip.classList.remove('hidden');
-        const left = Math.min((this.canvas?.width || 800) - 290, mx + 16);
+        const left = Math.min((this.canvas?.width || 800) - 295, mx + 16);
         const top = Math.max(12, my - 18);
         tooltip.style.left = `${left}px`;
         tooltip.style.top = `${top}px`;
@@ -363,7 +371,6 @@ window.C4ISR_Views.red = {
     },
 
     findNodeAt(wx, wy) {
-        // Priorizar nodos de usuario si están superpuestos sobre el halo de un servidor
         for (const node of this.nodes.values()) {
             if (node.type !== 'USER' || !this.isNodeVisible(node)) continue;
             const dx = wx - node.x;
@@ -382,15 +389,18 @@ window.C4ISR_Views.red = {
     isNodeVisible(node) {
         if (node.type === 'SERVER' && this.hideEmptyServers) {
             const connected = (this.serverMembers.get(node.key) || []).length;
-            if (connected === 0) return false;
+            if (connected === 0 && (!node.meta?.alianzasSalientes || node.meta.alianzasSalientes.length === 0)) {
+                return false;
+            }
         }
         if (this.onlyBridges && node.type === 'USER') {
             if (node.serverCount < 2 && !node.fichado && !node.altRole) return false;
         }
         if (this.searchTerm) {
-            const matchSelf = node.label.toLowerCase().includes(this.searchTerm) || String(node.rawId).includes(this.searchTerm);
+            const matchSelf = node.label.toLowerCase().includes(this.searchTerm) ||
+                String(node.rawId).includes(this.searchTerm) ||
+                String(node.meta?.inviteUrl || '').toLowerCase().includes(this.searchTerm);
             if (matchSelf) return true;
-            // Si el usuario busca el nombre de un servidor, mostrar también sus miembros conectados
             const neighbors = this.adjacency.get(node.key);
             if (neighbors) {
                 for (const nKey of neighbors) {
@@ -471,7 +481,6 @@ window.C4ISR_Views.red = {
                 if (interseccion.length < 2 || sharedServers.length === 0) continue;
 
                 const sharedChatPartners = [...uChatSet].filter(id => id !== v.id && vChatSet.has(id));
-                // Evitar falsos positivos de usuarios históricos que solo comparten 2 servidores sin hablar con los mismos objetivos
                 if (sharedChatPartners.length === 0 && sharedServers.length < 3) continue;
 
                 const unionSize = featuresU.size + featuresV.size - interseccion.length;
@@ -479,7 +488,6 @@ window.C4ISR_Views.red = {
 
                 if (jaccard < 0.68) continue;
 
-                // Validación Cronobiológica estricta: exigir que ambos tengan al menos 2 horas activas registradas
                 const rawHoursU = Array.isArray(u.horasActivas) ? u.horasActivas : [];
                 const rawHoursV = Array.isArray(v.horasActivas) ? v.horasActivas : [];
                 const tieneMuestraHoraria = rawHoursU.length >= 2 && rawHoursV.length >= 2;
@@ -571,6 +579,7 @@ window.C4ISR_Views.red = {
             const servidores = Array.isArray(data.servidores) ? data.servidores : [];
             const usuarios = Array.isArray(data.usuarios) ? data.usuarios : [];
             const interacciones = Array.isArray(data.interacciones) ? data.interacciones : [];
+            const alianzas = Array.isArray(data.alianzas) ? data.alianzas : [];
             const pulsos = Array.isArray(data.pulsos) ? data.pulsos : [];
 
             const badge = document.getElementById('red-stats-badge');
@@ -590,9 +599,8 @@ window.C4ISR_Views.red = {
                 this.adjacency.get(k2).add(k1);
             };
 
-            // 1. Sincronizar Nodos Rojos (Servidores) separando activos en el núcleo y vacíos en órbita exterior
-            const activeServers = servidores.filter(s => (s.usuariosCount || 0) > 0);
-            const emptyServers = servidores.filter(s => (s.usuariosCount || 0) === 0);
+            const activeServers = servidores.filter(s => (s.usuariosCount || 0) > 0 || (s.alianzasSalientes && s.alianzasSalientes.length > 0));
+            const emptyServers = servidores.filter(s => (s.usuariosCount || 0) === 0 && (!s.alianzasSalientes || s.alianzasSalientes.length === 0));
 
             activeServers.forEach((srv, idx) => {
                 const key = `SRV_${srv.id}`;
@@ -652,7 +660,6 @@ window.C4ISR_Views.red = {
                 }
             });
 
-            // 2. Sincronizar Nodos Verdes (Usuarios) en anillos concéntricos descongestionados
             const nuevasAristas = [];
             const serverSpawnIndex = new Map();
 
@@ -677,7 +684,6 @@ window.C4ISR_Views.red = {
                     const idxInSrv = (serverSpawnIndex.get(firstSrvKey) || 0);
                     serverSpawnIndex.set(firstSrvKey, idxInSrv + 1);
 
-                    // Distribución en espiral de Phyllotaxis (proporción áurea) para evitar bolas colapsadas
                     const goldenAngle = idxInSrv * 2.3999632;
                     const spiralRadius = 55 + Math.sqrt(idxInSrv + 1) * 22;
                     const baseX = parentSrv ? parentSrv.x : 0;
@@ -726,7 +732,6 @@ window.C4ISR_Views.red = {
                 }
             });
 
-            // 3. Aristas de conversación rápida (< 30s) entre Usuarios
             for (const rel of interacciones) {
                 const k1 = `USR_${rel.u1}`;
                 const k2 = `USR_${rel.u2}`;
@@ -741,7 +746,6 @@ window.C4ISR_Views.red = {
                 }
             }
 
-            // 4. Aristas espejo entre pares de Alts sospechosas
             this.altEdges = [];
             for (const pair of this.suspectPairs) {
                 const k1 = `USR_${pair.uId}`;
@@ -757,10 +761,25 @@ window.C4ISR_Views.red = {
                 }
             }
 
+            // 5. Vectores de Alianzas entre Servidores (Flechas Púrpura)
+            this.allianceEdges = [];
+            for (const ally of alianzas) {
+                const sKey = `SRV_${ally.sourceServerId}`;
+                const tKey = `SRV_${ally.targetServerId}`;
+                if (this.nodes.has(sKey) && this.nodes.has(tKey)) {
+                    this.allianceEdges.push({
+                        source: sKey,
+                        target: tKey,
+                        code: ally.code,
+                        inviteUrl: ally.inviteUrl
+                    });
+                    addNeighbor(sKey, tKey);
+                }
+            }
+
             this.edges = nuevasAristas;
             this.updateHudCoords();
 
-            // 5. Disparar partículas animadas por cada nuevo pulso en tiempo real
             if (this.seenPulses.size > 500) this.seenPulses.clear();
             for (const p of pulsos) {
                 const pulseKey = `${p.userId}_${p.guildId}_${p.ts}`;
@@ -826,7 +845,6 @@ window.C4ISR_Views.red = {
         if (!this.physicsEnabled) return;
         const visibleNodes = Array.from(this.nodes.values()).filter(n => this.isNodeVisible(n));
 
-        // 1. Repulsión adaptativa (mayor entre usuarios de super-clústeres para evitar apelotonamiento)
         for (let i = 0; i < visibleNodes.length; i++) {
             const n1 = visibleNodes[i];
             for (let j = i + 1; j < visibleNodes.length; j++) {
@@ -854,7 +872,6 @@ window.C4ISR_Views.red = {
             }
         }
 
-        // 2. Muelles con longitud dinámica según el tamaño del servidor (descomprime super-nodos como Fluc)
         for (const edge of this.edges) {
             if (edge.kind === 'CHAT' && !this.showUserLinks) continue;
             const s = this.nodes.get(edge.source);
@@ -880,11 +897,9 @@ window.C4ISR_Views.red = {
             if (t !== this.draggedNode) { t.vx -= fx * 0.12; t.vy -= fy * 0.12; }
         }
 
-        // 3. Amortiguación y mantenimiento de servidores vacíos en el anillo exterior
         for (const n of visibleNodes) {
             if (n === this.draggedNode) continue;
-            if (n.type === 'SERVER' && n.connectedUsersCount === 0) {
-                // Mantener los servidores sin usuarios en un cinturón exterior ordenado
+            if (n.type === 'SERVER' && n.connectedUsersCount === 0 && (!n.meta?.alianzasSalientes || n.meta.alianzasSalientes.length === 0)) {
                 const distCenter = Math.sqrt(n.x * n.x + n.y * n.y) || 1;
                 const targetRing = 680;
                 const radialForce = (targetRing - distCenter) * 0.008;
@@ -936,7 +951,6 @@ window.C4ISR_Views.red = {
         ctx.clearRect(0, 0, w, h);
         this.drawTacticalGrid(ctx, w, h);
 
-        // Determinar foco activo (Spotlight) para aislar visualmente la sub-red
         const focusNode = this.hoveredNode || this.selectedNode;
         const focusNeighbors = focusNode ? (this.adjacency.get(focusNode.key) || new Set()) : null;
 
@@ -950,7 +964,7 @@ window.C4ISR_Views.red = {
         ctx.translate(this.camera.x, this.camera.y);
         ctx.scale(this.camera.zoom, this.camera.zoom);
 
-        // 1. Dibujar Aristas Normales con soporte de Spotlight
+        // 1. Dibujar Aristas de Membresía y Chat
         for (const edge of this.edges) {
             if (edge.kind === 'CHAT' && !this.showUserLinks) continue;
             const s = this.nodes.get(edge.source);
@@ -982,7 +996,45 @@ window.C4ISR_Views.red = {
             ctx.stroke();
         }
 
-        // 2. Dibujar Enlaces Espejo Punteados entre Cuentas Alt Detectadas
+        // 2. Dibujar Flechas Púrpura de Alianzas entre Servidores
+        if (this.showAllianceLinks) {
+            for (const ally of this.allianceEdges) {
+                const s = this.nodes.get(ally.source);
+                const tNode = this.nodes.get(ally.target);
+                if (!s || !tNode || !this.isNodeVisible(s) || !this.isNodeVisible(tNode)) continue;
+
+                const isHighlighted = !focusNode || focusNode.key === s.key || focusNode.key === tNode.key;
+                const dx = tNode.x - s.x;
+                const dy = tNode.y - s.y;
+                const angle = Math.atan2(dy, dx);
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist <= s.radius + tNode.radius) continue;
+
+                const endX = tNode.x - Math.cos(angle) * (tNode.radius + 6);
+                const endY = tNode.y - Math.sin(angle) * (tNode.radius + 6);
+
+                ctx.save();
+                ctx.globalAlpha = isHighlighted ? 0.9 : 0.12;
+                ctx.beginPath();
+                ctx.moveTo(s.x, s.y);
+                ctx.lineTo(endX, endY);
+                ctx.strokeStyle = '#c084fc';
+                ctx.lineWidth = 2.2;
+                ctx.stroke();
+
+                // Punta de flecha direccional
+                ctx.beginPath();
+                ctx.moveTo(endX, endY);
+                ctx.lineTo(endX - 11 * Math.cos(angle - Math.PI / 6), endY - 11 * Math.sin(angle - Math.PI / 6));
+                ctx.lineTo(endX - 11 * Math.cos(angle + Math.PI / 6), endY - 11 * Math.sin(angle + Math.PI / 6));
+                ctx.closePath();
+                ctx.fillStyle = '#c084fc';
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        // 3. Dibujar Enlaces Espejo Punteados entre Cuentas Alt Detectadas
         if (this.showAltLinks) {
             for (const altEdge of this.altEdges) {
                 const s = this.nodes.get(altEdge.source);
@@ -1016,7 +1068,7 @@ window.C4ISR_Views.red = {
             }
         }
 
-        // 3. Dibujar Partículas de Actividad en Vivo
+        // 4. Dibujar Partículas de Actividad en Vivo
         for (let i = this.particles.length - 1; i >= 0; i--) {
             const p = this.particles[i];
             p.progress += p.speed;
@@ -1040,7 +1092,7 @@ window.C4ISR_Views.red = {
             ctx.shadowBlur = 0;
         }
 
-        // 4. Dibujar Nodos (Rojos = Servidores, Verdes = Usuarios)
+        // 5. Dibujar Nodos (Rojos = Servidores, Verdes = Usuarios)
         for (const node of this.nodes.values()) {
             if (!this.isNodeVisible(node)) continue;
 
@@ -1054,10 +1106,14 @@ window.C4ISR_Views.red = {
 
             if (node.type === 'SERVER') {
                 const hasUsers = node.connectedUsersCount > 0;
+                const hasInvite = Boolean(node.meta?.inviteUrl);
+
                 if (hasUsers || isSelected || isHovered) {
                     ctx.beginPath();
                     ctx.arc(node.x, node.y, node.radius + 5 + pulse * 8, 0, Math.PI * 2);
-                    ctx.strokeStyle = `rgba(239, 68, 68, ${0.55 - pulse * 0.4})`;
+                    ctx.strokeStyle = hasInvite
+                        ? `rgba(192, 132, 252, ${0.65 - pulse * 0.4})`
+                        : `rgba(239, 68, 68, ${0.55 - pulse * 0.4})`;
                     ctx.lineWidth = 2;
                     ctx.stroke();
                 }
@@ -1066,8 +1122,8 @@ window.C4ISR_Views.red = {
                 ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
                 ctx.fillStyle = hasUsers ? '#ef4444' : '#7f1d1d';
                 ctx.fill();
-                ctx.lineWidth = isSelected || isHovered ? 3 : 1.6;
-                ctx.strokeStyle = isSelected || isHovered ? '#ffffff' : '#fca5a5';
+                ctx.lineWidth = isSelected || isHovered ? 3 : 1.8;
+                ctx.strokeStyle = isSelected || isHovered ? '#ffffff' : (hasInvite ? '#e9d5ff' : '#fca5a5');
                 ctx.stroke();
 
                 ctx.font = 'bold 11px "JetBrains Mono", monospace';
@@ -1105,7 +1161,6 @@ window.C4ISR_Views.red = {
                 ctx.strokeStyle = isSelected || isHovered ? '#ffffff' : '#059669';
                 ctx.stroke();
 
-                // Control inteligente de etiquetas para no saturar super-clústeres
                 const showLabel = isHovered || isSelected || node.altRole || isBridge || this.camera.zoom > 1.05;
                 if (showLabel) {
                     ctx.font = '10px "JetBrains Mono", monospace';
@@ -1131,7 +1186,7 @@ window.C4ISR_Views.red = {
             container.innerHTML = `
                 <div style="padding: 1rem 0.4rem; color: var(--text-muted); line-height: 1.5;">
                     <div style="color: var(--accent-green); font-weight: 700; margin-bottom: 0.4rem;">[ TOPOLOGÍA LIMPIA ]</div>
-                    Aún no se detectan pares de usuarios con índice de Jaccard &ge; 68% y muestras horarias sincronizadas. A medida que los exploradores capten conversaciones reales, las cuentas espejo aparecerán aquí.
+                    Aún no se detectan pares de usuarios con índice de Jaccard &ge; 68% y muestras horarias sincronizadas.
                 </div>
             `;
             return;
@@ -1179,6 +1234,44 @@ window.C4ISR_Views.red = {
                 ? srv.exploradores.join(', ')
                 : 'Registro Pasivo';
 
+            // Mostrar el Link Oficial del servidor si fue cazado
+            let inviteBlockHtml = `
+                <div style="margin-bottom: 0.75rem; padding: 0.5rem 0.65rem; background: rgba(255,255,255,0.03); border: var(--border-subtle); border-radius: 4px; color: var(--text-muted); font-size: 0.72rem;">
+                    Invite del Servidor: Sin invitación capturada aún.
+                </div>
+            `;
+            if (srv.inviteUrl) {
+                const safeUrl = DOMPurify.sanitize(String(srv.inviteUrl));
+                inviteBlockHtml = `
+                    <div style="margin-bottom: 0.85rem; padding: 0.6rem 0.75rem; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.45); border-radius: 4px;">
+                        <div style="color: var(--accent-green); font-weight: 700; font-size: 0.7rem; margin-bottom: 3px;">[ INVITACIÓN CAZADA DE ESTE SERVIDOR ]</div>
+                        <a href="${safeUrl}" target="_blank" rel="noopener noreferrer" style="color: #ffffff; font-weight: 700; font-size: 0.82rem; text-decoration: underline;">${safeUrl}</a>
+                    </div>
+                `;
+            }
+
+            // Mostrar Alianzas promovidas desde este servidor
+            const alianzasList = Array.isArray(srv.alianzasSalientes) ? srv.alianzasSalientes : [];
+            let alianzasHtml = '';
+            if (alianzasList.length > 0) {
+                const rows = alianzasList.slice(0, 15).map(a => {
+                    const safeUrl = DOMPurify.sanitize(String(a.url));
+                    const safeName = DOMPurify.sanitize(String(a.targetName || a.url));
+                    return `
+                        <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 6px;border-bottom:var(--border-subtle);font-size:0.72rem;">
+                            <span style="color:#c084fc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:170px;">&rarr; ${safeName}</span>
+                            <a href="${safeUrl}" target="_blank" rel="noopener noreferrer" style="color:var(--accent-info);text-decoration:none;">${DOMPurify.sanitize(String(a.code))}</a>
+                        </div>
+                    `;
+                }).join('');
+                alianzasHtml = `
+                    <div style="color: #c084fc; font-weight: 700; margin-bottom: 0.35rem;">VECTORES DE ALIANZA EMITIDOS (${alianzasList.length}):</div>
+                    <div style="max-height: 120px; overflow-y: auto; border: var(--border-subtle); border-radius: 4px; background: rgba(0,0,0,0.2); margin-bottom: 0.85rem;">
+                        ${rows}
+                    </div>
+                `;
+            }
+
             const members = (this.serverMembers.get(node.key) || [])
                 .slice()
                 .sort((a, b) => (b.infracciones - a.infracciones) || ((b.meta?.totalMensajes || 0) - (a.meta?.totalMensajes || 0)));
@@ -1194,17 +1287,19 @@ window.C4ISR_Views.red = {
             }).join('');
 
             panel.innerHTML = `
-                <div style="border-left: 3px solid #ef4444; padding-left: 0.75rem; margin-bottom: 1rem;">
+                <div style="border-left: 3px solid #ef4444; padding-left: 0.75rem; margin-bottom: 0.85rem;">
                     <div style="color: #ef4444; font-weight: 700;">[ NODO SERVIDOR // ROJO ]</div>
                     <div style="font-size: 1rem; color: var(--text-main); font-weight: 700; margin-top: 4px;">${DOMPurify.sanitize(node.label)}</div>
-                    <div style="color: var(--text-muted); font-size: 0.72rem;">ID: ${DOMPurify.sanitize(String(node.rawId))}</div>
+                    <div class="selectable" style="color: var(--text-muted); font-size: 0.72rem;">ID: ${DOMPurify.sanitize(String(node.rawId))}</div>
                 </div>
-                <div style="margin-bottom: 0.45rem;"><strong>Usuarios Detectados Aquí:</strong> <span style="color: var(--accent-green);">${members.length}</span></div>
-                <div style="margin-bottom: 0.45rem;"><strong>Mensajes Captados:</strong> <span style="color: var(--accent-green);">${srv.mensajesSesion || 0}</span></div>
-                <div style="margin-bottom: 0.45rem;"><strong>Miembros Totales Discord:</strong> ${srv.memberCount || 'N/A'}</div>
-                <div style="margin-bottom: 0.85rem;"><strong>Unidades Infiltradas:</strong> <span style="color: var(--accent-amber);">${DOMPurify.sanitize(exploradores)}</span></div>
+                ${inviteBlockHtml}
+                <div style="margin-bottom: 0.4rem;"><strong>Usuarios Detectados Aquí:</strong> <span style="color: var(--accent-green);">${members.length}</span></div>
+                <div style="margin-bottom: 0.4rem;"><strong>Mensajes Captados:</strong> <span style="color: var(--accent-green);">${srv.mensajesSesion || 0}</span></div>
+                <div style="margin-bottom: 0.4rem;"><strong>Miembros Totales Discord:</strong> ${srv.memberCount || 'N/A'}</div>
+                <div style="margin-bottom: 0.8rem;"><strong>Unidades Infiltradas:</strong> <span style="color: var(--accent-amber);">${DOMPurify.sanitize(exploradores)}</span></div>
+                ${alianzasHtml}
                 <div style="color: var(--accent-rz); font-weight: 700; margin-bottom: 0.4rem;">SUJETOS ACTIVOS EN ESTE SERVIDOR (${members.length}):</div>
-                <div style="max-height: 290px; overflow-y: auto; border: var(--border-subtle); border-radius: 4px; background: rgba(0,0,0,0.2);">
+                <div style="max-height: 230px; overflow-y: auto; border: var(--border-subtle); border-radius: 4px; background: rgba(0,0,0,0.2);">
                     ${membersHtml || '<div style="padding:0.75rem;color:var(--text-muted);">Sin usuarios registrados aún.</div>'}
                 </div>
             `;
@@ -1227,7 +1322,6 @@ window.C4ISR_Views.red = {
                 `;
             }).join('');
 
-            // Reloj Cronobiológico Visual de 24h UTC
             const activeHoursSet = new Set(Array.isArray(usr.horasActivas) ? usr.horasActivas : []);
             let clockCells = '';
             for (let h = 0; h < 24; h++) {
@@ -1323,6 +1417,7 @@ window.C4ISR_Views.red = {
         this.nodes.clear();
         this.edges = [];
         this.altEdges = [];
+        this.allianceEdges = [];
         this.adjacency.clear();
         this.serverMembers.clear();
         this.suspectPairs = [];
