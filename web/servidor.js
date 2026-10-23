@@ -201,7 +201,8 @@ app.get('/api/datos', autenticar, async (req, res) => {
 
 /**
  * Endpoint en tiempo real para el Mapa de Red (Nodos Rojos = Servidores, Nodos Verdes = Usuarios).
- * Combina la actividad viva captada por los exploradores con los expedientes históricos de MongoDB.
+ * Combina la actividad viva captada por los exploradores con los expedientes históricos de MongoDB,
+ * reconstruyendo la huella cronobiológica (horasActivas UTC) desde las marcas de tiempo históricas.
  */
 app.get('/api/red', autenticar, async (req, res) => {
     try {
@@ -211,13 +212,14 @@ app.get('/api/red', autenticar, async (req, res) => {
 
         // 1. Cargar servidores en vivo (con sus IDs reales)
         for (const srv of (estadoRadarRed.servidores || [])) {
-            mapaServidores.set(srv.id, { ...srv });
+            mapaServidores.set(srv.id, { ...srv, usuariosCount: 0 });
         }
 
         // 2. Cargar usuarios activos en vivo
         for (const usr of (estadoRadarRed.usuarios || [])) {
             mapaUsuarios.set(usr.id, {
                 ...usr,
+                horasActivas: Array.isArray(usr.horasActivas) ? [...usr.horasActivas] : [],
                 infracciones: 0,
                 fichado: false,
                 servidores: { ...(usr.servidores || {}) }
@@ -229,15 +231,20 @@ app.get('/api/red', autenticar, async (req, res) => {
             const uid = String(exp.userId || '').trim();
             if (!uid) continue;
 
+            const primerTs = Date.parse(exp.primerFichaje);
             let usr = mapaUsuarios.get(uid);
             if (!usr) {
+                const horasSet = new Set();
+                if (!Number.isNaN(primerTs)) {
+                    horasSet.add(new Date(primerTs).getUTCHours());
+                }
                 usr = {
                     id: uid,
                     tag: exp.ultimoAlias || 'Objetivo Fichado',
                     avatar: null,
                     totalMensajes: exp.totalInfracciones || 1,
-                    ultimaActividad: Date.parse(exp.primerFichaje) || Date.now(),
-                    horasActivas: [],
+                    ultimaActividad: !Number.isNaN(primerTs) ? primerTs : Date.now(),
+                    horasActivas: Array.from(horasSet),
                     servidores: {},
                     infracciones: exp.totalInfracciones || 0,
                     fichado: true
@@ -247,12 +254,22 @@ app.get('/api/red', autenticar, async (req, res) => {
                 usr.fichado = true;
             }
 
+            const horasUsuarioSet = new Set(usr.horasActivas);
             const historial = Array.isArray(exp.historial) ? exp.historial : [];
+
             for (const h of historial) {
+                if (!h || typeof h !== 'object') continue;
+                const eventoTs = Date.parse(h.fecha);
+                if (!Number.isNaN(eventoTs)) {
+                    horasUsuarioSet.add(new Date(eventoTs).getUTCHours());
+                    if (eventoTs > (usr.ultimaActividad || 0)) {
+                        usr.ultimaActividad = eventoTs;
+                    }
+                }
+
                 const nombreSrv = String(h.servidor || '').trim();
                 if (!nombreSrv || nombreSrv === 'N/A') continue;
 
-                // Buscar si ese nombre de servidor ya corresponde a un servidor vivo por nombre
                 let srvIdEncontrado = null;
                 for (const [sId, sObj] of mapaServidores.entries()) {
                     if (sObj.name.toLowerCase() === nombreSrv.toLowerCase()) {
@@ -269,8 +286,9 @@ app.get('/api/red', autenticar, async (req, res) => {
                             icon: null,
                             memberCount: 0,
                             mensajesSesion: 1,
-                            ultimaActividad: Date.parse(h.fecha) || 0,
-                            exploradores: ['Archivo Histórico']
+                            ultimaActividad: !Number.isNaN(eventoTs) ? eventoTs : 0,
+                            exploradores: ['Archivo Histórico'],
+                            usuariosCount: 0
                         });
                     }
                 }
@@ -279,14 +297,28 @@ app.get('/api/red', autenticar, async (req, res) => {
                     usr.servidores[srvIdEncontrado] = {
                         name: nombreSrv,
                         count: 1,
-                        lastSeen: Date.parse(h.fecha) || Date.now()
+                        lastSeen: !Number.isNaN(eventoTs) ? eventoTs : Date.now()
                     };
                 } else {
                     usr.servidores[srvIdEncontrado].count += 1;
+                    if (!Number.isNaN(eventoTs) && eventoTs > usr.servidores[srvIdEncontrado].lastSeen) {
+                        usr.servidores[srvIdEncontrado].lastSeen = eventoTs;
+                    }
                 }
             }
 
+            usr.horasActivas = Array.from(horasUsuarioSet).sort((a, b) => a - b);
             mapaUsuarios.set(uid, usr);
+        }
+
+        // 4. Calcular cuántos usuarios monitoreados tiene cada servidor para las físicas adaptativas
+        for (const usr of mapaUsuarios.values()) {
+            for (const sId of Object.keys(usr.servidores || {})) {
+                const srvObj = mapaServidores.get(sId);
+                if (srvObj) {
+                    srvObj.usuariosCount = (srvObj.usuariosCount || 0) + 1;
+                }
+            }
         }
 
         res.json({
@@ -301,90 +333,3 @@ app.get('/api/red', autenticar, async (req, res) => {
         res.status(500).json({ error: 'Error al compilar la matriz de red.' });
     }
 });
-
-app.post('/api/notas', autenticar, async (req, res) => {
-    const { id, nota } = req.body || {};
-    if (!id) return res.status(400).json({ error: 'Identificador requerido.' });
-    try {
-        const exito = await database.actualizarNotaOSINT(String(id), String(nota ?? ''));
-        return exito
-            ? res.json({ success: true })
-            : res.status(500).json({ error: 'No se pudo actualizar la nota.' });
-    } catch (error) {
-        return res.status(500).json({ error: 'Fallo interno en BD' });
-    }
-});
-
-app.post('/api/eliminar', autenticar, async (req, res) => {
-    const { id } = req.body || {};
-    if (!id) return res.status(400).json({ error: 'Identificador requerido.' });
-    try {
-        const exito = await database.eliminarExpediente(String(id));
-        return exito
-            ? res.json({ success: true })
-            : res.status(404).json({ error: 'Expediente no encontrado o ya eliminado.' });
-    } catch (error) {
-        return res.status(500).json({ error: 'Fallo interno en BD' });
-    }
-});
-
-app.get('/api/exportar', autenticar, async (req, res) => {
-    try {
-        const cursor = database.obtenerExpedientesCursor({});
-        if (!cursor) return res.status(503).send('Base de datos no disponible');
-
-        res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        res.setHeader('Content-Disposition', 'attachment; filename="C4ISR_DATABASE.json"');
-
-        res.write('[\n');
-        let primero = true;
-        for await (const doc of cursor) {
-            if (!primero) res.write(',\n');
-            res.write(JSON.stringify(doc, null, 2));
-            primero = false;
-        }
-        res.write('\n]\n');
-        res.end();
-    } catch (error) {
-        console.error('[ERROR API /api/exportar]:', error.message);
-        if (!res.headersSent) res.status(500).send('Fallo durante la exportación');
-    }
-});
-
-app.post('/api/objetivos/manual', autenticar, async (req, res) => {
-    const { id } = req.body || {};
-    if (!id) return res.status(400).json({ error: 'ID requerido.' });
-    try {
-        const exito = await database.inyectarObjetivoManual(String(id));
-        return exito
-            ? res.json({ success: true })
-            : res.status(400).json({ error: 'ID inválido (debe ser un Snowflake numérico de 17-20 dígitos) o fallo de BD.' });
-    } catch (error) {
-        return res.status(500).json({ error: 'Error interno BD' });
-    }
-});
-
-app.post('/api/objetivos/importar', autenticar, async (req, res) => {
-    const { matriz } = req.body || {};
-    if (!Array.isArray(matriz)) return res.status(400).json({ error: 'Matriz JSON inválida.' });
-    try {
-        const exito = await database.importarMatriz(matriz);
-        return exito
-            ? res.json({ success: true })
-            : res.status(400).json({ error: 'No se encontraron registros válidos para importar.' });
-    } catch (error) {
-        return res.status(500).json({ error: 'Error interno BD' });
-    }
-});
-
-app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
-});
-
-function iniciar() {
-    app.listen(PUERTO, () => {
-        console.log(`[LA BIBLIOTECA] Servidor web operativo en puerto ${PUERTO}`);
-    });
-}
-
-module.exports = { iniciar, actualizarEnjambre, actualizarRadarRed };
