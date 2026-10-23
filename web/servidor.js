@@ -24,15 +24,16 @@ let estadoRadarRed = {
     servidores: [],
     usuarios: [],
     interacciones: [],
-    pulsos: []
+    pulsos: [],
+    bitacoraDvr: []
 };
 
-// Memoria persistente de invitaciones resueltas: Map<codeLower, { code, url, status, guildId, guildName, icon, memberCount, origenes: Array, emisores: Array, fecha }>
 const memoriaInvitaciones = new Map();
+const etiquetasServidores = new Map(); // Map<serverId, { texto, tipo }> (1-2 palabras definidas por el analista)
+const watchlistUsuarios = new Set();   // Set<userId> para seguimiento prioritario VIP
 const colaResolucionInvites = [];
 let resolviendoInvites = false;
 
-// Regex estricto para limpiar plantillas históricas y aislar solo invitaciones reales de Discord
 const REGEX_INVITE_STRICT = /(?:https?:\/\/)?(?:www\.)?(?:discord\.(?:gg|io|me|li)|discordapp\.com\/invite|discord\.com\/invite)\/([a-zA-Z0-9-]{2,32})/gi;
 const RUTAS_DISCORD_RESERVADAS = new Set([
     'events', 'channels', 'assets', 'developers', 'oauth2', 'login',
@@ -59,10 +60,6 @@ function extraerInvitacionesDeTexto(texto) {
     }));
 }
 
-/**
- * Normaliza nombres de servidores quitando emojis, símbolos y espacios extra
- * para emparejar servidores históricos con los servidores reales y evitar falsas burbujas.
- */
 function normalizarNombreServidor(nombre) {
     if (!nombre || typeof nombre !== 'string') return '';
     return nombre
@@ -171,6 +168,34 @@ function restaurarCacheInvitaciones(lista) {
 
 function exportarCacheInvitaciones() {
     return Array.from(memoriaInvitaciones.values());
+}
+
+function restaurarEtiquetasServidores(obj) {
+    if (!obj || typeof obj !== 'object') return;
+    for (const [k, val] of Object.entries(obj)) {
+        if (val && typeof val === 'object') {
+            etiquetasServidores.set(k, val);
+        }
+    }
+}
+
+function exportarEtiquetasServidores() {
+    return Object.fromEntries(etiquetasServidores.entries());
+}
+
+function restaurarWatchlist(arr) {
+    if (!Array.isArray(arr)) return;
+    for (const id of arr) {
+        if (id) watchlistUsuarios.add(String(id));
+    }
+}
+
+function exportarWatchlist() {
+    return Array.from(watchlistUsuarios);
+}
+
+function esObjetivoWatchlist(userId) {
+    return watchlistUsuarios.has(String(userId));
 }
 
 app.disable('x-powered-by');
@@ -283,7 +308,6 @@ app.get('/api/datos', autenticar, async (req, res) => {
             expedientes: expedientes
         };
 
-        // Mapa para deduplicar links en LinksPortal por código de invitación real
         const linksUnicosPorCodigo = new Map();
 
         for (const exp of expedientes) {
@@ -300,7 +324,6 @@ app.get('/api/datos', autenticar, async (req, res) => {
                 const accionStr = String(delito.accion || '');
                 const msgOriginal = String(delito.mensajeOriginal || '');
 
-                // Extraer invitaciones reales de cualquier mensaje histórico (ignora cdn.discordapp.com, events, imgur)
                 const invitesEncontradas = extraerInvitacionesDeTexto(msgOriginal);
                 if (invitesEncontradas.length > 0) {
                     const fechaDelito = delito.fecha || exp.primerFichaje || new Date().toISOString();
@@ -345,6 +368,7 @@ app.get('/api/datos', autenticar, async (req, res) => {
                 datos.blacklist.push({
                     id: exp.userId,
                     username: exp.ultimoAlias || 'Desconocido',
+                    historialAliases: Array.isArray(exp.historialAliases) ? exp.historialAliases : [],
                     reincidencia: exp.totalInfracciones || delitosGraves.length,
                     evidencia: ultimoGrave.mensajeOriginal || '[ Sin evidencia ]',
                     fecha: ultimoGrave.fecha || exp.primerFichaje,
@@ -357,6 +381,7 @@ app.get('/api/datos', autenticar, async (req, res) => {
                 datos.blacklist.push({
                     id: exp.userId,
                     username: exp.ultimoAlias || 'Identidad Desconocida',
+                    historialAliases: Array.isArray(exp.historialAliases) ? exp.historialAliases : [],
                     reincidencia: exp.totalInfracciones || 0,
                     evidencia: ultimoEvento ? ultimoEvento.mensajeOriginal : '[ SIN REGISTROS ACTIVOS ]',
                     fecha: (ultimoEvento && ultimoEvento.fecha) || exp.primerFichaje || new Date().toISOString(),
@@ -379,7 +404,7 @@ app.get('/api/red', autenticar, async (req, res) => {
     try {
         const expedientes = await database.obtenerExpedientes({});
         const mapaServidores = new Map();
-        const indiceNombreServidor = new Map(); // normName -> serverId (evita falsas burbujas duplicadas)
+        const indiceNombreServidor = new Map();
         const mapaUsuarios = new Map();
 
         const buscarServidorPorNombre = (nombre) => {
@@ -394,20 +419,25 @@ app.get('/api/red', autenticar, async (req, res) => {
             return null;
         };
 
-        // 1. Cargar servidores en vivo (con sus IDs reales)
         for (const srv of (estadoRadarRed.servidores || [])) {
             if (!srv || !srv.id || srv.id === 'DM_SECTOR') continue;
+            const etiqueta = etiquetasServidores.get(srv.id) || null;
             mapaServidores.set(srv.id, {
                 ...srv,
                 usuariosCount: 0,
                 inviteUrl: srv.inviteUrl || null,
+                etiquetaManual: etiqueta,
+                redundancia: Array.isArray(srv.exploradores) ? srv.exploradores.length : 0,
                 alianzasSalientes: []
             });
             const norm = normalizarNombreServidor(srv.name);
             if (norm) indiceNombreServidor.set(norm, srv.id);
+            if (srv.nombreOriginal) {
+                const normOrig = normalizarNombreServidor(srv.nombreOriginal);
+                if (normOrig) indiceNombreServidor.set(normOrig, srv.id);
+            }
         }
 
-        // 2. Vincular primero invitaciones ya resueltas (VALID) a los servidores existentes por ID o Nombre
         for (const inv of memoriaInvitaciones.values()) {
             if (inv.status === 'VALID' && inv.guildId) {
                 let targetId = mapaServidores.has(inv.guildId)
@@ -424,18 +454,21 @@ app.get('/api/red', autenticar, async (req, res) => {
                         srvExistente.icon = inv.icon;
                     }
                 } else {
-                    // Servidor real verificado por Discord API a través de invitación activa
                     targetId = inv.guildId;
                     mapaServidores.set(targetId, {
                         id: targetId,
                         name: inv.guildName || 'Servidor Aliado',
+                        nombreOriginal: inv.guildName || 'Servidor Aliado',
                         icon: inv.icon || null,
                         memberCount: inv.memberCount || 0,
                         mensajesSesion: 1,
                         ultimaActividad: Date.parse(inv.fecha) || Date.now(),
                         exploradores: ['Radar de Alianzas (Invite Activa)'],
+                        redundancia: 0,
                         usuariosCount: 0,
                         inviteUrl: inv.url,
+                        etiquetaManual: etiquetasServidores.get(targetId) || null,
+                        estadoCeniza: null,
                         alianzasSalientes: []
                     });
                     const norm = normalizarNombreServidor(inv.guildName);
@@ -444,7 +477,6 @@ app.get('/api/red', autenticar, async (req, res) => {
             }
         }
 
-        // 3. Cargar usuarios activos en vivo
         for (const usr of (estadoRadarRed.usuarios || [])) {
             const servidoresLimpiados = {};
             for (const [sId, sData] of Object.entries(usr.servidores || {})) {
@@ -454,13 +486,14 @@ app.get('/api/red', autenticar, async (req, res) => {
             mapaUsuarios.set(usr.id, {
                 ...usr,
                 horasActivas: Array.isArray(usr.horasActivas) ? [...usr.horasActivas] : [],
+                historialAliases: [usr.tag || 'Usuario'],
                 infracciones: 0,
                 fichado: false,
+                enWatchlist: watchlistUsuarios.has(String(usr.id)),
                 servidores: servidoresLimpiados
             });
         }
 
-        // 4. Enriquecer con los expedientes históricos de MongoDB y extraer invitaciones ocultas
         for (const exp of expedientes) {
             const uid = String(exp.userId || '').trim();
             if (!uid) continue;
@@ -479,13 +512,19 @@ app.get('/api/red', autenticar, async (req, res) => {
                     totalMensajes: exp.totalInfracciones || 1,
                     ultimaActividad: !Number.isNaN(primerTs) ? primerTs : Date.now(),
                     horasActivas: Array.from(horasSet),
+                    historialAliases: Array.isArray(exp.historialAliases) ? exp.historialAliases : [exp.ultimoAlias || 'Objetivo'],
                     servidores: {},
                     infracciones: exp.totalInfracciones || 0,
-                    fichado: true
+                    fichado: true,
+                    enWatchlist: watchlistUsuarios.has(uid)
                 };
             } else {
                 usr.infracciones = exp.totalInfracciones || 0;
                 usr.fichado = true;
+                usr.enWatchlist = watchlistUsuarios.has(uid);
+                if (Array.isArray(exp.historialAliases) && exp.historialAliases.length > 0) {
+                    usr.historialAliases = [...new Set([...usr.historialAliases, ...exp.historialAliases])];
+                }
             }
 
             const horasUsuarioSet = new Set(usr.horasActivas);
@@ -533,20 +572,23 @@ app.get('/api/red', autenticar, async (req, res) => {
                         mapaServidores.set(srvIdEncontrado, {
                             id: srvIdEncontrado,
                             name: nombreSrv,
+                            nombreOriginal: nombreSrv,
                             icon: null,
                             memberCount: 0,
                             mensajesSesion: 1,
                             ultimaActividad: !Number.isNaN(eventoTs) ? eventoTs : 0,
                             exploradores: ['Archivo Histórico'],
+                            redundancia: 0,
                             usuariosCount: 0,
                             inviteUrl: null,
+                            etiquetaManual: etiquetasServidores.get(srvIdEncontrado) || null,
+                            estadoCeniza: null,
                             alianzasSalientes: []
                         });
                         indiceNombreServidor.set(norm, srvIdEncontrado);
                     }
                 }
 
-                // Si el mensaje en este servidor contenía una invitación cuyo nombre coincide con el propio servidor, o si aún no tiene invite asignada y el mensaje anuncia el servidor
                 if (invitesEnMsg.length > 0) {
                     const srvNode = mapaServidores.get(srvIdEncontrado);
                     for (const inv of invitesEnMsg) {
@@ -579,14 +621,15 @@ app.get('/api/red', autenticar, async (req, res) => {
             mapaUsuarios.set(uid, usr);
         }
 
-        // 5. Construir Vectores de Alianzas (Flechas Púrpura entre Servidor Emisor -> Servidor Promocionado)
         const alianzas = [];
         for (const inv of memoriaInvitaciones.values()) {
             let targetSrvId = null;
             if (inv.status === 'VALID' && inv.guildId) {
-                targetSrvId = mapaServidores.has(inv.guildId)
-                    ? inv.guildId
-                    : buscarServidorPorNombre(inv.guildName);
+                targetIdSearch: {
+                    targetSrvId = mapaServidores.has(inv.guildId)
+                        ? inv.guildId
+                        : buscarServidorPorNombre(inv.guildName);
+                }
             }
 
             for (const origenNombre of (inv.origenes || [])) {
@@ -595,12 +638,10 @@ app.get('/api/red', autenticar, async (req, res) => {
 
                 const sourceNode = mapaServidores.get(sourceSrvId);
                 if (targetSrvId && targetSrvId === sourceSrvId) {
-                    // La invitación publicada pertenece a este mismo servidor: ya tenemos su link oficial
                     sourceNode.inviteUrl = inv.url;
                     continue;
                 }
 
-                // Registrar en la lista de alianzas salientes del servidor emisor
                 const targetLabel = (targetSrvId && mapaServidores.get(targetSrvId)?.name) || inv.guildName || `discord.gg/${inv.code}`;
                 if (!sourceNode.alianzasSalientes.some(a => a.url === inv.url)) {
                     sourceNode.alianzasSalientes.push({
@@ -624,7 +665,6 @@ app.get('/api/red', autenticar, async (req, res) => {
             }
         }
 
-        // 6. Calcular usuarios conectados por cada servidor
         for (const usr of mapaUsuarios.values()) {
             for (const sId of Object.keys(usr.servidores || {})) {
                 const srvObj = mapaServidores.get(sId);
@@ -640,11 +680,52 @@ app.get('/api/red', autenticar, async (req, res) => {
             usuarios: Array.from(mapaUsuarios.values()),
             interacciones: estadoRadarRed.interacciones || [],
             alianzas: alianzas,
-            pulsos: estadoRadarRed.pulsos || []
+            pulsos: estadoRadarRed.pulsos || [],
+            bitacoraDvr: estadoRadarRed.bitacoraDvr || [],
+            watchlist: Array.from(watchlistUsuarios)
         });
     } catch (error) {
         console.error('[ERROR API /api/red]:', error.message);
         res.status(500).json({ error: 'Error al compilar la matriz de red.' });
+    }
+});
+
+/**
+ * Guarda o elimina la etiqueta táctica de 1-2 palabras de un servidor en el mapa.
+ */
+app.post('/api/red/etiqueta', autenticar, (req, res) => {
+    const { serverId, texto, tipo } = req.body || {};
+    if (!serverId) return res.status(400).json({ error: 'serverId requerido.' });
+
+    const idLimpio = String(serverId).trim();
+    const textoLimpio = String(texto || '').trim().slice(0, 22).toUpperCase();
+
+    if (!textoLimpio) {
+        etiquetasServidores.delete(idLimpio);
+    } else {
+        etiquetasServidores.set(idLimpio, {
+            texto: textoLimpio,
+            tipo: String(tipo || 'CUSTOM').toUpperCase()
+        });
+    }
+
+    return res.json({ success: true, etiqueta: etiquetasServidores.get(idLimpio) || null });
+});
+
+/**
+ * Activa o desactiva el seguimiento prioritario (Watchlist VIP) sobre un usuario.
+ */
+app.post('/api/red/watchlist', autenticar, (req, res) => {
+    const { userId } = req.body || {};
+    if (!userId) return res.status(400).json({ error: 'userId requerido.' });
+
+    const idLimpio = String(userId).trim();
+    if (watchlistUsuarios.has(idLimpio)) {
+        watchlistUsuarios.delete(idLimpio);
+        return res.json({ success: true, enWatchlist: false });
+    } else {
+        watchlistUsuarios.add(idLimpio);
+        return res.json({ success: true, enWatchlist: true });
     }
 });
 
@@ -741,5 +822,10 @@ module.exports = {
     actualizarRadarRed,
     registrarInvitacionViva,
     restaurarCacheInvitaciones,
-    exportarCacheInvitaciones
+    exportarCacheInvitaciones,
+    restaurarEtiquetasServidores,
+    exportarEtiquetasServidores,
+    restaurarWatchlist,
+    exportarWatchlist,
+    esObjetivoWatchlist
 };
