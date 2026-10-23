@@ -6,9 +6,6 @@
    ========================================================================== */
 
 const STORAGE_SESSION_KEY = 'C4ISR_SESSION_TOKEN';
-async getRedTopologia() {
-        return await this.request('/api/red');
-    } 
 
 window.C4ISR_API = {
     sessionKey: sessionStorage.getItem(STORAGE_SESSION_KEY) || null,
@@ -41,7 +38,6 @@ window.C4ISR_API = {
             throw new Error(data.error || `HTTP_ERROR_${response.status}`);
         }
 
-        // Guardamos el token emitido por el servidor (o la clave si se usa un backend antiguo)
         this.setSession(data.token || clave);
         return data;
     },
@@ -77,6 +73,7 @@ window.C4ISR_API = {
             if (options.isDownload) {
                 return await response.blob();
             }
+
             return await response.json();
         } catch (error) {
             console.error(`[C4ISR_API] Fallo en petición a ${endpoint}:`, error.message);
@@ -88,6 +85,10 @@ window.C4ISR_API = {
 
     async getDatosGlobales() {
         return await this.request('/api/datos');
+    },
+
+    async getRedTopologia() {
+        return await this.request('/api/red');
     },
 
     async guardarNota(idUsuario, contenidoNota) {
