@@ -6,6 +6,9 @@
    ========================================================================== */
 
 const STORAGE_SESSION_KEY = 'C4ISR_SESSION_TOKEN';
+async getRedTopologia() {
+        return await this.request('/api/red');
+    } 
 
 window.C4ISR_API = {
     sessionKey: sessionStorage.getItem(STORAGE_SESSION_KEY) || null,
