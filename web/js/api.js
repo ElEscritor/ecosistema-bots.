@@ -91,6 +91,20 @@ window.C4ISR_API = {
         return await this.request('/api/red');
     },
 
+    async guardarEtiquetaServidor(serverId, texto, tipo = 'CUSTOM') {
+        return await this.request('/api/red/etiqueta', {
+            method: 'POST',
+            body: JSON.stringify({ serverId, texto, tipo })
+        });
+    },
+
+    async toggleWatchlistUsuario(userId) {
+        return await this.request('/api/red/watchlist', {
+            method: 'POST',
+            body: JSON.stringify({ userId })
+        });
+    },
+
     async guardarNota(idUsuario, contenidoNota) {
         return await this.request('/api/notas', {
             method: 'POST',
