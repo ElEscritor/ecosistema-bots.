@@ -31,11 +31,18 @@ async function asegurarIndiceSeguro(collection, keySpec, options = {}) {
     try {
         await collection.createIndex(keySpec, options);
     } catch (error) {
-        if (error.code === 85 || error.code === 86 || error.message.includes('existing index')) {
-            console.warn(`[AVISO BD] Índice existente detectado para ${JSON.stringify(keySpec)}. Conservando índice actual.`);
-        } else {
-            console.warn(`[AVISO BD] No se pudo optimizar el índice ${JSON.stringify(keySpec)}: ${error.message}`);
+        const msg = String(error.message || '');
+        if (
+            error.code === 85 ||
+            error.code === 86 ||
+            error.code === 67 ||
+            msg.includes('existing index') ||
+            msg.includes('only one text index')
+        ) {
+            // Se conserva silenciosamente el índice existente en el clúster
+            return;
         }
+        console.warn(`[AVISO BD] No se pudo optimizar el índice ${JSON.stringify(keySpec)}: ${msg}`);
     }
 }
 
@@ -267,23 +274,21 @@ async function importarMatriz(usuariosArray) {
     }
 }
 
-/**
- * Guarda en MongoDB el estado comprimido del radar de red (servidores, usuarios activos e interacciones)
- * para no perder la memoria ante reinicios del servidor en la nube.
- */
 async function guardarSnapshotRed(snapshotData) {
     if (!topologyCollection || !snapshotData) return false;
     try {
+        const updateDoc = {
+            actualizadoEn: new Date().toISOString(),
+            servidores: Array.isArray(snapshotData.servidores) ? snapshotData.servidores.slice(0, 600) : [],
+            usuarios: Array.isArray(snapshotData.usuarios) ? snapshotData.usuarios.slice(0, 2500) : [],
+            interacciones: Array.isArray(snapshotData.interacciones) ? snapshotData.interacciones.slice(0, 3000) : []
+        };
+        if (Array.isArray(snapshotData.invitaciones)) {
+            updateDoc.invitaciones = snapshotData.invitaciones.slice(0, 1500);
+        }
         await topologyCollection.updateOne(
             { _id: 'RADAR_STATE_GLOBAL' },
-            {
-                $set: {
-                    actualizadoEn: new Date().toISOString(),
-                    servidores: Array.isArray(snapshotData.servidores) ? snapshotData.servidores.slice(0, 500) : [],
-                    usuarios: Array.isArray(snapshotData.usuarios) ? snapshotData.usuarios.slice(0, 2500) : [],
-                    interacciones: Array.isArray(snapshotData.interacciones) ? snapshotData.interacciones.slice(0, 3000) : []
-                }
-            },
+            { $set: updateDoc },
             { upsert: true }
         );
         return true;
@@ -293,9 +298,6 @@ async function guardarSnapshotRed(snapshotData) {
     }
 }
 
-/**
- * Carga la memoria topológica previa al iniciar el sistema.
- */
 async function cargarSnapshotRed() {
     if (!topologyCollection) return null;
     try {
