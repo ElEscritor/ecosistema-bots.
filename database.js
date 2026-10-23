@@ -5,6 +5,7 @@ const { MongoClient } = require('mongodb');
 const MONGO_URI = process.env.MONGO_URI;
 const DB_NAME = process.env.MONGO_DB_NAME || 'panoptico_db';
 const COLLECTION_NAME = 'blacklist';
+const TOPOLOGY_COLLECTION_NAME = 'topologia_red';
 const MAX_HISTORIAL_SLICE = -50;
 const MAX_PAGINATION_LIMIT = 200;
 
@@ -13,7 +14,6 @@ if (!MONGO_URI) {
     process.exit(1);
 }
 
-// Configuración de Pool de Conexiones de nivel producción
 const client = new MongoClient(MONGO_URI, {
     maxPoolSize: 20,
     minPoolSize: 2,
@@ -24,32 +24,23 @@ const client = new MongoClient(MONGO_URI, {
 });
 
 let dbCollection = null;
+let topologyCollection = null;
 let connectionPromise = null;
 
-/**
- * Sincroniza un índice de forma segura. Si ya existe en MongoDB con opciones
- * heredadas distintas (IndexOptionsConflict / código 85 o 86), conserva el existente
- * o lo recrea si es seguro, sin tumbar jamás el despliegue en producción.
- */
 async function asegurarIndiceSeguro(collection, keySpec, options = {}) {
     try {
         await collection.createIndex(keySpec, options);
     } catch (error) {
-        // Códigos 85 (IndexOptionsConflict) y 86 (IndexKeySpecsConflict) en MongoDB
         if (error.code === 85 || error.code === 86 || error.message.includes('existing index')) {
-            console.warn(`[AVISO BD] Índice existente detectado para ${JSON.stringify(keySpec)}. Conservando índice actual del clúster.`);
+            console.warn(`[AVISO BD] Índice existente detectado para ${JSON.stringify(keySpec)}. Conservando índice actual.`);
         } else {
             console.warn(`[AVISO BD] No se pudo optimizar el índice ${JSON.stringify(keySpec)}: ${error.message}`);
         }
     }
 }
 
-/**
- * Inicializa la conexión a MongoDB garantizando una única instancia (Singleton)
- * y deteniendo el proceso únicamente si el clúster es inalcanzable en red.
- */
 async function conectarBaseDatos() {
-    if (dbCollection) return dbCollection;
+    if (dbCollection && topologyCollection) return dbCollection;
     if (connectionPromise) return connectionPromise;
 
     connectionPromise = (async () => {
@@ -57,13 +48,13 @@ async function conectarBaseDatos() {
             await client.connect();
             const db = client.db(DB_NAME);
             dbCollection = db.collection(COLLECTION_NAME);
+            topologyCollection = db.collection(TOPOLOGY_COLLECTION_NAME);
         } catch (error) {
             connectionPromise = null;
             console.error('[ERROR CRÍTICO BD] Fallo de red al conectar con el clúster MongoDB:', error.message);
             process.exit(1);
         }
 
-        // Sincronización tolerante de índices (compatible con bases de datos ya pobladas)
         await Promise.all([
             asegurarIndiceSeguro(dbCollection, { userId: 1 }, { background: true }),
             asegurarIndiceSeguro(dbCollection, { ultimoAlias: 'text' }, { background: true }),
@@ -71,26 +62,19 @@ async function conectarBaseDatos() {
             asegurarIndiceSeguro(dbCollection, { primerFichaje: -1 }, { background: true })
         ]);
 
-        console.log('[SISTEMA] Clúster MongoDB enlazado e índices verificados correctamente.');
+        console.log('[SISTEMA] Clúster MongoDB enlazado (Blacklist + Memoria Topológica).');
         return dbCollection;
     })();
 
     return connectionPromise;
 }
 
-/**
- * Valida que la colección esté activa antes de operar.
- */
 function verificarConexion() {
     if (!dbCollection) {
         throw new Error('La conexión a la base de datos no ha sido inicializada.');
     }
 }
 
-/**
- * Registra o actualiza el expediente de un infractor de forma atómica.
- * Mantiene el formato de retorno esperado por los módulos.
- */
 async function ficharInfractor(
     userId,
     userTag,
@@ -115,21 +99,20 @@ async function ficharInfractor(
         const resultado = await dbCollection.findOneAndUpdate(
             { userId: userId.trim() },
             {
-                $setOnInsert: { primerFichaje: timestampActual, notasAnalista: '', perfiladoAutomatico: [] },$set: {
-                    ultimoAlias: String(userTag || 'Desconocido').trim()
-                },
-                $inc: { totalInfracciones: 1 },$push: {
+                $setOnInsert: { primerFichaje: timestampActual, notasAnalista: '', perfiladoAutomatico: [] },
+                $set: { ultimoAlias: String(userTag || 'Desconocido').trim() },
+                $inc: { totalInfracciones: 1 },
+                $push: {
                     historial: {
-                        $each: [nuevoDelito],$slice: MAX_HISTORIAL_SLICE
+                        $each: [nuevoDelito],
+                        $slice: MAX_HISTORIAL_SLICE
                     }
                 }
             },
             { upsert: true, returnDocument: 'after' }
         );
 
-        // Compatibilidad con driver MongoDB v5 y v6+
         const exp = resultado?.value !== undefined ? resultado.value : resultado;
-
         if (exp && exp.totalInfracciones === 1) {
             return '**Nuevo Ingreso:** Primer delito registrado.';
         }
@@ -140,9 +123,6 @@ async function ficharInfractor(
     }
 }
 
-/**
- * Obtiene hasta 500 expedientes ordenados por nivel de reincidencia.
- */
 async function obtenerExpedientes(filtro = {}) {
     if (!dbCollection) return [];
     try {
@@ -158,12 +138,8 @@ async function obtenerExpedientes(filtro = {}) {
     }
 }
 
-/**
- * Obtiene expedientes paginados ejecutando la búsqueda y el conteo en paralelo.
- */
 async function obtenerExpedientesPaginados(filtro = {}, pagina = 1, limite = 50) {
     if (!dbCollection) return { datos: [], total: 0 };
-
     try {
         const queryFiltro = (filtro && typeof filtro === 'object') ? filtro : {};
         const paginaSegura = Math.max(1, parseInt(pagina, 10) || 1);
@@ -187,18 +163,12 @@ async function obtenerExpedientesPaginados(filtro = {}, pagina = 1, limite = 50)
     }
 }
 
-/**
- * Devuelve un cursor de lectura para streaming de datos (ej. exportaciones).
- */
 function obtenerExpedientesCursor(filtro = {}) {
     if (!dbCollection) return null;
     const queryFiltro = (filtro && typeof filtro === 'object') ? filtro : {};
     return dbCollection.find(queryFiltro).sort({ primerFichaje: -1 });
 }
 
-/**
- * Elimina un expediente por su userId.
- */
 async function eliminarExpediente(userId) {
     if (!dbCollection || !userId) return false;
     try {
@@ -210,9 +180,6 @@ async function eliminarExpediente(userId) {
     }
 }
 
-/**
- * Actualiza las notas manuales del analista OSINT.
- */
 async function actualizarNotaOSINT(userId, nota) {
     if (!dbCollection || !userId) return false;
     try {
@@ -228,9 +195,6 @@ async function actualizarNotaOSINT(userId, nota) {
     }
 }
 
-/**
- * Inyecta un objetivo de forma manual sin sobrescribir sus datos si ya existía.
- */
 async function inyectarObjetivoManual(userId) {
     if (!dbCollection || !userId) return false;
     const idLimpio = String(userId).trim();
@@ -258,9 +222,6 @@ async function inyectarObjetivoManual(userId) {
     }
 }
 
-/**
- * Importación masiva saneando entradas corruptas antes de ejecutar bulkWrite.
- */
 async function importarMatriz(usuariosArray) {
     if (!dbCollection || !Array.isArray(usuariosArray) || usuariosArray.length === 0) {
         return false;
@@ -274,7 +235,6 @@ async function importarMatriz(usuariosArray) {
             if (!user || typeof user !== 'object') continue;
             const rawId = user.userId || user.id;
             if (!rawId) continue;
-
             const cleanId = String(rawId).trim();
             if (!cleanId) continue;
 
@@ -299,7 +259,6 @@ async function importarMatriz(usuariosArray) {
         }
 
         if (operaciones.length === 0) return false;
-
         await dbCollection.bulkWrite(operaciones, { ordered: false });
         return true;
     } catch (error) {
@@ -309,12 +268,49 @@ async function importarMatriz(usuariosArray) {
 }
 
 /**
- * Cierra limpiamente la conexión al clúster de MongoDB.
+ * Guarda en MongoDB el estado comprimido del radar de red (servidores, usuarios activos e interacciones)
+ * para no perder la memoria ante reinicios del servidor en la nube.
  */
+async function guardarSnapshotRed(snapshotData) {
+    if (!topologyCollection || !snapshotData) return false;
+    try {
+        await topologyCollection.updateOne(
+            { _id: 'RADAR_STATE_GLOBAL' },
+            {
+                $set: {
+                    actualizadoEn: new Date().toISOString(),
+                    servidores: Array.isArray(snapshotData.servidores) ? snapshotData.servidores.slice(0, 500) : [],
+                    usuarios: Array.isArray(snapshotData.usuarios) ? snapshotData.usuarios.slice(0, 2500) : [],
+                    interacciones: Array.isArray(snapshotData.interacciones) ? snapshotData.interacciones.slice(0, 3000) : []
+                }
+            },
+            { upsert: true }
+        );
+        return true;
+    } catch (error) {
+        console.error('[ERROR BD] Fallo al guardar snapshot de red:', error.message);
+        return false;
+    }
+}
+
+/**
+ * Carga la memoria topológica previa al iniciar el sistema.
+ */
+async function cargarSnapshotRed() {
+    if (!topologyCollection) return null;
+    try {
+        return await topologyCollection.findOne({ _id: 'RADAR_STATE_GLOBAL' });
+    } catch (error) {
+        console.error('[ERROR BD] Fallo al cargar snapshot de red:', error.message);
+        return null;
+    }
+}
+
 async function cerrarBaseDatos() {
     try {
         await client.close();
         dbCollection = null;
+        topologyCollection = null;
         connectionPromise = null;
         console.log('[SISTEMA] Conexión a MongoDB cerrada correctamente.');
     } catch (error) {
@@ -333,5 +329,7 @@ module.exports = {
     actualizarNotaOSINT,
     inyectarObjetivoManual,
     importarMatriz,
+    guardarSnapshotRed,
+    cargarSnapshotRed,
     cerrarBaseDatos
 };
