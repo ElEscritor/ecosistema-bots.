@@ -8,21 +8,23 @@ const database = require('../database.js');
 const app = express();
 const PUERTO = Number(process.env.PORT) || 3000;
 
-// Prioriza variables de entorno manteniendo fallback compatible con tu configuración actual
 const USUARIO_MAESTRO = process.env.PANEL_USER || 'Admin';
 const PASSWORD_MAESTRA = process.env.PANEL_PASSWORD || '1930';
 
-// Almacén de sesiones activas y control anti-fuerza bruta en memoria
-const sesionesActivas = new Map(); // Map<token, expirationTimestamp>
-const intentosFallidosIP = new Map(); // Map<ip, { count, lockUntil }>
-
-const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 horas
+const sesionesActivas = new Map();
+const intentosFallidosIP = new Map();
+const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const MAX_INTENTOS_LOGIN = 8;
-const BLOQUEO_LOGIN_MS = 5 * 60 * 1000; // 5 minutos
+const BLOQUEO_LOGIN_MS = 5 * 60 * 1000;
 
 let estadoEnjambre = [];
+let estadoRadarRed = {
+    servidores: [],
+    usuarios: [],
+    interacciones: [],
+    pulsos: []
+};
 
-// Cabeceras de seguridad básicas y desactivación de huella del servidor
 app.disable('x-powered-by');
 app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -33,7 +35,6 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: '25mb' }));
 
-// BLOQUEO CRÍTICO DE SEGURIDAD: Impedir que los scripts de backend sean descargados como archivos estáticos
 app.use((req, res, next) => {
     const rutaMinuscula = req.path.toLowerCase();
     if (rutaMinuscula.endsWith('/servidor.js') || rutaMinuscula.endsWith('/transmisor.js')) {
@@ -44,9 +45,6 @@ app.use((req, res, next) => {
 
 app.use(express.static(path.join(__dirname), { index: false }));
 
-/**
- * Comparación en tiempo constante para evitar ataques de timing.
- */
 function compararSeguro(a, b) {
     const strA = String(a || '');
     const strB = String(b || '');
@@ -62,9 +60,12 @@ function actualizarEnjambre(datos) {
     }
 }
 
-/**
- * Endpoint de autenticación con protección contra fuerza bruta.
- */
+function actualizarRadarRed(datos) {
+    if (datos && typeof datos === 'object') {
+        estadoRadarRed = datos;
+    }
+}
+
 app.post('/api/login', (req, res) => {
     const ipCliente = req.ip || req.socket?.remoteAddress || 'unknown';
     const ahora = Date.now();
@@ -98,9 +99,6 @@ app.post('/api/login', (req, res) => {
     return res.status(403).json({ error: 'Credenciales inválidas' });
 });
 
-/**
- * Middleware de autenticación compatible con token de sesión y con clave directa (retrocompatibilidad).
- */
 function autenticar(req, res, next) {
     const headerKey = req.headers['x-auth-key'];
     if (!headerKey) {
@@ -108,7 +106,6 @@ function autenticar(req, res, next) {
     }
 
     const ahora = Date.now();
-    // 1. Verificar si es un token de sesión emitido por /api/login
     if (sesionesActivas.has(headerKey)) {
         const expira = sesionesActivas.get(headerKey);
         if (ahora < expira) {
@@ -117,7 +114,6 @@ function autenticar(req, res, next) {
         sesionesActivas.delete(headerKey);
     }
 
-    // 2. Fallback de retrocompatibilidad si el cliente envió la clave maestra directamente
     if (compararSeguro(headerKey, PASSWORD_MAESTRA)) {
         return next();
     }
@@ -125,9 +121,6 @@ function autenticar(req, res, next) {
     return res.status(403).json({ error: 'Sesión expirada o clave incorrecta' });
 }
 
-/**
- * Endpoint central de telemetría y sincronización de vistas.
- */
 app.get('/api/datos', autenticar, async (req, res) => {
     try {
         const expedientes = await database.obtenerExpedientes({});
@@ -139,7 +132,7 @@ app.get('/api/datos', autenticar, async (req, res) => {
             enjambre: estadoEnjambre,
             blacklist: [],
             links: [],
-            expedientes: expedientes // Disponible íntegro para las vistas que requieran el historial completo
+            expedientes: expedientes
         };
 
         const regexUrl = /(https?:\/\/[^\s<>]+|discord\.gg\/[^\s<>]+)/i;
@@ -158,7 +151,6 @@ app.get('/api/datos', autenticar, async (req, res) => {
                 const accionStr = String(delito.accion || '');
                 const msgOriginal = String(delito.mensajeOriginal || '');
 
-                // A. Clasificación para Radar de Alianzas (LinksPortal)
                 if (accionStr.includes('Links')) {
                     const urlMatch = msgOriginal.match(regexUrl);
                     datos.links.push({
@@ -173,7 +165,6 @@ app.get('/api/datos', autenticar, async (req, res) => {
                 }
             }
 
-            // B. Clasificación para Blacklist y Expedientes (Sin perder perfiles de solo-OSINT o manuales)
             if (delitosGraves.length > 0) {
                 const ultimoGrave = delitosGraves[delitosGraves.length - 1];
                 datos.blacklist.push({
@@ -187,7 +178,6 @@ app.get('/api/datos', autenticar, async (req, res) => {
                     historial: historial
                 });
             } else {
-                // Incluye perfiles OSINT, o de Links, o inyectados manualmente para que no desaparezcan de Expedientes
                 const ultimoEvento = historial.length > 0 ? historial[historial.length - 1] : null;
                 datos.blacklist.push({
                     id: exp.userId,
@@ -206,6 +196,109 @@ app.get('/api/datos', autenticar, async (req, res) => {
     } catch (error) {
         console.error('[ERROR API /api/datos]:', error.message);
         res.status(500).json({ error: 'Desincronización de Base de Datos' });
+    }
+});
+
+/**
+ * Endpoint en tiempo real para el Mapa de Red (Nodos Rojos = Servidores, Nodos Verdes = Usuarios).
+ * Combina la actividad viva captada por los exploradores con los expedientes históricos de MongoDB.
+ */
+app.get('/api/red', autenticar, async (req, res) => {
+    try {
+        const expedientes = await database.obtenerExpedientes({});
+        const mapaServidores = new Map();
+        const mapaUsuarios = new Map();
+
+        // 1. Cargar servidores en vivo (con sus IDs reales)
+        for (const srv of (estadoRadarRed.servidores || [])) {
+            mapaServidores.set(srv.id, { ...srv });
+        }
+
+        // 2. Cargar usuarios activos en vivo
+        for (const usr of (estadoRadarRed.usuarios || [])) {
+            mapaUsuarios.set(usr.id, {
+                ...usr,
+                infracciones: 0,
+                fichado: false,
+                servidores: { ...(usr.servidores || {}) }
+            });
+        }
+
+        // 3. Enriquecer con los expedientes históricos de MongoDB
+        for (const exp of expedientes) {
+            const uid = String(exp.userId || '').trim();
+            if (!uid) continue;
+
+            let usr = mapaUsuarios.get(uid);
+            if (!usr) {
+                usr = {
+                    id: uid,
+                    tag: exp.ultimoAlias || 'Objetivo Fichado',
+                    avatar: null,
+                    totalMensajes: exp.totalInfracciones || 1,
+                    ultimaActividad: Date.parse(exp.primerFichaje) || Date.now(),
+                    horasActivas: [],
+                    servidores: {},
+                    infracciones: exp.totalInfracciones || 0,
+                    fichado: true
+                };
+            } else {
+                usr.infracciones = exp.totalInfracciones || 0;
+                usr.fichado = true;
+            }
+
+            const historial = Array.isArray(exp.historial) ? exp.historial : [];
+            for (const h of historial) {
+                const nombreSrv = String(h.servidor || '').trim();
+                if (!nombreSrv || nombreSrv === 'N/A') continue;
+
+                // Buscar si ese nombre de servidor ya corresponde a un servidor vivo por nombre
+                let srvIdEncontrado = null;
+                for (const [sId, sObj] of mapaServidores.entries()) {
+                    if (sObj.name.toLowerCase() === nombreSrv.toLowerCase()) {
+                        srvIdEncontrado = sId;
+                        break;
+                    }
+                }
+                if (!srvIdEncontrado) {
+                    srvIdEncontrado = `HIST_${nombreSrv.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
+                    if (!mapaServidores.has(srvIdEncontrado)) {
+                        mapaServidores.set(srvIdEncontrado, {
+                            id: srvIdEncontrado,
+                            name: nombreSrv,
+                            icon: null,
+                            memberCount: 0,
+                            mensajesSesion: 1,
+                            ultimaActividad: Date.parse(h.fecha) || 0,
+                            exploradores: ['Archivo Histórico']
+                        });
+                    }
+                }
+
+                if (!usr.servidores[srvIdEncontrado]) {
+                    usr.servidores[srvIdEncontrado] = {
+                        name: nombreSrv,
+                        count: 1,
+                        lastSeen: Date.parse(h.fecha) || Date.now()
+                    };
+                } else {
+                    usr.servidores[srvIdEncontrado].count += 1;
+                }
+            }
+
+            mapaUsuarios.set(uid, usr);
+        }
+
+        res.json({
+            enjambre: estadoEnjambre,
+            servidores: Array.from(mapaServidores.values()),
+            usuarios: Array.from(mapaUsuarios.values()),
+            interacciones: estadoRadarRed.interacciones || [],
+            pulsos: estadoRadarRed.pulsos || []
+        });
+    } catch (error) {
+        console.error('[ERROR API /api/red]:', error.message);
+        res.status(500).json({ error: 'Error al compilar la matriz de red.' });
     }
 });
 
@@ -235,9 +328,6 @@ app.post('/api/eliminar', autenticar, async (req, res) => {
     }
 });
 
-/**
- * Exportación mediante streaming para evitar desbordar la memoria RAM en bases de datos grandes.
- */
 app.get('/api/exportar', autenticar, async (req, res) => {
     try {
         const cursor = database.obtenerExpedientesCursor({});
@@ -297,4 +387,4 @@ function iniciar() {
     });
 }
 
-module.exports = { iniciar, actualizarEnjambre };
+module.exports = { iniciar, actualizarEnjambre, actualizarRadarRed };
