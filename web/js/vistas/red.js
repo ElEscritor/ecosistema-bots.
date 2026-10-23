@@ -1,7 +1,7 @@
 'use strict';
 
 /* ==========================================================================
-   VISTA: MAPA DE RED EN VIVO + MOTOR FORENSE CAZA DE ALTS (JACCARD + HORARIO)
+   VISTA: MAPA DE RED C4ISR v2.0 (FÍSICAS ADAPTATIVAS // SPOTLIGHT // ALTS)
    Archivo: js/vistas/red.js
    ========================================================================== */
 
@@ -19,36 +19,41 @@ window.C4ISR_Views.red = {
     nodes: new Map(),
     edges: [],
     altEdges: [],
+    adjacency: new Map(), // Map<nodeKey, Set<neighborKey>> para Spotlight instantáneo
+    serverMembers: new Map(), // Map<serverKey, Array<userNode>>
     suspectPairs: [],
     altMapByUser: new Map(),
     particles: [],
     seenPulses: new Set(),
 
-    camera: { x: 0, y: 0, zoom: 0.9 },
+    camera: { x: 0, y: 0, zoom: 0.78 },
     isDraggingCanvas: false,
     draggedNode: null,
     hoveredNode: null,
     selectedNode: null,
     highlightedPair: null,
     lastMousePos: { x: 0, y: 0 },
+    screenMousePos: { x: 0, y: 0 },
 
-    rightPanelTab: 'inspector', // 'inspector' | 'alts'
+    rightPanelTab: 'inspector',
     physicsEnabled: true,
     showUserLinks: true,
     showAltLinks: true,
     onlyBridges: false,
+    hideEmptyServers: false,
     searchTerm: '',
 
     async render(container) {
         container.innerHTML = `
-            <div class="panel-header" style="margin-bottom: 0.85rem;">
-                <div>
-                    <span class="panel-title" style="font-size: 1.1rem; color: var(--accent-rz);">TOPOLOGÍA EN TIEMPO REAL // SERVIDORES, ACTIVIDAD Y ALTS</span>
-                    <span id="red-stats-badge" class="badge badge-green" style="margin-left: 0.75rem;">SINCRONIZANDO...</span>
-                    <span id="red-alts-badge" class="badge badge-amber" style="margin-left: 0.4rem;">0 ALTS DETECTADAS</span>
+            <div class="panel-header" style="margin-bottom: 0.65rem; padding-bottom: 0.55rem;">
+                <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                    <span class="panel-title" style="font-size: 1.05rem; color: var(--accent-rz);">TOPOLOGÍA EN TIEMPO REAL // SERVIDORES, ACTIVIDAD Y ALTS</span>
+                    <span id="red-stats-badge" class="badge badge-green">SINCRONIZANDO...</span>
+                    <span id="red-alts-badge" class="badge badge-amber">0 ALTS DETECTADAS</span>
                 </div>
-                <div style="display: flex; gap: 0.45rem; flex-wrap: wrap;">
-                    <button id="btn-toggle-bridges" class="btn-action" type="button">PUENTES MULTI-SERVER: OFF</button>
+                <div style="display: flex; gap: 0.4rem; flex-wrap: wrap;">
+                    <button id="btn-toggle-empty-srv" class="btn-action" type="button">OCULTAR SERVERS VACÍOS: OFF</button>
+                    <button id="btn-toggle-bridges" class="btn-action" type="button">SOLO PUENTES: OFF</button>
                     <button id="btn-toggle-chatlinks" class="btn-action" type="button">DIÁLOGO (&lt;30s): ON</button>
                     <button id="btn-toggle-altlinks" class="btn-action" type="button">ENLACES ALTS: ON</button>
                     <button id="btn-toggle-physics" class="btn-action" type="button">FÍSICAS: ON</button>
@@ -56,35 +61,48 @@ window.C4ISR_Views.red = {
                 </div>
             </div>
 
-            <div class="toolbar-tactical" style="margin-bottom: 0.85rem; padding: 0.65rem 1rem;">
-                <input type="text" id="red-search" class="search-input" placeholder="Localizar servidor o usuario por nombre o UID..." autocomplete="off">
-                <div style="display: flex; gap: 1rem; align-items: center; font-family: var(--font-mono); font-size: 0.73rem; color: var(--text-secondary); flex-wrap: wrap;">
+            <div class="toolbar-tactical" style="margin-bottom: 0.65rem; padding: 0.55rem 0.9rem;">
+                <div style="display: flex; align-items: center; gap: 0.5rem; flex: 1; min-width: 260px;">
+                    <input type="text" id="red-search" class="search-input" style="width: 100%; max-width: 420px;" placeholder="Buscar servidor o usuario por nombre o UID (Enter para enfocar)..." autocomplete="off">
+                </div>
+                <div style="display: flex; gap: 0.95rem; align-items: center; font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-secondary); flex-wrap: wrap;">
                     <span><strong style="color: #ef4444;">&#9679; ROJO:</strong> SERVIDORES</span>
                     <span><strong style="color: #10b981;">&#9679; VERDE:</strong> USUARIOS</span>
                     <span><strong style="color: #fbbf24;">&#9678; ÁMBAR:</strong> MULTI-SERVER</span>
+                    <span><strong style="color: #ff2a6d;">&#9678; ROSA:</strong> FICHADO</span>
                     <span><strong style="color: #fcee0a;">&#10697; MIRA NEÓN:</strong> SOSPECHA ALT</span>
                 </div>
             </div>
 
-            <div style="display: grid; grid-template-columns: 1fr 350px; gap: 1rem; height: calc(100vh - 235px); min-height: 480px;">
-                <div id="canvas-wrapper" style="position: relative; background: #07060a; border: var(--border-thin); border-radius: var(--radius-md); overflow: hidden;">
+            <div style="display: grid; grid-template-columns: 1fr 360px; gap: 0.85rem; height: calc(100vh - 210px); min-height: 440px;">
+                <div id="canvas-wrapper" style="position: relative; background: radial-gradient(circle at 50% 50%, #120e1c 0%, #07060a 100%); border: var(--border-thin); border-radius: var(--radius-md); overflow: hidden;">
                     <canvas id="net-canvas" style="width: 100%; height: 100%; display: block; cursor: grab;"></canvas>
-                    <div id="live-feed-ticker" style="position: absolute; bottom: 10px; left: 12px; font-family: var(--font-mono); font-size: 0.72rem; color: var(--accent-green); background: rgba(9, 8, 12, 0.88); padding: 4px 10px; border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 4px; pointer-events: none;">
-                        [RADAR ACTIVO] Esperando impulsos de red...
+
+                    <!-- HUD Esquina Superior Izquierda: Telemetría de Cámara -->
+                    <div id="hud-coords" style="position: absolute; top: 10px; left: 12px; font-family: var(--font-mono); font-size: 0.68rem; color: rgba(255, 42, 109, 0.75); background: rgba(9, 8, 12, 0.75); padding: 4px 8px; border-left: 2px solid var(--accent-rz); pointer-events: none;">
+                        C4ISR // GRID-LOCK // ZOOM: 78%
+                    </div>
+
+                    <!-- Tooltip Flotante Instantáneo (Hover) -->
+                    <div id="canvas-hover-tooltip" class="hidden" style="position: absolute; pointer-events: none; z-index: 30; background: rgba(11, 9, 16, 0.95); border: 1px solid var(--accent-rz); border-left: 3px solid var(--accent-rz); padding: 6px 10px; border-radius: 4px; font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-main); box-shadow: 0 8px 20px rgba(0,0,0,0.85); max-width: 280px;"></div>
+
+                    <!-- Ticker de Impulsos en Vivo (Posicionado sin cortes) -->
+                    <div id="live-feed-ticker" style="position: absolute; bottom: 12px; left: 12px; right: 12px; max-width: fit-content; font-family: var(--font-mono); font-size: 0.72rem; color: var(--accent-green); background: rgba(9, 8, 12, 0.92); padding: 5px 12px; border: 1px solid rgba(16, 185, 129, 0.4); border-left: 3px solid var(--accent-green); border-radius: 4px; pointer-events: none; box-shadow: 0 4px 12px rgba(0,0,0,0.6);">
+                        [RADAR ACTIVO] Escaneando tráfico de la matriz...
                     </div>
                 </div>
 
                 <div class="osint-panel" style="height: 100%;">
-                    <div class="panel-header" style="margin: 0; padding: 0.65rem 0.9rem; display: flex; gap: 0.4rem;">
+                    <div class="panel-header" style="margin: 0; padding: 0.6rem 0.85rem; display: flex; gap: 0.4rem;">
                         <button id="tab-btn-inspector" class="btn-action" type="button" style="flex: 1; background: var(--accent-rz); color: #fff;">INSPECTOR NODO</button>
                         <button id="tab-btn-alts" class="btn-action" type="button" style="flex: 1;">RADAR ALTS (0)</button>
                     </div>
-                    <div id="node-inspector-content" class="osint-content" style="font-family: var(--font-mono); font-size: 0.79rem;">
-                        <div style="color: var(--text-muted); padding-top: 1rem;">
-                            Haz clic sobre cualquier punto rojo (Servidor) o punto verde (Usuario) en el lienzo para inspeccionar su actividad en vivo, servidores en común y análisis de cuentas espejo (Alts).
+                    <div id="node-inspector-content" class="osint-content" style="font-family: var(--font-mono); font-size: 0.78rem;">
+                        <div style="color: var(--text-muted); padding-top: 0.75rem; line-height: 1.5;">
+                            Haz clic sobre cualquier <strong style="color: #ef4444;">Servidor (Rojo)</strong> para listar todos sus usuarios infiltrados, o sobre un <strong style="color: #10b981;">Usuario (Verde)</strong> para auditar su huella horaria de 24h, servidores comunes y cuentas espejo.
                         </div>
                     </div>
-                    <div id="alts-radar-content" class="osint-content hidden" style="font-family: var(--font-mono); font-size: 0.79rem;"></div>
+                    <div id="alts-radar-content" class="osint-content hidden" style="font-family: var(--font-mono); font-size: 0.78rem;"></div>
                 </div>
             </div>
         `;
@@ -114,7 +132,23 @@ window.C4ISR_Views.red = {
         if (!this.canvas) return;
         this.camera.x = this.canvas.width / 2;
         this.camera.y = this.canvas.height / 2;
-        this.camera.zoom = 0.85;
+        this.camera.zoom = 0.78;
+        this.updateHudCoords();
+    },
+
+    updateHudCoords() {
+        const hud = document.getElementById('hud-coords');
+        if (hud) {
+            hud.textContent = `C4ISR // GRID-LOCK // ZOOM: ${Math.round(this.camera.zoom * 100)}% // NODOS VISIBLES: ${this.countVisibleNodes()}`;
+        }
+    },
+
+    countVisibleNodes() {
+        let count = 0;
+        for (const n of this.nodes.values()) {
+            if (this.isNodeVisible(n)) count++;
+        }
+        return count;
     },
 
     switchRightTab(tabName) {
@@ -154,6 +188,7 @@ window.C4ISR_Views.red = {
         window.addEventListener('resize', this.boundResize);
         window.addEventListener('mouseup', this.boundMouseUp);
 
+        const btnEmptySrv = document.getElementById('btn-toggle-empty-srv');
         const btnPhysics = document.getElementById('btn-toggle-physics');
         const btnChatLinks = document.getElementById('btn-toggle-chatlinks');
         const btnAltLinks = document.getElementById('btn-toggle-altlinks');
@@ -163,11 +198,15 @@ window.C4ISR_Views.red = {
         const tabInspector = document.getElementById('tab-btn-inspector');
         const tabAlts = document.getElementById('tab-btn-alts');
 
-        if (tabInspector) {
-            tabInspector.addEventListener('click', () => this.switchRightTab('inspector'));
-        }
-        if (tabAlts) {
-            tabAlts.addEventListener('click', () => this.switchRightTab('alts'));
+        if (tabInspector) tabInspector.addEventListener('click', () => this.switchRightTab('inspector'));
+        if (tabAlts) tabAlts.addEventListener('click', () => this.switchRightTab('alts'));
+
+        if (btnEmptySrv) {
+            btnEmptySrv.addEventListener('click', () => {
+                this.hideEmptyServers = !this.hideEmptyServers;
+                btnEmptySrv.textContent = `OCULTAR SERVERS VACÍOS: ${this.hideEmptyServers ? 'ON' : 'OFF'}`;
+                this.updateHudCoords();
+            });
         }
 
         if (btnPhysics) {
@@ -194,12 +233,14 @@ window.C4ISR_Views.red = {
         if (btnBridges) {
             btnBridges.addEventListener('click', () => {
                 this.onlyBridges = !this.onlyBridges;
-                btnBridges.textContent = `PUENTES MULTI-SERVER: ${this.onlyBridges ? 'ON' : 'OFF'}`;
+                btnBridges.textContent = `SOLO PUENTES: ${this.onlyBridges ? 'ON' : 'OFF'}`;
+                this.updateHudCoords();
             });
         }
 
         if (btnCenter) {
             btnCenter.addEventListener('click', () => {
+                this.selectedNode = null;
                 this.highlightedPair = null;
                 this.centerCamera();
             });
@@ -208,6 +249,17 @@ window.C4ISR_Views.red = {
         if (searchInput) {
             searchInput.addEventListener('input', (e) => {
                 this.searchTerm = e.target.value.toLowerCase().trim();
+                this.updateHudCoords();
+            });
+            searchInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && this.searchTerm) {
+                    for (const n of this.nodes.values()) {
+                        if (this.isNodeVisible(n)) {
+                            this.focusSingleNode(n);
+                            break;
+                        }
+                    }
+                }
             });
         }
 
@@ -221,12 +273,16 @@ window.C4ISR_Views.red = {
                 this.switchRightTab('inspector');
                 this.renderInspector(hit);
             } else {
+                // Clic en el fondo deselecciona el aislamiento para volver a ver toda la red al 100%
+                this.selectedNode = null;
+                this.highlightedPair = null;
                 this.isDraggingCanvas = true;
                 this.lastMousePos = { x: e.clientX, y: e.clientY };
             }
         });
 
         this.canvas.addEventListener('mousemove', (e) => {
+            this.screenMousePos = { x: e.offsetX, y: e.offsetY };
             const pos = this.screenToWorld(e.offsetX, e.offsetY);
             if (this.draggedNode) {
                 this.draggedNode.x = pos.x;
@@ -240,16 +296,63 @@ window.C4ISR_Views.red = {
                 this.camera.y += dy;
                 this.lastMousePos = { x: e.clientX, y: e.clientY };
             } else {
-                this.hoveredNode = this.findNodeAt(pos.x, pos.y);
-                this.canvas.style.cursor = this.hoveredNode ? 'pointer' : 'grab';
+                const hit = this.findNodeAt(pos.x, pos.y);
+                this.hoveredNode = hit;
+                this.canvas.style.cursor = hit ? 'pointer' : 'grab';
+                this.updateFloatingTooltip(hit, e.offsetX, e.offsetY);
             }
+        });
+
+        this.canvas.addEventListener('mouseleave', () => {
+            this.hoveredNode = null;
+            this.updateFloatingTooltip(null, 0, 0);
         });
 
         this.canvas.addEventListener('wheel', (e) => {
             e.preventDefault();
             const factor = e.deltaY < 0 ? 1.12 : 0.89;
-            this.camera.zoom = Math.max(0.18, Math.min(3.5, this.camera.zoom * factor));
+            const newZoom = Math.max(0.15, Math.min(3.8, this.camera.zoom * factor));
+
+            // Zoom centrado exactamente sobre el puntero del ratón
+            const wx = (e.offsetX - this.camera.x) / this.camera.zoom;
+            const wy = (e.offsetY - this.camera.y) / this.camera.zoom;
+            this.camera.zoom = newZoom;
+            this.camera.x = e.offsetX - wx * newZoom;
+            this.camera.y = e.offsetY - wy * newZoom;
+            this.updateHudCoords();
         }, { passive: false });
+    },
+
+    updateFloatingTooltip(node, mx, my) {
+        const tooltip = document.getElementById('canvas-hover-tooltip');
+        if (!tooltip) return;
+        if (!node) {
+            tooltip.classList.add('hidden');
+            return;
+        }
+
+        if (node.type === 'SERVER') {
+            const membersCount = (this.serverMembers.get(node.key) || []).length;
+            tooltip.style.borderColor = '#ef4444';
+            tooltip.innerHTML = `
+                <div style="color:#ef4444;font-weight:700;">[SERVIDOR] ${DOMPurify.sanitize(node.label)}</div>
+                <div style="color:var(--text-secondary);">Usuarios Monitoreados: <b>${membersCount}</b> | Msgs: <b>${node.meta?.mensajesSesion || 0}</b></div>
+            `;
+        } else {
+            const statusColor = node.altRole ? '#fcee0a' : (node.fichado ? '#ff2a6d' : '#10b981');
+            tooltip.style.borderColor = statusColor;
+            tooltip.innerHTML = `
+                <div style="color:${statusColor};font-weight:700;">[USUARIO] ${DOMPurify.sanitize(node.label)}</div>
+                <div style="color:var(--text-secondary);">UID: ${DOMPurify.sanitize(String(node.rawId))}</div>
+                <div style="color:var(--text-main);">Servers: <b>${node.serverCount}</b> | Msgs: <b>${node.meta?.totalMensajes || 0}</b> | Infracciones: <b>${node.infracciones}</b></div>
+            `;
+        }
+
+        tooltip.classList.remove('hidden');
+        const left = Math.min((this.canvas?.width || 800) - 290, mx + 16);
+        const top = Math.max(12, my - 18);
+        tooltip.style.left = `${left}px`;
+        tooltip.style.top = `${top}px`;
     },
 
     screenToWorld(sx, sy) {
@@ -260,32 +363,46 @@ window.C4ISR_Views.red = {
     },
 
     findNodeAt(wx, wy) {
+        // Priorizar nodos de usuario si están superpuestos sobre el halo de un servidor
         for (const node of this.nodes.values()) {
-            if (!this.isNodeVisible(node)) continue;
+            if (node.type !== 'USER' || !this.isNodeVisible(node)) continue;
             const dx = wx - node.x;
             const dy = wy - node.y;
-            if (Math.sqrt(dx * dx + dy * dy) <= node.radius + 5) {
-                return node;
-            }
+            if (Math.sqrt(dx * dx + dy * dy) <= node.radius + 4) return node;
+        }
+        for (const node of this.nodes.values()) {
+            if (node.type !== 'SERVER' || !this.isNodeVisible(node)) continue;
+            const dx = wx - node.x;
+            const dy = wy - node.y;
+            if (Math.sqrt(dx * dx + dy * dy) <= node.radius + 5) return node;
         }
         return null;
     },
 
     isNodeVisible(node) {
+        if (node.type === 'SERVER' && this.hideEmptyServers) {
+            const connected = (this.serverMembers.get(node.key) || []).length;
+            if (connected === 0) return false;
+        }
         if (this.onlyBridges && node.type === 'USER') {
             if (node.serverCount < 2 && !node.fichado && !node.altRole) return false;
         }
         if (this.searchTerm) {
-            return node.label.toLowerCase().includes(this.searchTerm) || String(node.rawId).includes(this.searchTerm);
+            const matchSelf = node.label.toLowerCase().includes(this.searchTerm) || String(node.rawId).includes(this.searchTerm);
+            if (matchSelf) return true;
+            // Si el usuario busca el nombre de un servidor, mostrar también sus miembros conectados
+            const neighbors = this.adjacency.get(node.key);
+            if (neighbors) {
+                for (const nKey of neighbors) {
+                    const nb = this.nodes.get(nKey);
+                    if (nb && nb.label.toLowerCase().includes(this.searchTerm)) return true;
+                }
+            }
+            return false;
         }
         return true;
     },
 
-    /**
-     * Motor Forense Multi-Heurístico en JS:
-     * 1. Similitud de Jaccard sobre vecinos de conversación (<30s) + servidores compartidos (sin hablar entre sí o peso <= 1).
-     * 2. Exclusión Horaria por bloques (Madrugada, Mañana, Tarde, Noche), Conmutación (<10 min) y Sueño Común (>= 6h).
-     */
     analyzeMirrorAccounts(usuarios, interacciones) {
         const chatNeighbors = new Map();
         const directWeights = new Map();
@@ -330,13 +447,11 @@ window.C4ISR_Views.red = {
                 const pairKey = u.id < v.id ? `${u.id}:${v.id}` : `${v.id}:${u.id}`;
                 const pesoDirecto = directWeights.get(pairKey) || 0;
 
-                // Regla Efecto Espejo: Nunca o casi nunca hablan directamente entre ellos (peso <= 1)
                 if (pesoDirecto > 1) continue;
 
                 const vChatSet = chatNeighbors.get(v.id) || new Set();
                 const vSrvKeys = Object.keys(v.servidores || {});
 
-                // Construir conjunto de huella relacional (vecinos de chat + servidores)
                 const featuresU = new Set();
                 const featuresV = new Set();
 
@@ -352,35 +467,39 @@ window.C4ISR_Views.red = {
                     if (featuresV.has(item)) interseccion.push(item);
                 }
 
-                // Exigir al menos 2 vectores compartidos y al menos 1 servidor en común
                 const sharedServers = uSrvKeys.filter(s => vSrvKeys.includes(s));
                 if (interseccion.length < 2 || sharedServers.length === 0) continue;
 
-                // Exigir que o bien compartan >= 2 vecinos de diálogo o bien >= 2 servidores exactos
                 const sharedChatPartners = [...uChatSet].filter(id => id !== v.id && vChatSet.has(id));
-                if (sharedChatPartners.length < 2 && sharedServers.length < 2) continue;
+                // Evitar falsos positivos de usuarios históricos que solo comparten 2 servidores sin hablar con los mismos objetivos
+                if (sharedChatPartners.length === 0 && sharedServers.length < 3) continue;
 
                 const unionSize = featuresU.size + featuresV.size - interseccion.length;
                 const jaccard = unionSize > 0 ? (interseccion.length / unionSize) : 0;
 
-                if (jaccard < 0.65) continue;
+                if (jaccard < 0.68) continue;
 
-                // Evaluación Cronobiológica: Ciclos de sueño (horas inactivas 0..23)
-                const horasU = new Set(Array.isArray(u.horasActivas) ? u.horasActivas : []);
-                const horasV = new Set(Array.isArray(v.horasActivas) ? v.horasActivas : []);
+                // Validación Cronobiológica estricta: exigir que ambos tengan al menos 2 horas activas registradas
+                const rawHoursU = Array.isArray(u.horasActivas) ? u.horasActivas : [];
+                const rawHoursV = Array.isArray(v.horasActivas) ? v.horasActivas : [];
+                const tieneMuestraHoraria = rawHoursU.length >= 2 && rawHoursV.length >= 2;
+
+                const horasU = new Set(rawHoursU);
+                const horasV = new Set(rawHoursV);
                 let horasSuenoComunes = 0;
-                for (let h = 0; h < 24; h++) {
-                    if (!horasU.has(h) && !horasV.has(h)) horasSuenoComunes++;
+
+                if (tieneMuestraHoraria) {
+                    for (let h = 0; h < 24; h++) {
+                        if (!horasU.has(h) && !horasV.has(h)) horasSuenoComunes++;
+                    }
                 }
 
-                // Bloques dominantes
-                const blocksU = new Set([...horasU].map(getBlockName));
-                const blocksV = new Set([...horasV].map(getBlockName));
+                const blocksU = new Set(rawHoursU.map(getBlockName));
+                const blocksV = new Set(rawHoursV.map(getBlockName));
                 let sharedBlocks = 0;
                 blocksU.forEach(b => { if (blocksV.has(b)) sharedBlocks++; });
-                const exclusionHoraria = (blocksU.size > 0 && blocksV.size > 0 && sharedBlocks === 0);
+                const exclusionHoraria = tieneMuestraHoraria && (blocksU.size > 0 && blocksV.size > 0 && sharedBlocks === 0);
 
-                // Conmutación rápida (< 10 minutos = 600.000 ms) en servidores compartidos
                 let relevosRapidos = 0;
                 for (const sId of sharedServers) {
                     const lastU = u.servidores[sId]?.lastSeen || 0;
@@ -391,7 +510,8 @@ window.C4ISR_Views.red = {
                     }
                 }
 
-                const esCritico = (relevosRapidos >= 1 || exclusionHoraria) && horasSuenoComunes >= 6;
+                const esCritico = (relevosRapidos >= 1 && sharedChatPartners.length >= 1) ||
+                    (exclusionHoraria && horasSuenoComunes >= 6);
                 const nivelAlerta = esCritico ? 'CRÍTICO' : 'ADVERTENCIA';
 
                 const record = {
@@ -427,7 +547,6 @@ window.C4ISR_Views.red = {
         this.suspectPairs = paresDetectados;
         this.altMapByUser = mapaAltsUsuario;
 
-        // Actualizar contadores en UI
         const badgeAlts = document.getElementById('red-alts-badge');
         if (badgeAlts) {
             badgeAlts.textContent = `${paresDetectados.length} PAR(ES) ALT DETECTADOS`;
@@ -459,17 +578,30 @@ window.C4ISR_Views.red = {
                 badge.textContent = `${servidores.length} SERVIDORES (ROJOS) // ${usuarios.length} USUARIOS (VERDES)`;
             }
 
-            // Ejecutar motor de detección de cuentas espejo (Alts)
             this.analyzeMirrorAccounts(usuarios, interacciones);
 
-            // 1. Sincronizar Nodos Rojos (Servidores)
-            servidores.forEach((srv, idx) => {
+            this.adjacency.clear();
+            this.serverMembers.clear();
+
+            const addNeighbor = (k1, k2) => {
+                if (!this.adjacency.has(k1)) this.adjacency.set(k1, new Set());
+                if (!this.adjacency.has(k2)) this.adjacency.set(k2, new Set());
+                this.adjacency.get(k1).add(k2);
+                this.adjacency.get(k2).add(k1);
+            };
+
+            // 1. Sincronizar Nodos Rojos (Servidores) separando activos en el núcleo y vacíos en órbita exterior
+            const activeServers = servidores.filter(s => (s.usuariosCount || 0) > 0);
+            const emptyServers = servidores.filter(s => (s.usuariosCount || 0) === 0);
+
+            activeServers.forEach((srv, idx) => {
                 const key = `SRV_${srv.id}`;
+                this.serverMembers.set(key, []);
                 let node = this.nodes.get(key);
-                const radius = Math.max(18, Math.min(42, 16 + Math.sqrt(srv.mensajesSesion || 1) * 2.5));
+                const radius = Math.max(20, Math.min(46, 16 + Math.sqrt(srv.usuariosCount || 1) * 2.4));
                 if (!node) {
-                    const angle = (idx / Math.max(1, servidores.length)) * Math.PI * 2;
-                    const dist = 220 + (idx % 3) * 90;
+                    const angle = (idx / Math.max(1, activeServers.length)) * Math.PI * 2;
+                    const dist = activeServers.length === 1 ? 0 : 280 + (idx % 2) * 140;
                     node = {
                         key,
                         rawId: srv.id,
@@ -480,18 +612,50 @@ window.C4ISR_Views.red = {
                         vx: 0,
                         vy: 0,
                         radius,
+                        connectedUsersCount: srv.usuariosCount || 0,
                         meta: srv
                     };
                     this.nodes.set(key, node);
                 } else {
                     node.label = srv.name || node.label;
                     node.radius = radius;
+                    node.connectedUsersCount = srv.usuariosCount || 0;
                     node.meta = srv;
                 }
             });
 
-            // 2. Sincronizar Nodos Verdes (Usuarios) y Aristas Usuario -> Servidor
+            emptyServers.forEach((srv, idx) => {
+                const key = `SRV_${srv.id}`;
+                this.serverMembers.set(key, []);
+                let node = this.nodes.get(key);
+                if (!node) {
+                    const angle = (idx / Math.max(1, emptyServers.length)) * Math.PI * 2;
+                    const ringRadius = 640 + (idx % 3) * 85;
+                    node = {
+                        key,
+                        rawId: srv.id,
+                        type: 'SERVER',
+                        label: srv.name || 'Servidor',
+                        x: Math.cos(angle) * ringRadius,
+                        y: Math.sin(angle) * ringRadius,
+                        vx: 0,
+                        vy: 0,
+                        radius: 15,
+                        connectedUsersCount: 0,
+                        meta: srv
+                    };
+                    this.nodes.set(key, node);
+                } else {
+                    node.label = srv.name || node.label;
+                    node.connectedUsersCount = 0;
+                    node.meta = srv;
+                }
+            });
+
+            // 2. Sincronizar Nodos Verdes (Usuarios) en anillos concéntricos descongestionados
             const nuevasAristas = [];
+            const serverSpawnIndex = new Map();
+
             usuarios.forEach((usr) => {
                 const key = `USR_${usr.id}`;
                 const srvKeys = Object.keys(usr.servidores || {});
@@ -502,22 +666,30 @@ window.C4ISR_Views.red = {
                     : (altsDeUsuario.length > 0 ? 'ADVERTENCIA' : null);
 
                 const radius = Math.max(
-                    7,
-                    Math.min(20, 6 + Math.log2((usr.totalMensajes || 1) + 1) * 2.2 + (serverCount > 1 ? 4 : 0))
+                    6.5,
+                    Math.min(18, 5.5 + Math.log2((usr.totalMensajes || 1) + 1) * 1.9 + (serverCount > 1 ? 3.5 : 0))
                 );
 
                 let node = this.nodes.get(key);
                 if (!node) {
-                    const parentSrv = srvKeys.length > 0 ? this.nodes.get(`SRV_${srvKeys[0]}`) : null;
+                    const firstSrvKey = srvKeys.length > 0 ? `SRV_${srvKeys[0]}` : null;
+                    const parentSrv = firstSrvKey ? this.nodes.get(firstSrvKey) : null;
+                    const idxInSrv = (serverSpawnIndex.get(firstSrvKey) || 0);
+                    serverSpawnIndex.set(firstSrvKey, idxInSrv + 1);
+
+                    // Distribución en espiral de Phyllotaxis (proporción áurea) para evitar bolas colapsadas
+                    const goldenAngle = idxInSrv * 2.3999632;
+                    const spiralRadius = 55 + Math.sqrt(idxInSrv + 1) * 22;
                     const baseX = parentSrv ? parentSrv.x : 0;
                     const baseY = parentSrv ? parentSrv.y : 0;
+
                     node = {
                         key,
                         rawId: usr.id,
                         type: 'USER',
                         label: usr.tag || 'Usuario',
-                        x: baseX + (Math.random() - 0.5) * 140,
-                        y: baseY + (Math.random() - 0.5) * 140,
+                        x: baseX + Math.cos(goldenAngle) * spiralRadius,
+                        y: baseY + Math.sin(goldenAngle) * spiralRadius,
                         vx: 0,
                         vy: 0,
                         radius,
@@ -547,6 +719,9 @@ window.C4ISR_Views.red = {
                             weight: usr.servidores[sId].count || 1,
                             kind: 'MEMBERSHIP'
                         });
+                        addNeighbor(key, targetKey);
+                        if (!this.serverMembers.has(targetKey)) this.serverMembers.set(targetKey, []);
+                        this.serverMembers.get(targetKey).push(node);
                     }
                 }
             });
@@ -562,6 +737,7 @@ window.C4ISR_Views.red = {
                         weight: rel.weight || 1,
                         kind: 'CHAT'
                     });
+                    addNeighbor(k1, k2);
                 }
             }
 
@@ -577,15 +753,15 @@ window.C4ISR_Views.red = {
                         jaccard: pair.jaccard,
                         critical: pair.nivelAlerta === 'CRÍTICO'
                     });
+                    addNeighbor(k1, k2);
                 }
             }
 
             this.edges = nuevasAristas;
+            this.updateHudCoords();
 
             // 5. Disparar partículas animadas por cada nuevo pulso en tiempo real
-            if (this.seenPulses.size > 500) {
-                this.seenPulses.clear();
-            }
+            if (this.seenPulses.size > 500) this.seenPulses.clear();
             for (const p of pulsos) {
                 const pulseKey = `${p.userId}_${p.guildId}_${p.ts}`;
                 if (!this.seenPulses.has(pulseKey)) {
@@ -593,7 +769,7 @@ window.C4ISR_Views.red = {
                     this.spawnParticle(`USR_${p.userId}`, `SRV_${p.guildId}`);
                     const ticker = document.getElementById('live-feed-ticker');
                     if (ticker) {
-                        ticker.innerHTML = `[IMPULSO EN VIVO] ${DOMPurify.sanitize(String(p.userTag))} &rarr; ${DOMPurify.sanitize(String(p.guildName))}`;
+                        ticker.innerHTML = `[IMPULSO EN VIVO] <strong>${DOMPurify.sanitize(String(p.userTag))}</strong> &rarr; ${DOMPurify.sanitize(String(p.guildName))}`;
                     }
                 }
             }
@@ -619,23 +795,38 @@ window.C4ISR_Views.red = {
         });
     },
 
+    focusSingleNode(node) {
+        if (!node || !this.canvas) return;
+        this.selectedNode = node;
+        this.highlightedPair = null;
+        this.camera.zoom = 1.25;
+        this.camera.x = (this.canvas.width / 2) - (node.x * this.camera.zoom);
+        this.camera.y = (this.canvas.height / 2) - (node.y * this.camera.zoom);
+        this.switchRightTab('inspector');
+        this.renderInspector(node);
+        this.updateHudCoords();
+    },
+
     focusOnNodePair(key1, key2) {
         const n1 = this.nodes.get(key1);
         const n2 = this.nodes.get(key2);
         if (!n1 || !n2 || !this.canvas) return;
 
+        this.selectedNode = null;
         this.highlightedPair = [key1, key2];
         const midX = (n1.x + n2.x) / 2;
         const midY = (n1.y + n2.y) / 2;
         this.camera.zoom = 1.15;
         this.camera.x = (this.canvas.width / 2) - (midX * this.camera.zoom);
         this.camera.y = (this.canvas.height / 2) - (midY * this.camera.zoom);
+        this.updateHudCoords();
     },
 
     stepPhysics() {
         if (!this.physicsEnabled) return;
         const visibleNodes = Array.from(this.nodes.values()).filter(n => this.isNodeVisible(n));
 
+        // 1. Repulsión adaptativa (mayor entre usuarios de super-clústeres para evitar apelotonamiento)
         for (let i = 0; i < visibleNodes.length; i++) {
             const n1 = visibleNodes[i];
             for (let j = i + 1; j < visibleNodes.length; j++) {
@@ -648,11 +839,12 @@ window.C4ISR_Views.red = {
                     dy = (Math.random() - 0.5) * 2;
                     distSq = 4;
                 }
-                const maxDist = (n1.type === 'SERVER' && n2.type === 'SERVER') ? 520 : 240;
+                const bothServers = n1.type === 'SERVER' && n2.type === 'SERVER';
+                const maxDist = bothServers ? 620 : 280;
                 if (distSq > maxDist * maxDist) continue;
 
                 const dist = Math.sqrt(distSq);
-                const repulsionForce = (n1.type === 'SERVER' && n2.type === 'SERVER') ? 3800 : 650;
+                const repulsionForce = bothServers ? 5200 : 980;
                 const force = repulsionForce / distSq;
                 const fx = (dx / dist) * force;
                 const fy = (dy / dist) * force;
@@ -662,6 +854,7 @@ window.C4ISR_Views.red = {
             }
         }
 
+        // 2. Muelles con longitud dinámica según el tamaño del servidor (descomprime super-nodos como Fluc)
         for (const edge of this.edges) {
             if (edge.kind === 'CHAT' && !this.showUserLinks) continue;
             const s = this.nodes.get(edge.source);
@@ -671,25 +864,64 @@ window.C4ISR_Views.red = {
             const dx = t.x - s.x;
             const dy = t.y - s.y;
             const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-            const targetLen = edge.kind === 'MEMBERSHIP' ? 115 : 75;
-            const strength = edge.kind === 'MEMBERSHIP' ? 0.035 : 0.015;
+
+            let targetLen = 85;
+            if (edge.kind === 'MEMBERSHIP') {
+                const srvMembers = (this.serverMembers.get(t.key) || []).length;
+                targetLen = 95 + Math.min(260, Math.sqrt(srvMembers) * 16);
+            }
+
+            const strength = edge.kind === 'MEMBERSHIP' ? 0.032 : 0.012;
             const force = (dist - targetLen) * strength;
             const fx = (dx / dist) * force;
             const fy = (dy / dist) * force;
 
             if (s !== this.draggedNode) { s.vx += fx; s.vy += fy; }
-            if (t !== this.draggedNode) { t.vx -= fx * 0.25; t.vy -= fy * 0.25; }
+            if (t !== this.draggedNode) { t.vx -= fx * 0.12; t.vy -= fy * 0.12; }
         }
 
+        // 3. Amortiguación y mantenimiento de servidores vacíos en el anillo exterior
         for (const n of visibleNodes) {
             if (n === this.draggedNode) continue;
-            n.vx -= n.x * 0.0012;
-            n.vy -= n.y * 0.0012;
-            n.vx *= 0.82;
-            n.vy *= 0.82;
+            if (n.type === 'SERVER' && n.connectedUsersCount === 0) {
+                // Mantener los servidores sin usuarios en un cinturón exterior ordenado
+                const distCenter = Math.sqrt(n.x * n.x + n.y * n.y) || 1;
+                const targetRing = 680;
+                const radialForce = (targetRing - distCenter) * 0.008;
+                n.vx += (n.x / distCenter) * radialForce;
+                n.vy += (n.y / distCenter) * radialForce;
+            } else {
+                n.vx -= n.x * 0.0009;
+                n.vy -= n.y * 0.0009;
+            }
+            n.vx *= 0.80;
+            n.vy *= 0.80;
             n.x += n.vx;
             n.y += n.vy;
         }
+    },
+
+    drawTacticalGrid(ctx, w, h) {
+        ctx.save();
+        const gridStep = 80 * this.camera.zoom;
+        if (gridStep >= 18) {
+            ctx.strokeStyle = 'rgba(255, 42, 109, 0.04)';
+            ctx.lineWidth = 1;
+            const offsetX = this.camera.x % gridStep;
+            const offsetY = this.camera.y % gridStep;
+
+            ctx.beginPath();
+            for (let x = offsetX; x < w; x += gridStep) {
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, h);
+            }
+            for (let y = offsetY; y < h; y += gridStep) {
+                ctx.moveTo(0, y);
+                ctx.lineTo(w, y);
+            }
+            ctx.stroke();
+        }
+        ctx.restore();
     },
 
     drawFrame() {
@@ -702,27 +934,50 @@ window.C4ISR_Views.red = {
         const pulse = (Math.sin(t) + 1) * 0.5;
 
         ctx.clearRect(0, 0, w, h);
+        this.drawTacticalGrid(ctx, w, h);
+
+        // Determinar foco activo (Spotlight) para aislar visualmente la sub-red
+        const focusNode = this.hoveredNode || this.selectedNode;
+        const focusNeighbors = focusNode ? (this.adjacency.get(focusNode.key) || new Set()) : null;
+
+        const isNodeHighlighted = (nodeKey) => {
+            if (this.highlightedPair) return this.highlightedPair.includes(nodeKey);
+            if (!focusNode) return true;
+            return nodeKey === focusNode.key || (focusNeighbors && focusNeighbors.has(nodeKey));
+        };
+
         ctx.save();
         ctx.translate(this.camera.x, this.camera.y);
         ctx.scale(this.camera.zoom, this.camera.zoom);
 
-        // 1. Dibujar Aristas Normales
+        // 1. Dibujar Aristas Normales con soporte de Spotlight
         for (const edge of this.edges) {
             if (edge.kind === 'CHAT' && !this.showUserLinks) continue;
             const s = this.nodes.get(edge.source);
             const tNode = this.nodes.get(edge.target);
             if (!s || !tNode || !this.isNodeVisible(s) || !this.isNodeVisible(tNode)) continue;
 
+            const edgeActive = !focusNode
+                ? !this.highlightedPair
+                : (s.key === focusNode.key || tNode.key === focusNode.key);
+
             ctx.beginPath();
             ctx.moveTo(s.x, s.y);
             ctx.lineTo(tNode.x, tNode.y);
             if (edge.kind === 'MEMBERSHIP') {
                 const isBridge = s.serverCount >= 2;
-                ctx.strokeStyle = isBridge ? 'rgba(251, 191, 36, 0.38)' : 'rgba(16, 185, 129, 0.22)';
-                ctx.lineWidth = Math.min(3.5, 0.8 + Math.log2(edge.weight + 1) * 0.5);
+                if (focusNode && edgeActive) {
+                    ctx.strokeStyle = isBridge ? 'rgba(251, 191, 36, 0.85)' : 'rgba(16, 185, 129, 0.72)';
+                    ctx.lineWidth = 2.0;
+                } else {
+                    const alpha = edgeActive ? (isBridge ? 0.42 : 0.22) : 0.04;
+                    ctx.strokeStyle = isBridge ? `rgba(251, 191, 36, ${alpha})` : `rgba(16, 185, 129, ${alpha})`;
+                    ctx.lineWidth = Math.min(3.0, 0.8 + Math.log2(edge.weight + 1) * 0.45);
+                }
             } else {
-                ctx.strokeStyle = 'rgba(56, 189, 248, 0.28)';
-                ctx.lineWidth = 1.1;
+                const alpha = edgeActive ? 0.38 : 0.04;
+                ctx.strokeStyle = `rgba(56, 189, 248, ${alpha})`;
+                ctx.lineWidth = edgeActive && focusNode ? 1.8 : 1.0;
             }
             ctx.stroke();
         }
@@ -734,9 +989,10 @@ window.C4ISR_Views.red = {
                 const tNode = this.nodes.get(altEdge.target);
                 if (!s || !tNode || !this.isNodeVisible(s) || !this.isNodeVisible(tNode)) continue;
 
-                const isHighlighted = this.highlightedPair &&
+                const isHighlighted = (this.highlightedPair &&
                     this.highlightedPair.includes(s.key) &&
-                    this.highlightedPair.includes(tNode.key);
+                    this.highlightedPair.includes(tNode.key)) ||
+                    (focusNode && (focusNode.key === s.key || focusNode.key === tNode.key));
 
                 ctx.save();
                 ctx.beginPath();
@@ -744,22 +1000,23 @@ window.C4ISR_Views.red = {
                 ctx.moveTo(s.x, s.y);
                 ctx.lineTo(tNode.x, tNode.y);
                 ctx.strokeStyle = altEdge.critical ? '#ff003c' : '#fcee0a';
+                ctx.globalAlpha = (!focusNode || isHighlighted) ? 0.95 : 0.15;
                 ctx.lineWidth = isHighlighted ? 2.8 : 1.6;
                 ctx.stroke();
 
-                if (this.camera.zoom > 0.7 || isHighlighted) {
+                if (this.camera.zoom > 0.65 || isHighlighted) {
                     const mx = (s.x + tNode.x) / 2;
                     const my = (s.y + tNode.y) / 2;
-                    ctx.font = 'bold 9px "JetBrains Mono", monospace';
+                    ctx.font = 'bold 9.5px "JetBrains Mono", monospace';
                     ctx.fillStyle = altEdge.critical ? '#ff003c' : '#fcee0a';
                     ctx.textAlign = 'center';
-                    ctx.fillText(`ALT ${Math.round(altEdge.jaccard * 100)}%`, mx, my - 4);
+                    ctx.fillText(`ALT ${Math.round(altEdge.jaccard * 100)}%`, mx, my - 5);
                 }
                 ctx.restore();
             }
         }
 
-        // 3. Dibujar Partículas de Actividad en Vivo (Verde Neón hacia Servidor Rojo)
+        // 3. Dibujar Partículas de Actividad en Vivo
         for (let i = this.particles.length - 1; i >= 0; i--) {
             const p = this.particles[i];
             p.progress += p.speed;
@@ -787,22 +1044,29 @@ window.C4ISR_Views.red = {
         for (const node of this.nodes.values()) {
             if (!this.isNodeVisible(node)) continue;
 
+            const isActive = isNodeHighlighted(node.key);
             const isSelected = (this.selectedNode && this.selectedNode.key === node.key) ||
                 (this.highlightedPair && this.highlightedPair.includes(node.key));
             const isHovered = this.hoveredNode && this.hoveredNode.key === node.key;
 
+            ctx.save();
+            ctx.globalAlpha = isActive ? 1.0 : 0.14;
+
             if (node.type === 'SERVER') {
-                ctx.beginPath();
-                ctx.arc(node.x, node.y, node.radius + 5 + pulse * 8, 0, Math.PI * 2);
-                ctx.strokeStyle = `rgba(239, 68, 68, ${0.55 - pulse * 0.4})`;
-                ctx.lineWidth = 2;
-                ctx.stroke();
+                const hasUsers = node.connectedUsersCount > 0;
+                if (hasUsers || isSelected || isHovered) {
+                    ctx.beginPath();
+                    ctx.arc(node.x, node.y, node.radius + 5 + pulse * 8, 0, Math.PI * 2);
+                    ctx.strokeStyle = `rgba(239, 68, 68, ${0.55 - pulse * 0.4})`;
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                }
 
                 ctx.beginPath();
                 ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
-                ctx.fillStyle = '#ef4444';
+                ctx.fillStyle = hasUsers ? '#ef4444' : '#7f1d1d';
                 ctx.fill();
-                ctx.lineWidth = isSelected || isHovered ? 3 : 1.8;
+                ctx.lineWidth = isSelected || isHovered ? 3 : 1.6;
                 ctx.strokeStyle = isSelected || isHovered ? '#ffffff' : '#fca5a5';
                 ctx.stroke();
 
@@ -813,7 +1077,6 @@ window.C4ISR_Views.red = {
             } else {
                 const isBridge = node.serverCount >= 2;
 
-                // Retícula táctica giratoria si es sospechoso de Cuenta Espejo (Alt)
                 if (node.altRole) {
                     const isCrit = node.altRole === 'CRITICO';
                     ctx.save();
@@ -828,9 +1091,9 @@ window.C4ISR_Views.red = {
                     ctx.restore();
                 } else if (isBridge || node.fichado) {
                     ctx.beginPath();
-                    ctx.arc(node.x, node.y, node.radius + 4 + pulse * 4, 0, Math.PI * 2);
+                    ctx.arc(node.x, node.y, node.radius + 3.5 + pulse * 3, 0, Math.PI * 2);
                     ctx.strokeStyle = node.fichado ? '#ff2a6d' : '#fbbf24';
-                    ctx.lineWidth = 1.5;
+                    ctx.lineWidth = 1.4;
                     ctx.stroke();
                 }
 
@@ -838,19 +1101,23 @@ window.C4ISR_Views.red = {
                 ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
                 ctx.fillStyle = '#10b981';
                 ctx.fill();
-                ctx.lineWidth = isSelected || isHovered ? 2.5 : 1.2;
+                ctx.lineWidth = isSelected || isHovered ? 2.5 : 1.1;
                 ctx.strokeStyle = isSelected || isHovered ? '#ffffff' : '#059669';
                 ctx.stroke();
 
-                if (this.camera.zoom > 0.65 || isHovered || isSelected || isBridge || node.altRole) {
+                // Control inteligente de etiquetas para no saturar super-clústeres
+                const showLabel = isHovered || isSelected || node.altRole || isBridge || this.camera.zoom > 1.05;
+                if (showLabel) {
                     ctx.font = '10px "JetBrains Mono", monospace';
                     ctx.fillStyle = node.altRole
                         ? (node.altRole === 'CRITICO' ? '#ff003c' : '#fcee0a')
-                        : (isBridge ? '#fbbf24' : '#cbd5e1');
+                        : (isBridge ? '#fbbf24' : '#e2e8f0');
                     ctx.textAlign = 'center';
                     ctx.fillText(node.label.slice(0, 18), node.x, node.y - node.radius - 5);
                 }
             }
+
+            ctx.restore();
         }
 
         ctx.restore();
@@ -864,7 +1131,7 @@ window.C4ISR_Views.red = {
             container.innerHTML = `
                 <div style="padding: 1rem 0.4rem; color: var(--text-muted); line-height: 1.5;">
                     <div style="color: var(--accent-green); font-weight: 700; margin-bottom: 0.4rem;">[ TOPOLOGÍA LIMPIA ]</div>
-                    Aún no se detectan pares de usuarios con índice de Jaccard &ge; 65% y ausencia de diálogo directo. A medida que los exploradores capten más conversaciones en vivo, las cuentas espejo aparecerán aquí automáticamente.
+                    Aún no se detectan pares de usuarios con índice de Jaccard &ge; 68% y muestras horarias sincronizadas. A medida que los exploradores capten conversaciones reales, las cuentas espejo aparecerán aquí.
                 </div>
             `;
             return;
@@ -912,24 +1179,65 @@ window.C4ISR_Views.red = {
                 ? srv.exploradores.join(', ')
                 : 'Registro Pasivo';
 
+            const members = (this.serverMembers.get(node.key) || [])
+                .slice()
+                .sort((a, b) => (b.infracciones - a.infracciones) || ((b.meta?.totalMensajes || 0) - (a.meta?.totalMensajes || 0)));
+
+            const membersHtml = members.slice(0, 60).map(m => {
+                const badgeCol = m.altRole ? '#fcee0a' : (m.infracciones > 0 ? '#ef4444' : '#10b981');
+                return `
+                    <div class="srv-member-row" data-ukey="${DOMPurify.sanitize(m.key)}" style="display:flex;justify-content:space-between;align-items:center;padding:5px 6px;border-bottom:var(--border-subtle);cursor:pointer;">
+                        <span style="color:var(--text-main);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:190px;">&#9679; ${DOMPurify.sanitize(m.label)}</span>
+                        <span style="color:${badgeCol};font-size:0.7rem;font-weight:700;">${m.infracciones > 0 ? `NIVEL ${m.infracciones}` : `${m.meta?.totalMensajes || 1} MSGS`}</span>
+                    </div>
+                `;
+            }).join('');
+
             panel.innerHTML = `
                 <div style="border-left: 3px solid #ef4444; padding-left: 0.75rem; margin-bottom: 1rem;">
                     <div style="color: #ef4444; font-weight: 700;">[ NODO SERVIDOR // ROJO ]</div>
                     <div style="font-size: 1rem; color: var(--text-main); font-weight: 700; margin-top: 4px;">${DOMPurify.sanitize(node.label)}</div>
                     <div style="color: var(--text-muted); font-size: 0.72rem;">ID: ${DOMPurify.sanitize(String(node.rawId))}</div>
                 </div>
-                <div style="margin-bottom: 0.6rem;"><strong>Mensajes Captados:</strong> <span style="color: var(--accent-green);">${srv.mensajesSesion || 0}</span></div>
-                <div style="margin-bottom: 0.6rem;"><strong>Miembros Totales:</strong> ${srv.memberCount || 'N/A'}</div>
-                <div style="margin-bottom: 0.6rem;"><strong>Unidades Infiltradas:</strong> <span style="color: var(--accent-amber);">${DOMPurify.sanitize(exploradores)}</span></div>
+                <div style="margin-bottom: 0.45rem;"><strong>Usuarios Detectados Aquí:</strong> <span style="color: var(--accent-green);">${members.length}</span></div>
+                <div style="margin-bottom: 0.45rem;"><strong>Mensajes Captados:</strong> <span style="color: var(--accent-green);">${srv.mensajesSesion || 0}</span></div>
+                <div style="margin-bottom: 0.45rem;"><strong>Miembros Totales Discord:</strong> ${srv.memberCount || 'N/A'}</div>
+                <div style="margin-bottom: 0.85rem;"><strong>Unidades Infiltradas:</strong> <span style="color: var(--accent-amber);">${DOMPurify.sanitize(exploradores)}</span></div>
+                <div style="color: var(--accent-rz); font-weight: 700; margin-bottom: 0.4rem;">SUJETOS ACTIVOS EN ESTE SERVIDOR (${members.length}):</div>
+                <div style="max-height: 290px; overflow-y: auto; border: var(--border-subtle); border-radius: 4px; background: rgba(0,0,0,0.2);">
+                    ${membersHtml || '<div style="padding:0.75rem;color:var(--text-muted);">Sin usuarios registrados aún.</div>'}
+                </div>
             `;
+
+            panel.querySelectorAll('.srv-member-row').forEach(row => {
+                row.addEventListener('click', () => {
+                    const uKey = row.getAttribute('data-ukey');
+                    const targetUser = this.nodes.get(uKey);
+                    if (targetUser) this.focusSingleNode(targetUser);
+                });
+            });
         } else {
             const usr = node.meta || {};
-            const servidoresList = Object.entries(usr.servidores || {}).map(([, info]) => {
-                return `<div style="padding: 4px 0; border-bottom: var(--border-subtle);">&#9679; <strong>${DOMPurify.sanitize(info.name)}</strong> (${info.count} msgs)</div>`;
+            const servidoresList = Object.entries(usr.servidores || {}).map(([sId, info]) => {
+                return `
+                    <div class="usr-srv-row" data-skey="SRV_${DOMPurify.sanitize(sId)}" style="padding: 5px 4px; border-bottom: var(--border-subtle); cursor: pointer; display: flex; justify-content: space-between;">
+                        <span><strong style="color:#ef4444;">&#9679;</strong> <strong>${DOMPurify.sanitize(info.name)}</strong></span>
+                        <span style="color:var(--text-muted);">${info.count} msgs</span>
+                    </div>
+                `;
             }).join('');
 
+            // Reloj Cronobiológico Visual de 24h UTC
+            const activeHoursSet = new Set(Array.isArray(usr.horasActivas) ? usr.horasActivas : []);
+            let clockCells = '';
+            for (let h = 0; h < 24; h++) {
+                const isActiveHour = activeHoursSet.has(h);
+                const cellBg = isActiveHour ? 'var(--accent-green)' : 'rgba(255,255,255,0.06)';
+                clockCells += `<div title="${String(h).padStart(2, '0')}:00 UTC - ${isActiveHour ? 'ACTIVO' : 'INACTIVO'}" style="height:12px;background:${cellBg};border-radius:2px;"></div>`;
+            }
+
             const altsDeUsuario = this.altMapByUser.get(String(node.rawId)) || [];
-            let altsHtml = `<div style="color: var(--text-muted); font-size: 0.73rem; margin-bottom: 1rem;">Sin coincidencias espejo por encima del umbral.</div>`;
+            let altsHtml = `<div style="color: var(--text-muted); font-size: 0.72rem; margin-bottom: 0.85rem;">Sin coincidencias espejo por encima del umbral.</div>`;
 
             if (altsDeUsuario.length > 0) {
                 altsHtml = altsDeUsuario.map(alt => {
@@ -946,20 +1254,33 @@ window.C4ISR_Views.red = {
             }
 
             panel.innerHTML = `
-                <div style="border-left: 3px solid #10b981; padding-left: 0.75rem; margin-bottom: 1rem;">
+                <div style="border-left: 3px solid #10b981; padding-left: 0.75rem; margin-bottom: 0.85rem;">
                     <div style="color: #10b981; font-weight: 700;">[ NODO USUARIO // VERDE ]</div>
-                    <div style="font-size: 1rem; color: var(--text-main); font-weight: 700; margin-top: 4px;">${DOMPurify.sanitize(node.label)}</div>
-                    <div style="color: var(--text-muted); font-size: 0.72rem;">UID: ${DOMPurify.sanitize(String(node.rawId))}</div>
+                    <div style="font-size: 1rem; color: var(--text-main); font-weight: 700; margin-top: 3px;">${DOMPurify.sanitize(node.label)}</div>
+                    <div class="selectable" style="color: var(--text-muted); font-size: 0.72rem;">UID: ${DOMPurify.sanitize(String(node.rawId))}</div>
                 </div>
-                <div style="margin-bottom: 0.45rem;"><strong>Actividad Total:</strong> <span style="color: var(--accent-green);">${usr.totalMensajes || 0} mensajes</span></div>
-                <div style="margin-bottom: 0.45rem;"><strong>Servidores Comunes:</strong> <span style="color: ${node.serverCount > 1 ? '#fbbf24' : 'var(--text-main)'};">${node.serverCount} servidor(es)</span></div>
+                <div style="margin-bottom: 0.4rem;"><strong>Actividad Total:</strong> <span style="color: var(--accent-green);">${usr.totalMensajes || 0} mensajes</span></div>
+                <div style="margin-bottom: 0.4rem;"><strong>Servidores Comunes:</strong> <span style="color: ${node.serverCount > 1 ? '#fbbf24' : 'var(--text-main)'};">${node.serverCount} servidor(es)</span></div>
                 <div style="margin-bottom: 0.75rem;"><strong>Infracciones Fichadas:</strong> <span style="color: ${node.infracciones > 0 ? '#ef4444' : 'var(--text-muted)'};">${node.infracciones}</span></div>
+
+                <div style="color: var(--accent-info); font-weight: 700; font-size: 0.72rem; margin-bottom: 0.3rem;">HUELLA HORARIA 24H (UTC):</div>
+                <div style="display:grid;grid-template-columns:repeat(24,1fr);gap:2px;margin-bottom:0.85rem;">${clockCells}</div>
+
                 <div style="color: #fcee0a; font-weight: 700; margin-bottom: 0.35rem;">SOSPECHAS DE CUENTA ESPEJO (ALTS):</div>
                 <div style="margin-bottom: 0.85rem;">${altsHtml}</div>
+
                 <div style="color: var(--accent-rz); font-weight: 700; margin-bottom: 0.35rem;">SERVIDORES DETECTADOS:</div>
                 <div style="margin-bottom: 1rem;">${servidoresList || 'Sin servidores'}</div>
                 <button id="btn-open-dossier" class="btn-cyber" type="button" style="padding: 0.55rem; font-size: 0.78rem;">ABRIR EXPEDIENTE OSINT</button>
             `;
+
+            panel.querySelectorAll('.usr-srv-row').forEach(row => {
+                row.addEventListener('click', () => {
+                    const sKey = row.getAttribute('data-skey');
+                    const targetSrv = this.nodes.get(sKey);
+                    if (targetSrv) this.focusSingleNode(targetSrv);
+                });
+            });
 
             panel.querySelectorAll('.btn-focus-alt').forEach(el => {
                 el.addEventListener('click', () => {
@@ -1002,6 +1323,8 @@ window.C4ISR_Views.red = {
         this.nodes.clear();
         this.edges = [];
         this.altEdges = [];
+        this.adjacency.clear();
+        this.serverMembers.clear();
         this.suspectPairs = [];
         this.altMapByUser.clear();
         this.particles = [];
