@@ -21,13 +21,13 @@ const MAX_CANALES_EN_CACHE = 1000;
 const MAX_MENSAJES_POR_CANAL = 5;
 const MAX_USUARIOS_RADAR_RAM = 2500;
 const MAX_INTERACCIONES_RAM = 3000;
-const VENTANA_RESPUESTA_MS = 30000;          // 30 segundos para correlación de diálogo
-const COOLDOWN_USUARIO_MS = 10000;           // 10 segundos
-const TTL_FIRMA_MENSAJE_MS = 120000;         // 2 minutos
-const TTL_DEDUP_MENSAJE_MS = 30000;          // 30 segundos para evitar eco entre bots
-const DELAY_DESPLIEGUE_MS = 45000;           // 45 segundos entre logins
-const INTERVALO_PURGA_MEMORIA_MS = 60000;    // 1 minuto
-const INTERVALO_PERSISTENCIA_RED_MS = 60000; // 1 minuto para guardar memoria en MongoDB
+const VENTANA_RESPUESTA_MS = 30000;
+const COOLDOWN_USUARIO_MS = 10000;
+const TTL_FIRMA_MENSAJE_MS = 120000;
+const TTL_DEDUP_MENSAJE_MS = 30000;
+const DELAY_DESPLIEGUE_MS = 45000;
+const INTERVALO_PURGA_MEMORIA_MS = 60000;
+const INTERVALO_PERSISTENCIA_RED_MS = 60000;
 
 function cargarWhitelist() {
     const whitelistPath = path.join(__dirname, 'whitelist_usuarios.json');
@@ -52,15 +52,12 @@ const memoriaCooldown = new Map();
 const hashMensajesRecientes = new Map();
 const mensajesProcesadosGlobal = new Map();
 
-// ESTRUCTURAS DE TOPOLOGÍA EN VIVO (NODOS ROJOS = SERVIDORES, NODOS VERDES = USUARIOS)
-const radarServidores = new Map();     // Map<guildId, { id, name, icon, memberCount, mensajesSesion, ultimaActividad, exploradores: Array }>
-const radarUsuarios = new Map();       // Map<userId, { id, tag, avatar, totalMensajes, ultimaActividad, horasActivas: Array, servidores: Object }>
-const radarInteracciones = new Map();  // Map<pairKey, { u1, u2, guildId, weight, lastTs }>
-const eventosRecientesPulso = [];      // Últimos 40 impulsos en tiempo real para animar el lienzo web
+// ESTRUCTURAS DE TOPOLOGÍA EN VIVO
+const radarServidores = new Map();
+const radarUsuarios = new Map();
+const radarInteracciones = new Map();
+const eventosRecientesPulso = [];
 
-/**
- * Hidrata la memoria RAM desde el último snapshot guardado en MongoDB al arrancar.
- */
 async function restaurarMemoriaTopologica() {
     const snapshot = await database.cargarSnapshotRed();
     if (!snapshot) return;
@@ -83,13 +80,14 @@ async function restaurarMemoriaTopologica() {
             }
         }
     }
+    if (Array.isArray(snapshot.invitaciones) && typeof servidorWeb.restaurarCacheInvitaciones === 'function') {
+        servidorWeb.restaurarCacheInvitaciones(snapshot.invitaciones);
+    }
+
     console.log(`[MEMORIA RADAR] Restaurados ${radarServidores.size} servidores y ${radarUsuarios.size} usuarios desde MongoDB.`);
     sincronizarTelemetriaWeb();
 }
 
-/**
- * Escanea todos los servidores donde está presente un explorador al conectarse.
- */
 function registrarServidoresDeExplorador(explorador) {
     if (!explorador || !explorador.guilds || !explorador.guilds.cache) return;
     const tagExplorador = explorador.user?.tag || 'Unidad';
@@ -114,9 +112,6 @@ function registrarServidoresDeExplorador(explorador) {
     }
 }
 
-/**
- * Registra en tiempo real la actividad de cualquier usuario y servidor en el radar.
- */
 function registrarActividadRadar(message, contextoLocal) {
     const ahora = Date.now();
     const guildId = message.guild?.id || 'DM_SECTOR';
@@ -125,7 +120,6 @@ function registrarActividadRadar(message, contextoLocal) {
         ? message.guild.iconURL({ format: 'png', size: 64 })
         : null;
 
-    // 1. Actualizar Nodo Rojo (Servidor)
     let nodoServidor = radarServidores.get(guildId);
     if (!nodoServidor) {
         nodoServidor = {
@@ -143,7 +137,6 @@ function registrarActividadRadar(message, contextoLocal) {
     nodoServidor.ultimaActividad = ahora;
     radarServidores.set(guildId, nodoServidor);
 
-    // 2. Actualizar Nodo Verde (Usuario) con política LRU para proteger la RAM
     const userId = message.author.id;
     const userTag = message.author.tag || message.author.username || 'Usuario';
     const avatarUrl = typeof message.author.displayAvatarURL === 'function'
@@ -152,7 +145,7 @@ function registrarActividadRadar(message, contextoLocal) {
 
     let nodoUsuario = radarUsuarios.get(userId);
     if (nodoUsuario) {
-        radarUsuarios.delete(userId); // Refrescar posición LRU
+        radarUsuarios.delete(userId);
     } else {
         if (radarUsuarios.size >= MAX_USUARIOS_RADAR_RAM) {
             const usuarioMasAntiguo = radarUsuarios.keys().next().value;
@@ -192,7 +185,6 @@ function registrarActividadRadar(message, contextoLocal) {
 
     radarUsuarios.set(userId, nodoUsuario);
 
-    // 3. Correlación Temporal en Canal (< 30s entre dos usuarios distintos)
     if (Array.isArray(contextoLocal) && contextoLocal.length >= 2) {
         const msgAnterior = contextoLocal[contextoLocal.length - 2];
         if (
@@ -222,7 +214,6 @@ function registrarActividadRadar(message, contextoLocal) {
         }
     }
 
-    // 4. Registrar pulso en vivo para la animación de partículas en el navegador
     eventosRecientesPulso.push({
         userId,
         userTag,
@@ -238,11 +229,15 @@ function registrarActividadRadar(message, contextoLocal) {
 }
 
 function obtenerSnapshotActual() {
+    const invCache = typeof servidorWeb.exportarCacheInvitaciones === 'function'
+        ? servidorWeb.exportarCacheInvitaciones()
+        : [];
     return {
         servidores: Array.from(radarServidores.values()),
         usuarios: Array.from(radarUsuarios.values()),
         interacciones: Array.from(radarInteracciones.values()),
-        pulsos: [...eventosRecientesPulso]
+        pulsos: [...eventosRecientesPulso],
+        invitaciones: invCache
     };
 }
 
@@ -288,7 +283,6 @@ const timerLimpieza = setInterval(() => {
 
 if (timerLimpieza.unref) timerLimpieza.unref();
 
-// Guardado periódico en MongoDB cada 60 segundos para no perder la memoria
 const timerPersistenciaRed = setInterval(async () => {
     if (radarUsuarios.size > 0 || radarServidores.size > 0) {
         await database.guardarSnapshotRed(obtenerSnapshotActual());
@@ -312,7 +306,9 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function sincronizarTelemetriaWeb() {
     try {
-        servidorWeb.actualizarEnjambre(Array.from(exploradoresActivos.values()));
+        if (typeof servidorWeb.actualizarEnjambre === 'function') {
+            servidorWeb.actualizarEnjambre(Array.from(exploradoresActivos.values()));
+        }
         if (typeof servidorWeb.actualizarRadarRed === 'function') {
             servidorWeb.actualizarRadarRed(obtenerSnapshotActual());
         }
@@ -327,11 +323,9 @@ async function procesarMensajeEntrante(explorador, message) {
 
     const ahora = Date.now();
 
-    // Deduplicación Global de Enjambre
     if (tieneBloqueoActivo(mensajesProcesadosGlobal, message.id, ahora)) return;
     mensajesProcesadosGlobal.set(message.id, ahora + TTL_DEDUP_MENSAJE_MS);
 
-    // Ingesta en Caché de Contexto Local (LRU)
     const contextoLocal = registrarEnCacheContexto(message.channel.id, {
         authorTag: message.author.tag || 'Usuario Desconocido',
         authorId: message.author.id,
@@ -339,13 +333,9 @@ async function procesarMensajeEntrante(explorador, message) {
         createdTimestamp: message.createdTimestamp || ahora
     });
 
-    // Registrar SIEMPRE la actividad en el Radar de Red en Vivo (incluso usuarios normales)
     registrarActividadRadar(message, contextoLocal);
 
-    // Comando de consulta !expediente
     if (await moduloExpedientes.ejecutar(message)) return;
-
-    // Respetar inmunidad de Whitelist para los módulos punitivos
     if (whitelistUsuarios.has(message.author.id)) return;
 
     if (tieneBloqueoActivo(memoriaCooldown, message.author.id, ahora)) return;
@@ -428,9 +418,14 @@ async function iniciarEnjambre() {
         process.exit(1);
     }
 
+    // 1. Abrir puerto HTTP inmediatamente para que Render detecte el servicio sin timeout
+    if (typeof servidorWeb.iniciar === 'function') {
+        servidorWeb.iniciar();
+    }
+
+    // 2. Conectar a MongoDB y restaurar memoria topológica e invitaciones
     await database.conectarBaseDatos();
     await restaurarMemoriaTopologica();
-    servidorWeb.iniciar();
 
     console.log(`[ENJAMBRE] Desplegando ${tokensConfigurados.length} unidades de reconocimiento (Modo Stealth)...`);
 
