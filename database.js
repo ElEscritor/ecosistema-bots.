@@ -39,7 +39,6 @@ async function asegurarIndiceSeguro(collection, keySpec, options = {}) {
             msg.includes('existing index') ||
             msg.includes('only one text index')
         ) {
-            // Se conserva silenciosamente el índice existente en el clúster
             return;
         }
         console.warn(`[AVISO BD] No se pudo optimizar el índice ${JSON.stringify(keySpec)}: ${msg}`);
@@ -69,7 +68,7 @@ async function conectarBaseDatos() {
             asegurarIndiceSeguro(dbCollection, { primerFichaje: -1 }, { background: true })
         ]);
 
-        console.log('[SISTEMA] Clúster MongoDB enlazado (Blacklist + Memoria Topológica).');
+        console.log('[SISTEMA] Clúster MongoDB enlazado (Blacklist + Memoria Topológica + DVR).');
         return dbCollection;
     })();
 
@@ -82,18 +81,25 @@ function verificarConexion() {
     }
 }
 
+/**
+ * Registra o actualiza el expediente de un infractor o sujeto perfilado.
+ * Si esSoloOsint = true, no infla artificialmente el contador de infracciones de ataque,
+ * pero guarda toda la evidencia y actualiza el historial inmutable de alias (historialAliases).
+ */
 async function ficharInfractor(
     userId,
     userTag,
     accion,
     casoId,
     mensajeCrudo = 'Evidencia no disponible',
-    servidorOrigen = 'Sector Desconocido'
+    servidorOrigen = 'Sector Desconocido',
+    esSoloOsint = false
 ) {
     if (!dbCollection) return 'BD Inactiva';
     if (!userId || typeof userId !== 'string') return 'ID de usuario inválido.';
 
     const timestampActual = new Date().toISOString();
+    const aliasLimpio = String(userTag || 'Desconocido').trim();
     const nuevoDelito = {
         fecha: timestampActual,
         accion: String(accion || 'Infracción no especificada').slice(0, 256),
@@ -102,13 +108,24 @@ async function ficharInfractor(
         servidor: String(servidorOrigen).slice(0, 256)
     };
 
+    const incrementoInfraccion = esSoloOsint ? 0 : 1;
+
     try {
         const resultado = await dbCollection.findOneAndUpdate(
             { userId: userId.trim() },
             {
-                $setOnInsert: { primerFichaje: timestampActual, notasAnalista: '', perfiladoAutomatico: [] },
-                $set: { ultimoAlias: String(userTag || 'Desconocido').trim() },
-                $inc: { totalInfracciones: 1 },
+                $setOnInsert: {
+                    primerFichaje: timestampActual,
+                    notasAnalista: '',
+                    perfiladoAutomatico: []
+                },
+                $set: {
+                    ultimoAlias: aliasLimpio
+                },
+                $addToSet: {
+                    historialAliases: aliasLimpio
+                },
+                $inc: { totalInfracciones: incrementoInfraccion },
                 $push: {
                     historial: {
                         $each: [nuevoDelito],
@@ -120,10 +137,10 @@ async function ficharInfractor(
         );
 
         const exp = resultado?.value !== undefined ? resultado.value : resultado;
-        if (exp && exp.totalInfracciones === 1) {
+        if (exp && exp.totalInfracciones <= 1 && !esSoloOsint) {
             return '**Nuevo Ingreso:** Primer delito registrado.';
         }
-        return `**Reincidente:** Expediente actualizado (Infracción #${exp?.totalInfracciones ?? 1}).`;
+        return `**Expediente Actualizado:** Registro acumulado (#${exp?.totalInfracciones ?? 1}).`;
     } catch (error) {
         console.error(`[ERROR BD] Fallo al fichar infractor (${userId}):`, error.message);
         return 'Error de escritura en clúster MongoDB.';
@@ -136,8 +153,8 @@ async function obtenerExpedientes(filtro = {}) {
         const queryFiltro = (filtro && typeof filtro === 'object') ? filtro : {};
         return await dbCollection
             .find(queryFiltro)
-            .sort({ totalInfracciones: -1 })
-            .limit(500)
+            .sort({ totalInfracciones: -1, primerFichaje: -1 })
+            .limit(600)
             .toArray();
     } catch (error) {
         console.error('[ERROR BD] Fallo en obtenerExpedientes:', error.message);
@@ -216,6 +233,7 @@ async function inyectarObjetivoManual(userId) {
                     primerFichaje: new Date().toISOString(),
                     notasAnalista: '[ INYECCIÓN MANUAL ] Pendiente de perfilado.',
                     perfiladoAutomatico: [],
+                    historialAliases: [],
                     totalInfracciones: 0,
                     historial: []
                 }
@@ -274,6 +292,10 @@ async function importarMatriz(usuariosArray) {
     }
 }
 
+/**
+ * Guarda en MongoDB el estado completo del radar: servidores (incluyendo estado Ceniza),
+ * usuarios activos, interacciones, invitaciones, etiquetas personalizadas, Watchlist VIP y DVR.
+ */
 async function guardarSnapshotRed(snapshotData) {
     if (!topologyCollection || !snapshotData) return false;
     try {
@@ -281,11 +303,19 @@ async function guardarSnapshotRed(snapshotData) {
             actualizadoEn: new Date().toISOString(),
             servidores: Array.isArray(snapshotData.servidores) ? snapshotData.servidores.slice(0, 600) : [],
             usuarios: Array.isArray(snapshotData.usuarios) ? snapshotData.usuarios.slice(0, 2500) : [],
-            interacciones: Array.isArray(snapshotData.interacciones) ? snapshotData.interacciones.slice(0, 3000) : []
+            interacciones: Array.isArray(snapshotData.interacciones) ? snapshotData.interacciones.slice(0, 3000) : [],
+            bitacoraDvr: Array.isArray(snapshotData.bitacoraDvr) ? snapshotData.bitacoraDvr.slice(-250) : []
         };
         if (Array.isArray(snapshotData.invitaciones)) {
             updateDoc.invitaciones = snapshotData.invitaciones.slice(0, 1500);
         }
+        if (snapshotData.etiquetasServidores && typeof snapshotData.etiquetasServidores === 'object') {
+            updateDoc.etiquetasServidores = snapshotData.etiquetasServidores;
+        }
+        if (Array.isArray(snapshotData.watchlist)) {
+            updateDoc.watchlist = snapshotData.watchlist.slice(0, 200);
+        }
+
         await topologyCollection.updateOne(
             { _id: 'RADAR_STATE_GLOBAL' },
             { $set: updateDoc },
