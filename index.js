@@ -15,6 +15,7 @@ const moduloLinks = require('./modulos/modulo_links.js');
 const moduloOrg = require('./modulos/modulo_org.js');
 const moduloOsint = require('./modulos/modulo_osint.js');
 const moduloExpedientes = require('./modulos/modulo_expedientes.js');
+const intelExterna = require('./modulos/modulo_intel_externa.js');
 
 // 3. CONSTANTES DE CONFIGURACIÓN Y RENDIMIENTO
 const MAX_CANALES_EN_CACHE = 1000;
@@ -23,6 +24,7 @@ const MAX_USUARIOS_RADAR_RAM = 2500;
 const MAX_INTERACCIONES_RAM = 3000;
 const MAX_EVENTOS_DVR = 250;
 const VENTANA_RESPUESTA_MS = 30000;
+const VENTANA_COLISION_SIMULTANEA_MS = 15000; // Si 2 cuentas hablan con <15s de diferencia, son 2 personas distintas
 const VENTANA_RAFAGA_EVERYONE_MS = 90000;
 const UMBRAL_CENIZA_EVERYONE = 15;
 const COOLDOWN_USUARIO_MS = 10000;
@@ -33,6 +35,7 @@ const INTERVALO_PURGA_MEMORIA_MS = 60000;
 const INTERVALO_PERSISTENCIA_RED_MS = 60000;
 
 const REGEX_NOMBRE_SERVIDOR_RAIDEADO = /\b(raid(?:ed)?\s*by|nuked\s*by|pwned\s*by|fucked\s*by|hacked\s*by|domados\s*por|owned\s*by|destroyed\s*by|raideado\s*por)\b/i;
+const REGEX_ROL_ESPECIAL = /\b(owner|founder|fundador|creador|admin|administrador|staff|mod|moderator|moderador|helper|support|raid|raider|squad|gang|vip|premium|buyer|customer|dev|developer|booster|lider|leader|boss|jefe)\b/i;
 
 function cargarWhitelist() {
     const whitelistPath = path.join(__dirname, 'whitelist_usuarios.json');
@@ -58,15 +61,121 @@ const memoriaCooldown = new Map();
 const hashMensajesRecientes = new Map();
 const mensajesProcesadosGlobal = new Map();
 
-// ESTRUCTURAS DE TOPOLOGÍA EN VIVO, SERVIDORES CENIZA Y GRABADORA DVR
+// ESTRUCTURAS DE TOPOLOGÍA, LINAJE DE BOTS RAID Y GRABADORA DVR
 const radarServidores = new Map();
 const radarUsuarios = new Map();
 const radarInteracciones = new Map();
+const radarLinajeBots = new Map(); // Map<botFirmaNorm, { nombreBase, idsVistos: Array, servidoresAtacados: Array, ultimoAtaqueTs }>
 const rafagasEveryoneServidor = new Map();
 const eventosRecientesPulso = [];
 const bitacoraDvr = [];
 
 let contadorUnidades = 0;
+
+function normalizarFirmaBot(botTag) {
+    return String(botTag || 'bot')
+        .replace(/#\d{4}$/, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '')
+        .slice(0, 18) || 'botraid';
+}
+
+/**
+ * Extrae el rango/permiso especial de un usuario dentro del servidor actual
+ * analizando primero los bits matemáticos de permisos y luego los nombres de rol.
+ */
+function extraerRangoEnServidor(message) {
+    if (!message || !message.member) return null;
+    try {
+        const member = message.member;
+        let nivelPermiso = null;
+
+        // 1. Verificar bitfield de permisos de Discord (100% fiable aunque cambien el nombre del rol)
+        const perms = member.permissions;
+        if (perms && typeof perms.has === 'function') {
+            if (perms.has('ADMINISTRATOR')) {
+                nivelPermiso = 'ADMIN (Permiso Total)';
+            } else if (perms.has('MANAGE_GUILD') || perms.has('BAN_MEMBERS') || perms.has('MANAGE_ROLES')) {
+                nivelPermiso = 'STAFF / GESTOR';
+            } else if (perms.has('MANAGE_CHANNELS') || perms.has('MANAGE_WEBHOOKS') || perms.has('MANAGE_MESSAGES')) {
+                nivelPermiso = 'MOD / OPERADOR';
+            }
+        }
+
+        // 2. Extraer nombres de roles relevantes
+        const rolesDestacados = [];
+        if (member.roles && member.roles.cache) {
+            for (const [, role] of member.roles.cache.entries()) {
+                if (!role || role.name === '@everyone') continue;
+                if (REGEX_ROL_ESPECIAL.test(role.name)) {
+                    rolesDestacados.push(role.name.slice(0, 24));
+                }
+            }
+        }
+
+        if (!nivelPermiso && rolesDestacados.length === 0) return null;
+        const rolStr = rolesDestacados.slice(0, 2).join(', ');
+        if (nivelPermiso && rolStr) return `${nivelPermiso} [${rolStr}]`;
+        return nivelPermiso || `ROL: ${rolStr}`;
+    } catch (_) {
+        return null;
+    }
+}
+
+/**
+ * Actualiza el perfil estilométrico (patrón de habla) de un usuario en memoria RAM
+ * para detectar cuentas espejo (Alts) por su forma de escribir y no solo por su zona horaria.
+ */
+function actualizarEstilometriaHabla(nodoUsuario, textoMensaje) {
+    if (typeof textoMensaje !== 'string') return;
+    const texto = textoMensaje.trim();
+    if (texto.length < 2) return;
+
+    if (!nodoUsuario.estilometria) {
+        nodoUsuario.estilometria = {
+            muestras: 0,
+            sumaLongitud: 0,
+            iniciaMayuscula: 0,
+            usaPuntoFinal: 0,
+            usaComas: 0,
+            usaSignos: 0,
+            usaAlargamiento: 0,
+            usaEmojis: 0,
+            vocabulario: {}
+        };
+    }
+
+    const st = nodoUsuario.estilometria;
+    st.muestras += 1;
+    st.sumaLongitud += Math.min(300, texto.length);
+
+    if (/^[A-ZÁÉÍÓÚÑ]/.test(texto)) st.iniciaMayuscula += 1;
+    if (/\.$/.test(texto)) st.usaPuntoFinal += 1;
+    if (texto.includes(',')) st.usaComas += 1;
+    if (/[!?¿¡]/.test(texto)) st.usaSignos += 1;
+    if (/([a-záéíóú])\1{2,}/i.test(texto)) st.usaAlargamiento += 1;
+    if (/[\u{1F300}-\u{1F9FF}]|<a?:[a-zA-Z0-9_]+:\d+>/u.test(texto)) st.usaEmojis += 1;
+
+    // Capturar muletillas cortas y jerga (palabras de 3 a 10 letras)
+    const palabras = texto
+        .toLowerCase()
+        .replace(/https?:\/\/[^\s]+/g, '')
+        .match(/\b[a-záéíóúñ]{3,10}\b/g);
+
+    if (palabras) {
+        for (const w of palabras.slice(0, 12)) {
+            st.vocabulario[w] = (st.vocabulario[w] || 0) + 1;
+        }
+        // Mantener solo las 25 palabras más frecuentes por usuario para no gastar RAM
+        const keys = Object.keys(st.vocabulario);
+        if (keys.length > 35) {
+            const topEntries = Object.entries(st.vocabulario)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 25);
+            st.vocabulario = Object.fromEntries(topEntries);
+        }
+    }
+}
 
 function registrarEventoDvr(evento) {
     bitacoraDvr.push({
@@ -147,7 +256,8 @@ function registrarServidoresDeExplorador(explorador) {
                     fecha: new Date().toISOString(),
                     atacanteTag: 'Detectado por nombre de servidor',
                     linkRaid: null,
-                    mencionesEveryone: 0
+                    mencionesEveryone: 0,
+                    servidoresPreviosBot: []
                 };
             }
         } else {
@@ -163,6 +273,10 @@ function registrarServidoresDeExplorador(explorador) {
     }
 }
 
+/**
+ * Evalúa si un servidor está sufriendo un Raid Real (@everyone masivo + links)
+ * y rastrea el linaje del bot atacante aunque haya cambiado de cuenta.
+ */
 function evaluarBombardeoCeniza(message, nodoServidor) {
     if (!message.guild || !nodoServidor) return;
     const contenido = String(message.content || '');
@@ -174,6 +288,8 @@ function evaluarBombardeoCeniza(message, nodoServidor) {
 
     const ahora = Date.now();
     const guildId = message.guild.id;
+    const attackerTag = message.author?.tag || message.author?.username || 'Bot/Raider';
+    const attackerId = message.author?.id || '0';
 
     const matchesPing = contenido.match(/@(everyone|here)/g);
     const pesoPings = matchesPing ? Math.max(1, matchesPing.length) : 1;
@@ -183,15 +299,15 @@ function evaluarBombardeoCeniza(message, nodoServidor) {
         rafaga = {
             count: 0,
             firstTs: ahora,
-            lastAttackerTag: message.author?.tag || 'Bot/Raider',
-            lastAttackerId: message.author?.id || '0',
+            lastAttackerTag: attackerTag,
+            lastAttackerId: attackerId,
             inviteLink: null
         };
     }
 
     rafaga.count += pesoPings;
-    rafaga.lastAttackerTag = message.author?.tag || rafaga.lastAttackerTag;
-    rafaga.lastAttackerId = message.author?.id || rafaga.lastAttackerId;
+    rafaga.lastAttackerTag = attackerTag;
+    rafaga.lastAttackerId = attackerId;
 
     const invs = moduloLinks.extraerInvitacionesValidas(contenido);
     if (invs.length > 0) {
@@ -202,28 +318,49 @@ function evaluarBombardeoCeniza(message, nodoServidor) {
 
     if (rafaga.count >= UMBRAL_CENIZA_EVERYONE) {
         const yaEstabaEnCeniza = Boolean(nodoServidor.estadoCeniza?.raideado);
+
+        // Rastrear linaje del Bot de Raid por su nombre base (aunque cambie de cuenta/token)
+        const firmaBot = normalizarFirmaBot(attackerTag);
+        let linaje = radarLinajeBots.get(firmaBot);
+        if (!linaje) {
+            linaje = {
+                nombreBase: attackerTag,
+                idsVistos: [],
+                servidoresAtacados: [],
+                ultimoAtaqueTs: ahora
+            };
+        }
+        if (!linaje.idsVistos.includes(attackerId)) linaje.idsVistos.push(attackerId);
+        const nombreSrvOriginal = nodoServidor.nombreOriginal || nodoServidor.name;
+        if (!linaje.servidoresAtacados.includes(nombreSrvOriginal)) {
+            linaje.servidoresAtacados.push(nombreSrvOriginal);
+        }
+        linaje.ultimoAtaqueTs = ahora;
+        radarLinajeBots.set(firmaBot, linaje);
+
         nodoServidor.estadoCeniza = {
             raideado: true,
             motivo: `Bombardeo masivo de @everyone (${rafaga.count} pings acumulados)`,
-            nombreAnterior: nodoServidor.nombreOriginal || nodoServidor.name,
+            nombreAnterior: nombreSrvOriginal,
             fecha: nodoServidor.estadoCeniza?.fecha || new Date(ahora).toISOString(),
-            atacanteTag: rafaga.lastAttackerTag,
-            atacanteId: rafaga.lastAttackerId,
+            atacanteTag: `${attackerTag} (${linaje.idsVistos.length} cuenta(s) asociadas)`,
+            atacanteId: attackerId,
             linkRaid: rafaga.inviteLink || nodoServidor.estadoCeniza?.linkRaid || null,
-            mencionesEveryone: rafaga.count
+            mencionesEveryone: rafaga.count,
+            servidoresPreviosBot: linaje.servidoresAtacados.filter(s => s !== nombreSrvOriginal)
         };
 
         if (!yaEstabaEnCeniza) {
-            console.warn(`[ALERTA CENIZA] Servidor "${nodoServidor.name}" está siendo RAIDEADO (${rafaga.count} menciones @everyone por ${rafaga.lastAttackerTag}).`);
+            console.warn(`[ALERTA CENIZA] Servidor "${nodoServidor.name}" RAIDEADO (${rafaga.count} pings @everyone por ${attackerTag}).`);
             registrarEventoDvr({
                 tipo: 'RAID_CENIZA',
-                userId: rafaga.lastAttackerId,
-                userTag: rafaga.lastAttackerTag,
+                userId: attackerId,
+                userTag: attackerTag,
                 fromGuildId: guildId,
-                fromGuildName: nodoServidor.nombreOriginal || nodoServidor.name,
+                fromGuildName: nombreSrvOriginal,
                 toGuildId: guildId,
                 toGuildName: nodoServidor.name,
-                detalle: `Servidor reducido a cenizas (${rafaga.count} pings @everyone) ${rafaga.inviteLink ? `-> ${rafaga.inviteLink}` : ''}`
+                detalle: `Servidor reducido a cenizas por ${attackerTag} (${rafaga.count} pings @everyone)`
             });
         }
     }
@@ -264,6 +401,7 @@ function registrarActividadRadar(message, contextoLocal) {
         ? message.author.displayAvatarURL({ format: 'png', size: 64 })
         : null;
     const infoSnowflake = moduloOsint.analizarAntiguedadSnowflake(userId);
+    const rangoDetectado = extraerRangoEnServidor(message);
 
     let nodoUsuario = radarUsuarios.get(userId);
     const ultimoServerIdPrevio = nodoUsuario?.ultimoServidorId || null;
@@ -286,6 +424,8 @@ function registrarActividadRadar(message, contextoLocal) {
             diasAntiguedad: infoSnowflake?.diasAntiguedad ?? null,
             esBurner: Boolean(infoSnowflake?.esBurner),
             horasActivas: [],
+            ultimosTimestamps: [],
+            estilometria: null,
             servidores: {},
             ultimoServidorId: guildId,
             ultimoServidorNombre: guildName
@@ -333,6 +473,18 @@ function registrarActividadRadar(message, contextoLocal) {
         nodoUsuario.esBurner = infoSnowflake.esBurner;
     }
 
+    // Guardar muestra de los últimos 25 timestamps exactos para evaluar Exclusión Mutua / Alternancia
+    if (!Array.isArray(nodoUsuario.ultimosTimestamps)) {
+        nodoUsuario.ultimosTimestamps = [];
+    }
+    nodoUsuario.ultimosTimestamps.push(ahora);
+    if (nodoUsuario.ultimosTimestamps.length > 25) {
+        nodoUsuario.ultimosTimestamps.shift();
+    }
+
+    // Actualizar perfil estilométrico de habla
+    actualizarEstilometriaHabla(nodoUsuario, message.content || '');
+
     const horaUtc = new Date(ahora).getUTCHours();
     if (!nodoUsuario.horasActivas.includes(horaUtc)) {
         nodoUsuario.horasActivas.push(horaUtc);
@@ -342,22 +494,28 @@ function registrarActividadRadar(message, contextoLocal) {
         nodoUsuario.servidores[guildId] = {
             name: guildName,
             count: 0,
-            lastSeen: ahora
+            lastSeen: ahora,
+            rango: rangoDetectado || null
         };
     }
     nodoUsuario.servidores[guildId].name = guildName;
     nodoUsuario.servidores[guildId].count += 1;
     nodoUsuario.servidores[guildId].lastSeen = ahora;
+    if (rangoDetectado) {
+        nodoUsuario.servidores[guildId].rango = rangoDetectado;
+    }
 
     radarUsuarios.set(userId, nodoUsuario);
 
+    // Correlación Temporal en Canal (< 30s) y Detector de Colisión Simultánea (< 15s)
     if (Array.isArray(contextoLocal) && contextoLocal.length >= 2) {
         const msgAnterior = contextoLocal[contextoLocal.length - 2];
+        const gapMs = ahora - (msgAnterior?.createdTimestamp || 0);
         if (
             msgAnterior &&
             msgAnterior.authorId &&
             msgAnterior.authorId !== userId &&
-            (ahora - (msgAnterior.createdTimestamp || 0)) <= VENTANA_RESPUESTA_MS
+            gapMs <= VENTANA_RESPUESTA_MS
         ) {
             const u1 = userId < msgAnterior.authorId ? userId : msgAnterior.authorId;
             const u2 = userId < msgAnterior.authorId ? msgAnterior.authorId : userId;
@@ -369,12 +527,22 @@ function registrarActividadRadar(message, contextoLocal) {
                 interaccion.weight += 1;
                 interaccion.lastTs = ahora;
                 interaccion.guildId = guildId;
+                if (gapMs <= VENTANA_COLISION_SIMULTANEA_MS) {
+                    interaccion.simultaneousCollisions = (interaccion.simultaneousCollisions || 0) + 1;
+                }
             } else {
                 if (radarInteracciones.size >= MAX_INTERACCIONES_RAM) {
                     const relAntigua = radarInteracciones.keys().next().value;
                     radarInteracciones.delete(relAntigua);
                 }
-                interaccion = { u1, u2, guildId, weight: 1, lastTs: ahora };
+                interaccion = {
+                    u1,
+                    u2,
+                    guildId,
+                    weight: 1,
+                    lastTs: ahora,
+                    simultaneousCollisions: gapMs <= VENTANA_COLISION_SIMULTANEA_MS ? 1 : 0
+                };
             }
             radarInteracciones.set(pairKey, interaccion);
         }
@@ -506,7 +674,10 @@ async function procesarMensajeEntrante(explorador, message) {
     if (message.author.bot) {
         if (message.guild && (message.mentionEveryone || String(message.content || '').includes('@everyone'))) {
             const srv = radarServidores.get(message.guild.id);
-            if (srv) evaluarBombardeoCeniza(message, srv);
+            if (srv) {
+                evaluarBombardeoCeniza(message, srv);
+                sincronizarTelemetriaWeb();
+            }
         }
         return;
     }
@@ -609,7 +780,8 @@ function crearUnidadExploradora(indiceUnidad, sectorAsignado = 'General') {
                     fecha: new Date().toISOString(),
                     atacanteTag: srv.estadoCeniza?.atacanteTag || 'Cambio de Nombre Hostil',
                     linkRaid: srv.estadoCeniza?.linkRaid || null,
-                    mencionesEveryone: srv.estadoCeniza?.mencionesEveryone || 0
+                    mencionesEveryone: srv.estadoCeniza?.mencionesEveryone || 0,
+                    servidoresPreviosBot: srv.estadoCeniza?.servidoresPreviosBot || []
                 };
                 registrarEventoDvr({
                     tipo: 'RAID_CENIZA',
@@ -649,9 +821,6 @@ function crearUnidadExploradora(indiceUnidad, sectorAsignado = 'General') {
     return explorador;
 }
 
-/**
- * Despliega un nuevo token explorador en caliente (añadido desde la Web o desde BD).
- */
 async function desplegarUnidadEnCaliente(rawToken, sector = 'General') {
     const cleanToken = String(rawToken || '').replace(/^(Bot|Bearer)\s+/i, '').trim();
     if (!cleanToken || tokensYaDesplegados.has(cleanToken)) {
