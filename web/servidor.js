@@ -7,8 +7,6 @@ const axios = require('axios');
 const database = require('../database.js');
 const intelExterna = require('../modulos/modulo_intel_externa.js');
 
-
-
 const app = express();
 const PUERTO = Number(process.env.PORT) || 3000;
 
@@ -279,7 +277,7 @@ app.post('/api/login', (req, res) => {
         intentosFallidosIP.set(ipCliente, { count: conteoActual, lockUntil: 0 });
     }
 
-    return res.status(403).json({ error: 'Credenciales inválidas' });
+    return res.status(403).json({ error: 'Credenciales invalidas' });
 });
 
 function autenticar(req, res, next) {
@@ -301,7 +299,7 @@ function autenticar(req, res, next) {
         return next();
     }
 
-    return res.status(403).json({ error: 'Sesión expirada o clave incorrecta' });
+    return res.status(403).json({ error: 'Sesion expirada o clave incorrecta' });
 }
 
 app.get('/api/datos', autenticar, async (req, res) => {
@@ -406,7 +404,7 @@ app.get('/api/datos', autenticar, async (req, res) => {
         res.json(datos);
     } catch (error) {
         console.error('[ERROR API /api/datos]:', error.message);
-        res.status(500).json({ error: 'Desincronización de Base de Datos' });
+        res.status(500).json({ error: 'Desincronizacion de Base de Datos' });
     }
 });
 
@@ -416,7 +414,7 @@ app.get('/api/red', autenticar, async (req, res) => {
         const mapaServidores = new Map();
         const indiceNombreServidor = new Map();
         const mapaUsuarios = new Map();
-        const conteoServidoresVps = new Map(); // guildId -> { name, users: Set<uid>, commands: Set<cmd> }
+        const conteoServidoresVps = new Map();
 
         const buscarServidorPorNombre = (nombre) => {
             const norm = normalizarNombreServidor(nombre);
@@ -556,7 +554,6 @@ app.get('/api/red', autenticar, async (req, res) => {
                 }
             }
 
-            // Registrar ecos del pasado del VPS 5604 sin crear burbujas falsas por un único usuario aislado
             if (usr.intelExterna?.vpsRegistros && Array.isArray(usr.intelExterna.vpsRegistros)) {
                 for (const reg of usr.intelExterna.vpsRegistros) {
                     if (reg.servidorExtraidoId && reg.servidorExtraidoNombre) {
@@ -631,7 +628,7 @@ app.get('/api/red', autenticar, async (req, res) => {
                             memberCount: 0,
                             mensajesSesion: 1,
                             ultimaActividad: !Number.isNaN(eventoTs) ? eventoTs : 0,
-                            exploradores: ['Archivo Histórico'],
+                            exploradores: ['Archivo Historico'],
                             redundancia: 0,
                             usuariosCount: 0,
                             infeccionCount: 0,
@@ -683,9 +680,6 @@ app.get('/api/red', autenticar, async (req, res) => {
             mapaUsuarios.set(uid, usr);
         }
 
-        // Filtro de Gravedad Histórica para Servidores del VPS 5604:
-        // Si el servidor del VPS ya existe en nuestro mapa (por ID o nombre, ej. Serdán v4), se vincula y etiqueta.
-        // Si no existe, SOLO se crea si >= 2 usuarios distintos tienen registros de comandos en él.
         for (const [vpsGuildId, infoVps] of conteoServidoresVps.entries()) {
             let targetId = mapaServidores.has(vpsGuildId)
                 ? vpsGuildId
@@ -772,7 +766,6 @@ app.get('/api/red', autenticar, async (req, res) => {
             }
         }
 
-        // Calcular Usuarios Conectados e Índice de Infección Silenciosa por cada Servidor
         for (const usr of mapaUsuarios.values()) {
             const esUsuarioHostil = (usr.infracciones > 0) || Boolean(usr.intelExterna?.amenazaConfirmada);
             for (const sId of Object.keys(usr.servidores || {})) {
@@ -808,272 +801,10 @@ app.get('/api/red', autenticar, async (req, res) => {
     }
 });
 
-        for (const inv of memoriaInvitaciones.values()) {
-            if (inv.status === 'VALID' && inv.guildId) {
-                let targetId = mapaServidores.has(inv.guildId)
-                    ? inv.guildId
-                    : buscarServidorPorNombre(inv.guildName);
-
-                if (targetId && mapaServidores.has(targetId)) {
-                    const srvExistente = mapaServidores.get(targetId);
-                    srvExistente.inviteUrl = inv.url;
-                    if (!srvExistente.memberCount && inv.memberCount) {
-                        srvExistente.memberCount = inv.memberCount;
-                    }
-                    if (!srvExistente.icon && inv.icon) {
-                        srvExistente.icon = inv.icon;
-                    }
-                } else {
-                    targetId = inv.guildId;
-                    mapaServidores.set(targetId, {
-                        id: targetId,
-                        name: inv.guildName || 'Servidor Aliado',
-                        nombreOriginal: inv.guildName || 'Servidor Aliado',
-                        icon: inv.icon || null,
-                        memberCount: inv.memberCount || 0,
-                        mensajesSesion: 1,
-                        ultimaActividad: Date.parse(inv.fecha) || Date.now(),
-                        exploradores: ['Radar de Alianzas (Invite Activa)'],
-                        redundancia: 0,
-                        usuariosCount: 0,
-                        inviteUrl: inv.url,
-                        etiquetaManual: etiquetasServidores.get(targetId) || null,
-                        estadoCeniza: null,
-                        alianzasSalientes: []
-                    });
-                    const norm = normalizarNombreServidor(inv.guildName);
-                    if (norm) indiceNombreServidor.set(norm, targetId);
-                }
-            }
-        }
-
-        for (const usr of (estadoRadarRed.usuarios || [])) {
-            const servidoresLimpiados = {};
-            for (const [sId, sData] of Object.entries(usr.servidores || {})) {
-                if (sId === 'DM_SECTOR') continue;
-                servidoresLimpiados[sId] = { ...sData };
-            }
-            mapaUsuarios.set(usr.id, {
-                ...usr,
-                horasActivas: Array.isArray(usr.horasActivas) ? [...usr.horasActivas] : [],
-                historialAliases: [usr.tag || 'Usuario'],
-                infracciones: 0,
-                fichado: false,
-                enWatchlist: watchlistUsuarios.has(String(usr.id)),
-                servidores: servidoresLimpiados,
-                ultimoServidorId: usr.ultimoServidorId !== 'DM_SECTOR' ? usr.ultimoServidorId : null
-            });
-        }
-
-        for (const exp of expedientes) {
-            const uid = String(exp.userId || '').trim();
-            if (!uid) continue;
-
-            const primerTs = Date.parse(exp.primerFichaje);
-            let usr = mapaUsuarios.get(uid);
-            if (!usr) {
-                const horasSet = new Set();
-                if (!Number.isNaN(primerTs)) {
-                    horasSet.add(new Date(primerTs).getUTCHours());
-                }
-                usr = {
-                    id: uid,
-                    tag: exp.ultimoAlias || 'Objetivo Fichado',
-                    avatar: null,
-                    totalMensajes: exp.totalInfracciones || 1,
-                    ultimaActividad: !Number.isNaN(primerTs) ? primerTs : Date.now(),
-                    horasActivas: Array.from(horasSet),
-                    historialAliases: Array.isArray(exp.historialAliases) ? exp.historialAliases : [exp.ultimoAlias || 'Objetivo'],
-                    servidores: {},
-                    ultimoServidorId: null,
-                    infracciones: exp.totalInfracciones || 0,
-                    fichado: true,
-                    enWatchlist: watchlistUsuarios.has(uid)
-                };
-            } else {
-                usr.infracciones = exp.totalInfracciones || 0;
-                usr.fichado = true;
-                usr.enWatchlist = watchlistUsuarios.has(uid);
-                if (Array.isArray(exp.historialAliases) && exp.historialAliases.length > 0) {
-                    usr.historialAliases = [...new Set([...usr.historialAliases, ...exp.historialAliases])];
-                }
-            }
-
-            const horasUsuarioSet = new Set(usr.horasActivas);
-            const historial = Array.isArray(exp.historial) ? exp.historial : [];
-            let maxTsServidor = 0;
-
-            for (const h of historial) {
-                if (!h || typeof h !== 'object') continue;
-                const eventoTs = Date.parse(h.fecha);
-                if (!Number.isNaN(eventoTs)) {
-                    horasUsuarioSet.add(new Date(eventoTs).getUTCHours());
-                    if (eventoTs > (usr.ultimaActividad || 0)) {
-                        usr.ultimaActividad = eventoTs;
-                    }
-                }
-
-                const msgCrudo = String(h.mensajeOriginal || '');
-                const invitesEnMsg = extraerInvitacionesDeTexto(msgCrudo);
-                for (const inv of invitesEnMsg) {
-                    registrarInvitacionViva({
-                        code: inv.code,
-                        url: inv.url,
-                        origenServerName: h.servidor || 'Sector Desconocido',
-                        emisorId: uid,
-                        emisorTag: usr.tag,
-                        fecha: h.fecha || exp.primerFichaje
-                    });
-                }
-
-                const nombreSrv = String(h.servidor || '').trim();
-                if (
-                    !nombreSrv ||
-                    nombreSrv === 'N/A' ||
-                    nombreSrv === 'Sector Desconocido' ||
-                    nombreSrv.includes('Sector Privado')
-                ) {
-                    continue;
-                }
-
-                let srvIdEncontrado = buscarServidorPorNombre(nombreSrv);
-                if (!srvIdEncontrado) {
-                    const norm = normalizarNombreServidor(nombreSrv);
-                    if (!norm) continue;
-                    srvIdEncontrado = `HIST_${norm.toUpperCase()}`;
-                    if (!mapaServidores.has(srvIdEncontrado)) {
-                        mapaServidores.set(srvIdEncontrado, {
-                            id: srvIdEncontrado,
-                            name: nombreSrv,
-                            nombreOriginal: nombreSrv,
-                            icon: null,
-                            memberCount: 0,
-                            mensajesSesion: 1,
-                            ultimaActividad: !Number.isNaN(eventoTs) ? eventoTs : 0,
-                            exploradores: ['Archivo Histórico'],
-                            redundancia: 0,
-                            usuariosCount: 0,
-                            inviteUrl: null,
-                            etiquetaManual: etiquetasServidores.get(srvIdEncontrado) || null,
-                            estadoCeniza: null,
-                            alianzasSalientes: []
-                        });
-                        indiceNombreServidor.set(norm, srvIdEncontrado);
-                    }
-                }
-
-                if (invitesEnMsg.length > 0) {
-                    const srvNode = mapaServidores.get(srvIdEncontrado);
-                    for (const inv of invitesEnMsg) {
-                        const mem = memoriaInvitaciones.get(inv.code.toLowerCase());
-                        if (mem && mem.status === 'VALID' && mem.guildName) {
-                            if (normalizarNombreServidor(mem.guildName) === normalizarNombreServidor(srvNode.name)) {
-                                srvNode.inviteUrl = inv.url;
-                            }
-                        } else if (!srvNode.inviteUrl && msgCrudo.toLowerCase().includes(srvNode.name.toLowerCase())) {
-                            srvNode.inviteUrl = inv.url;
-                        }
-                    }
-                }
-
-                const tsVal = !Number.isNaN(eventoTs) ? eventoTs : Date.now();
-                if (!usr.servidores[srvIdEncontrado]) {
-                    usr.servidores[srvIdEncontrado] = {
-                        name: mapaServidores.get(srvIdEncontrado)?.name || nombreSrv,
-                        count: 1,
-                        lastSeen: tsVal
-                    };
-                } else {
-                    usr.servidores[srvIdEncontrado].count += 1;
-                    if (tsVal > usr.servidores[srvIdEncontrado].lastSeen) {
-                        usr.servidores[srvIdEncontrado].lastSeen = tsVal;
-                    }
-                }
-
-                if (!usr.ultimoServidorId || tsVal >= maxTsServidor) {
-                    maxTsServidor = tsVal;
-                    usr.ultimoServidorId = srvIdEncontrado;
-                }
-            }
-
-            usr.horasActivas = Array.from(horasUsuarioSet).sort((a, b) => a - b);
-            mapaUsuarios.set(uid, usr);
-        }
-
-        const alianzas = [];
-        for (const inv of memoriaInvitaciones.values()) {
-            let targetSrvId = null;
-            if (inv.status === 'VALID' && inv.guildId) {
-                targetSrvId = mapaServidores.has(inv.guildId)
-                    ? inv.guildId
-                    : buscarServidorPorNombre(inv.guildName);
-            }
-
-            for (const origenNombre of (inv.origenes || [])) {
-                const sourceSrvId = buscarServidorPorNombre(origenNombre);
-                if (!sourceSrvId || !mapaServidores.has(sourceSrvId)) continue;
-
-                const sourceNode = mapaServidores.get(sourceSrvId);
-                if (targetSrvId && targetSrvId === sourceSrvId) {
-                    sourceNode.inviteUrl = inv.url;
-                    continue;
-                }
-
-                const targetLabel = (targetSrvId && mapaServidores.get(targetSrvId)?.name) || inv.guildName || `discord.gg/${inv.code}`;
-                if (!sourceNode.alianzasSalientes.some(a => a.url === inv.url)) {
-                    sourceNode.alianzasSalientes.push({
-                        code: inv.code,
-                        url: inv.url,
-                        targetName: targetLabel,
-                        targetServerId: targetSrvId,
-                        status: inv.status
-                    });
-                }
-
-                if (targetSrvId && mapaServidores.has(targetSrvId) && sourceSrvId !== targetSrvId) {
-                    alianzas.push({
-                        sourceServerId: sourceSrvId,
-                        targetServerId: targetSrvId,
-                        inviteUrl: inv.url,
-                        code: inv.code,
-                        targetName: targetLabel
-                    });
-                }
-            }
-        }
-
-        for (const usr of mapaUsuarios.values()) {
-            for (const sId of Object.keys(usr.servidores || {})) {
-                const srvObj = mapaServidores.get(sId);
-                if (srvObj) {
-                    srvObj.usuariosCount = (srvObj.usuariosCount || 0) + 1;
-                }
-            }
-        }
-
-        res.json({
-            enjambre: estadoEnjambre,
-            servidores: Array.from(mapaServidores.values()),
-            usuarios: Array.from(mapaUsuarios.values()),
-            interacciones: estadoRadarRed.interacciones || [],
-            alianzas: alianzas,
-            pulsos: estadoRadarRed.pulsos || [],
-            bitacoraDvr: estadoRadarRed.bitacoraDvr || [],
-            watchlist: Array.from(watchlistUsuarios)
-        });
-    } catch (error) {
-        console.error('[ERROR API /api/red]:', error.message);
-        res.status(500).json({ error: 'Error al compilar la matriz de red.' });
-    }
-});
-
-/**
- * Despliega un nuevo Token Explorador en caliente desde el Panel Web y lo guarda en MongoDB.
- */
 app.post('/api/enjambre/token', autenticar, async (req, res) => {
     const { token, sector } = req.body || {};
     if (!token || typeof token !== 'string' || token.trim().length < 40) {
-        return res.status(400).json({ error: 'Formato de token inválido.' });
+        return res.status(400).json({ error: 'Formato de token invalido.' });
     }
 
     const cleanToken = token.replace(/^(Bot|Bearer)\s+/i, '').trim();
@@ -1083,7 +814,7 @@ app.post('/api/enjambre/token', autenticar, async (req, res) => {
         if (typeof callbackDesplegarToken === 'function') {
             const resultado = await callbackDesplegarToken(cleanToken, sectorLimpio);
             if (!resultado.exito) {
-                return res.status(400).json({ error: resultado.motivo || 'No se pudo iniciar sesión con ese token.' });
+                return res.status(400).json({ error: resultado.motivo || 'No se pudo iniciar sesion con ese token.' });
             }
             await database.guardarTokenDinamico(cleanToken, sectorLimpio);
             return res.json({
@@ -1092,7 +823,7 @@ app.post('/api/enjambre/token', autenticar, async (req, res) => {
                 guilds: resultado.guilds
             });
         }
-        return res.status(503).json({ error: 'El motor de enjambre aún no está listo.' });
+        return res.status(503).json({ error: 'El motor de enjambre aun no esta listo.' });
     } catch (error) {
         return res.status(500).json({ error: 'Error interno al desplegar token.' });
     }
@@ -1176,7 +907,7 @@ app.get('/api/exportar', autenticar, async (req, res) => {
         res.end();
     } catch (error) {
         console.error('[ERROR API /api/exportar]:', error.message);
-        if (!res.headersSent) res.status(500).send('Fallo durante la exportación');
+        if (!res.headersSent) res.status(500).send('Fallo durante la exportacion');
     }
 });
 
@@ -1187,7 +918,7 @@ app.post('/api/objetivos/manual', autenticar, async (req, res) => {
         const exito = await database.inyectarObjetivoManual(String(id));
         return exito
             ? res.json({ success: true })
-            : res.status(400).json({ error: 'ID inválido (debe ser un Snowflake numérico de 17-20 dígitos) o fallo de BD.' });
+            : res.status(400).json({ error: 'ID invalido (debe ser un Snowflake numerico de 17-20 digitos) o fallo de BD.' });
     } catch (error) {
         return res.status(500).json({ error: 'Error interno BD' });
     }
@@ -1195,20 +926,17 @@ app.post('/api/objetivos/manual', autenticar, async (req, res) => {
 
 app.post('/api/objetivos/importar', autenticar, async (req, res) => {
     const { matriz } = req.body || {};
-    if (!Array.isArray(matriz)) return res.status(400).json({ error: 'Matriz JSON inválida.' });
+    if (!Array.isArray(matriz)) return res.status(400).json({ error: 'Matriz JSON invalida.' });
     try {
         const exito = await database.importarMatriz(matriz);
         return exito
             ? res.json({ success: true })
-            : res.status(400).json({ error: 'No se encontraron registros válidos para importar.' });
+            : res.status(400).json({ error: 'No se encontraron registros validos para importar.' });
     } catch (error) {
         return res.status(500).json({ error: 'Error interno BD' });
     }
 });
-/**
- * Consulta en vivo todas las APIs externas (XN Protect, VPS 5604 Squads/Keywords, LC Guard)
- * para un UID, e inyecta automáticamente en el radar cualquier servidor filtrado en la razón del baneo.
- */
+
 app.get('/api/intel/:id', autenticar, async (req, res) => {
     const userId = String(req.params.id || '').trim();
     if (!userId) return res.status(400).json({ error: 'ID requerido.' });
@@ -1216,9 +944,7 @@ app.get('/api/intel/:id', autenticar, async (req, res) => {
     try {
         const resultado = await intelExterna.consultarPerfilExternoCompleto(userId, true);
         await database.guardarIntelExternaUsuario(userId, null, resultado);
-        
-        // Si la API del VPS 5604 reveló servidores donde ejecutó comandos (ej. .cbot en servidor NBM),
-        // los agregamos automáticamente a la memoria del radar para iluminarlos en el Mapa Estelar
+
         if (resultado.vpsSquads?.detectado && Array.isArray(resultado.vpsSquads.registros)) {
             for (const reg of resultado.vpsSquads.registros) {
                 if (reg.servidorExtraidoId && reg.servidorExtraidoNombre) {
@@ -1252,9 +978,6 @@ app.get('/api/intel/:id', autenticar, async (req, res) => {
     }
 });
 
-/**
- * Permite añadir o consultar comandos de squad y palabras clave en vivo desde la Web.
- */
 app.get('/api/arsenal', autenticar, (req, res) => {
     const { obtenerArsenalDinamico } = intelExterna;
     const data = obtenerArsenalDinamico();
@@ -1267,7 +990,7 @@ app.get('/api/arsenal', autenticar, (req, res) => {
 app.post('/api/arsenal/regla', autenticar, (req, res) => {
     const { tipo, valor, descripcion } = req.body || {};
     const ok = intelExterna.agregarReglaDinamica(tipo, valor, descripcion);
-    if (!ok) return res.status(400).json({ error: 'Datos de regla inválidos.' });
+    if (!ok) return res.status(400).json({ error: 'Datos de regla invalidos.' });
     return res.json({ success: true, arsenal: intelExterna.obtenerArsenalDinamico() });
 });
 
