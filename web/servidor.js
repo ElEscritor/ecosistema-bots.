@@ -5,6 +5,9 @@ const path = require('path');
 const crypto = require('crypto');
 const axios = require('axios');
 const database = require('../database.js');
+const intelExterna = require('../modulos/modulo_intel_externa.js');
+
+
 
 const app = express();
 const PUERTO = Number(process.env.PORT) || 3000;
@@ -841,6 +844,70 @@ app.post('/api/objetivos/importar', autenticar, async (req, res) => {
     } catch (error) {
         return res.status(500).json({ error: 'Error interno BD' });
     }
+});
+/**
+ * Consulta en vivo todas las APIs externas (XN Protect, VPS 5604 Squads/Keywords, LC Guard)
+ * para un UID, e inyecta automáticamente en el radar cualquier servidor filtrado en la razón del baneo.
+ */
+app.get('/api/intel/:id', autenticar, async (req, res) => {
+    const userId = String(req.params.id || '').trim();
+    if (!userId) return res.status(400).json({ error: 'ID requerido.' });
+
+    try {
+        const resultado = await intelExterna.consultarPerfilExternoCompleto(userId, true);
+
+        // Si la API del VPS 5604 reveló servidores donde ejecutó comandos (ej. .cbot en servidor NBM),
+        // los agregamos automáticamente a la memoria del radar para iluminarlos en el Mapa Estelar
+        if (resultado.vpsSquads?.detectado && Array.isArray(resultado.vpsSquads.registros)) {
+            for (const reg of resultado.vpsSquads.registros) {
+                if (reg.servidorExtraidoId && reg.servidorExtraidoNombre) {
+                    const existeSrv = (estadoRadarRed.servidores || []).some(s => s.id === reg.servidorExtraidoId);
+                    if (!existeSrv && Array.isArray(estadoRadarRed.servidores)) {
+                        estadoRadarRed.servidores.push({
+                            id: reg.servidorExtraidoId,
+                            name: reg.servidorExtraidoNombre,
+                            nombreOriginal: reg.servidorExtraidoNombre,
+                            icon: null,
+                            memberCount: 0,
+                            mensajesSesion: 1,
+                            ultimaActividad: Date.now(),
+                            exploradores: ['Inteligencia Externa VPS-5604'],
+                            estadoCeniza: null
+                        });
+                    }
+                    if (!etiquetasServidores.has(reg.servidorExtraidoId)) {
+                        etiquetasServidores.set(reg.servidorExtraidoId, {
+                            texto: 'DETECTADO VPS',
+                            tipo: 'PROVEEDOR'
+                        });
+                    }
+                }
+            }
+        }
+
+        return res.json(resultado);
+    } catch (error) {
+        return res.status(500).json({ error: 'Fallo al consultar las APIs externas.' });
+    }
+});
+
+/**
+ * Permite añadir o consultar comandos de squad y palabras clave en vivo desde la Web.
+ */
+app.get('/api/arsenal', autenticar, (req, res) => {
+    const { obtenerArsenalDinamico } = intelExterna;
+    const data = obtenerArsenalDinamico();
+    return res.json({
+        comandosSquad: data.comandosSquad,
+        palabrasRaid: data.palabrasRaid
+    });
+});
+
+app.post('/api/arsenal/regla', autenticar, (req, res) => {
+    const { tipo, valor, descripcion } = req.body || {};
+    const ok = intelExterna.agregarReglaDinamica(tipo, valor, descripcion);
+    if (!ok) return res.status(400).json({ error: 'Datos de regla inválidos.' });
+    return res.json({ success: true, arsenal: intelExterna.obtenerArsenalDinamico() });
 });
 
 app.get('*', (req, res) => {
