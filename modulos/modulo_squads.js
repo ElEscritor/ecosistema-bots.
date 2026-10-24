@@ -10,24 +10,16 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
-
 const database = require('../database.js');
 const transmisor = require('../web/transmisor.js');
+const intelExterna = require('./modulo_intel_externa.js');
 
-const CORDCAT_API_KEY = process.env.CORDCAT_API_KEY || '';
 const HTTP_TIMEOUT_MS = 2500;
 
-/**
- * Escapa caracteres especiales de RegExp para construir un matcher exacto de comando.
- */
 function escaparRegExp(str) {
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/**
- * Carga los comandos de squads ordenándolos de mayor a menor longitud
- * (para que '.sexopremium' se evalúe antes que '.sexo') y exigiendo fin de palabra o espacio.
- */
 function cargarComandosSquads() {
     const comandosPath = path.join(__dirname, '../comandos_squads.json');
     try {
@@ -46,8 +38,7 @@ function cargarComandosSquads() {
                     severidad: String(c.severidad || 'CRITICO').toUpperCase(),
                     colorHex: Number(c.colorHex) || 10181046,
                     webhookDestino: String(c.webhookDestino || 'WEBHOOK_Squads'),
-                    // Coincide solo si el mensaje empieza por el comando seguido de espacio o fin de línea
-                    regex: new RegExp(`^${escaparRegExp(cmdLimpio)}(?:\\s+\vert{}$)`, 'i')
+                    regex: new RegExp(`^${escaparRegExp(cmdLimpio)}(?:\\s+|$)`, 'i')
                 };
             });
     } catch (error) {
@@ -80,25 +71,6 @@ async function obtenerAvatarBase64(url) {
         return `data:${mimeType};base64,${buffer}`;
     } catch (_) {
         return url;
-    }
-}
-
-async function consultarCordCat(userId) {
-    if (!CORDCAT_API_KEY) {
-        return '  [CORDCAT_API_KEY no configurada en el entorno]';
-    }
-    try {
-        const res = await axios.get(`https://api.cordcat.com/v1/users/${userId}`, {
-            headers: { Authorization: `Bearer ${CORDCAT_API_KEY}` },
-            timeout: HTTP_TIMEOUT_MS
-        });
-        const data = res.data || {};
-        const flags = data.flags ? `**Marcadores:** ${data.flags}` : 'Historial Limpio';
-        const riesgo = data.risk_evaluation ? `**Perfil de Riesgo:** ${data.risk_evaluation}` : 'Bajo/Nulo';
-        const vinculadas = Array.isArray(data.linked_accounts) ? `**Alt-Accounts Detectadas:** ${data.linked_accounts.length}` : 'Ninguna';
-        return `  ${flags}\n  ${riesgo}\n${vinculadas}`;
-    } catch (_) {
-        return '  [API Externa fuera de línea]';
     }
 }
 
@@ -158,25 +130,24 @@ function compilarContextoClinico(message, contextoCache, servidorOrigen, casoId)
     if (Array.isArray(contextoCache) && contextoCache.length > 0) {
         for (const msg of contextoCache) {
             const time = new Date(msg.createdTimestamp || Date.now()).toISOString().split('T')[1].slice(0, 8);
-            txt += `[${time}] ${msg.authorTag}:${traducirVectores(msg.content)}\n`;
+            txt += `[${time}] ${msg.authorTag}: ${traducirVectores(msg.content)}\n`;
         }
     } else {
         txt += '[00:00:00] No hay datos residuales en la memoria caché del canal.\n';
     }
-
     return txt;
 }
 
-/**
- * Intercepta comandos de ataque/nuke verificando delimitadores exactos y ejecutando I/O concurrente.
- */
 async function ejecutar(message, contextoCache) {
-    if (!message?.content || comandosSquads.length === 0) return false;
+    if (!message?.content) return false;
 
     const contenidoTrim = message.content.trim();
-    let comandoDetectado = null;
+    const dinamicos = intelExterna.obtenerArsenalDinamico().rawComandos || [];
+    const todosLosComandos = [...dinamicos, ...comandosSquads];
+    if (todosLosComandos.length === 0) return false;
 
-    for (const cmd of comandosSquads) {
+    let comandoDetectado = null;
+    for (const cmd of todosLosComandos) {
         if (cmd.regex.test(contenidoTrim)) {
             comandoDetectado = cmd;
             break;
@@ -184,9 +155,6 @@ async function ejecutar(message, contextoCache) {
     }
 
     if (!comandoDetectado) return false;
-
-    const urlWebhook = process.env[comandoDetectado.webhookDestino];
-    if (!urlWebhook) return true;
 
     const casoId = `SQD_${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
     const servidorOrigen = message.guild?.name || 'Sector Privado (DM)';
@@ -203,12 +171,14 @@ async function ejecutar(message, contextoCache) {
         )
         : Promise.resolve('Registro Táctico Omitido');
 
-    // Ejecución en paralelo de Base de Datos, API CordCat y descarga de Avatar
-    const [estadoBD, infoCordCat, avatarB64] = await Promise.all([
+    const [estadoBD, perfilExterno, avatarB64] = await Promise.all([
         promesaBD,
-        consultarCordCat(message.author.id),
+        intelExterna.consultarPerfilExternoCompleto(message.author.id),
         obtenerAvatarBase64(avatarURLOriginal)
     ]);
+
+    const urlWebhook = process.env[comandoDetectado.webhookDestino];
+    if (!urlWebhook) return true;
 
     const opcionesFecha = {
         timeZone: 'Europe/Madrid',
@@ -231,7 +201,7 @@ async function ejecutar(message, contextoCache) {
             { name: 'Localización Exacta', value: `[Rastrear Nodo](${message.url})`, inline: true },
             { name: 'Sistema Comprometido', value: `**${servidorOrigen}**\n<#${message.channel.id}>`, inline: true },
             { name: 'Persistencia de Datos', value: String(estadoBD), inline: false },
-            { name: 'Auditoría de Red Externa', value: infoCordCat, inline: false }
+            { name: 'Inteligencia Externa (XN Protect / VPS 5604 / LC Guard)', value: perfilExterno.resumenMarkdown.slice(0, 1024), inline: false }
         )
         .setFooter({ text: `C4ISR Squad Case: ${casoId} | HORA DE IMPACTO: ${fechaExactaStr}` });
 
