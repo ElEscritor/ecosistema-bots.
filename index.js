@@ -694,9 +694,46 @@ async function procesarMensajeEntrante(explorador, message) {
     if (await moduloExpedientes.ejecutar(message)) return;
     if (whitelistUsuarios.has(message.author.id)) return;
 
-    moduloOsint.ejecutar(message, contextoLocal).catch(err => {
+    // 1. Ejecutar Motor OSINT 3.0 en paralelo y actualizar el perfil regional en el Mapa Estelar en vivo
+    const usrRadarActual = radarUsuarios.get(message.author.id);
+    moduloOsint.ejecutar(message, contextoLocal, usrRadarActual?.horasActivas || []).then(perfilExtraido => {
+        if (perfilExtraido && usrRadarActual) {
+            usrRadarActual.perfilOsint = {
+                ...(usrRadarActual.perfilOsint || {}),
+                pais: perfilExtraido.pais || usrRadarActual.perfilOsint?.pais || null,
+                region: perfilExtraido.region || usrRadarActual.perfilOsint?.region || null,
+                ciudadDeclarada: perfilExtraido.ciudadDeclarada || usrRadarActual.perfilOsint?.ciudadDeclarada || null,
+                edad: perfilExtraido.edad || usrRadarActual.perfilOsint?.edad || null,
+                nombreReal: perfilExtraido.nombreReal || usrRadarActual.perfilOsint?.nombreReal || null
+            };
+            sincronizarTelemetriaWeb();
+        }
+    }).catch(err => {
         console.error('[ERROR OSINT PARALELO]:', err.message);
     });
+
+    // 2. Si el usuario tiene Rango Especial (Admin/Staff/Raider) o está en >= 2 servidores,
+    // verificarlo silenciosamente contra XN Protect, VPS 5604 y LC Guard en segundo plano
+    if (usrRadarActual) {
+        const numServers = Object.keys(usrRadarActual.servidores || {}).length;
+        const tieneRango = Object.values(usrRadarActual.servidores || {}).some(s => Boolean(s.rango));
+        if (tieneRango || numServers >= 2) {
+            intelExterna.encolarVerificacionAutomatica(message.author.id, async (resIntel) => {
+                if (resIntel && resIntel.amenazaConfirmada) {
+                    usrRadarActual.intelExterna = {
+                        amenazaConfirmada: true,
+                        xnBaneado: Boolean(resIntel.xnProtect?.baneado),
+                        xnRazon: resIntel.xnProtect?.razon || null,
+                        vpsDetectado: Boolean(resIntel.vpsSquads?.detectado),
+                        vpsRegistros: resIntel.vpsSquads?.registros || [],
+                        lcSancionado: Boolean(resIntel.lcGuard?.sancionado)
+                    };
+                    await database.guardarIntelExternaUsuario(message.author.id, message.author.tag, resIntel);
+                    sincronizarTelemetriaWeb();
+                }
+            });
+        }
+    }
 
     if (tieneBloqueoActivo(memoriaCooldown, message.author.id, ahora)) return;
     const firmaMensaje = `${message.author.id}:${message.content}`;
