@@ -1,9 +1,7 @@
 'use strict';
 
 /* ==========================================================================
-   VISTA: CARTOGRAFÍA ESTELAR C4ISR v6.0 (ZERO-HUD // PARALAJE 3D // INFECCIÓN)
-   Incluye: Interfaz Limpia sin saturación, Fondo Espacial Multicapa con Caché,
-            Corona de Infección Silenciosa, Reencarnación de Alts y OSINT Regional.
+   VISTA: CARTOGRAFIA ESTELAR C4ISR v6.0 (ZERO-HUD // PARALAJE 3D // INFECCION)
    Archivo: js/vistas/red.js
    ========================================================================== */
 
@@ -80,7 +78,6 @@ window.C4ISR_Views.red = {
     pinchInitialDist: null,
     pinchInitialZoom: 1,
 
-    // Interfaz Zero-HUD: paneles cerrados y radar apagado por defecto para máxima limpieza visual
     controlsExpanded: false,
     leftDockOpen: false,
     rightDockOpen: false,
@@ -99,10 +96,6 @@ window.C4ISR_Views.red = {
     selectedSectorFilter: 'ALL',
     searchTerm: '',
 
-    /**
-     * Crea 3 capas de estrellas a distintas profundidades (Paralaje 3D real al mover la cámara)
-     * y pre-renderiza las nebulosas cósmicas en un canvas oculto para gastar 0% de GPU por fotograma.
-     */
     initDeepSpace() {
         this.starfield = [];
         const layers = [
@@ -124,7 +117,6 @@ window.C4ISR_Views.red = {
             }
         }
 
-        // Pre-renderizar nebulosas espaciales en un lienzo offscreen de 1024x1024
         this.nebulaCanvas = document.createElement('canvas');
         this.nebulaCanvas.width = 1024;
         this.nebulaCanvas.height = 1024;
@@ -174,7 +166,6 @@ window.C4ISR_Views.red = {
                     border-radius: 0 !important;
                     border: none !important;
                 }
-                /* Cápsula de Mando Minimalista Superior Izquierda (Zero-HUD) */
                 .zero-hud-pill {
                     position: absolute;
                     top: 14px;
@@ -235,7 +226,6 @@ window.C4ISR_Views.red = {
                     outline: none;
                     width: 100%;
                 }
-                /* Índice Flotante de Sistemas (Izquierda) */
                 .floating-dock-left {
                     position: absolute;
                     top: 60px;
@@ -257,7 +247,6 @@ window.C4ISR_Views.red = {
                     opacity: 0;
                     pointer-events: none;
                 }
-                /* Inspector Flotante Contextual (Derecha - Oculto por defecto) */
                 .floating-dock-right {
                     position: absolute;
                     top: 14px;
@@ -310,47 +299,43 @@ window.C4ISR_Views.red = {
             </style>
 
             <div id="starmap-master-shell">
-                <!-- LIENZO ESPACIAL 100% LIBRE -->
                 <div id="canvas-wrapper" style="position: relative; width: 100%; height: 100%; overflow: hidden; touch-action: none;">
                     <canvas id="net-canvas" style="width: 100%; height: 100%; display: block; cursor: grab;"></canvas>
 
-                    <!-- CÁPSULA FLOTANTE MINIMALISTA (ZERO-HUD) -->
                     <div class="zero-hud-pill">
                         <input type="text" id="red-search" class="search-input" style="width: 195px; padding: 4px 9px; font-size: 0.72rem; background: rgba(0,0,0,0.45);" placeholder="Buscar sistema o sujeto..." autocomplete="off">
-                        <button id="btn-toggle-left-dock" class="zero-btn" type="button" title="Índice de Servidores">&#9776; SISTEMAS</button>
+                        <button id="btn-toggle-left-dock" class="zero-btn" type="button" title="Indice de Servidores">&#9776; SISTEMAS</button>
                         <button id="btn-toggle-filters" class="zero-btn" type="button" title="Filtros y Capas Visuales">&#9881; CAPAS</button>
-                        <button id="btn-open-alerts-panel" class="zero-btn" type="button" title="Abrir Radar de Alts y Cámara DVR">&#9678; ALTS / DVR</button>
+                        <button id="btn-open-alerts-panel" class="zero-btn" type="button" title="Abrir Radar de Alts y Camara DVR">&#9678; ALTS / DVR</button>
                         <button id="btn-center-graph" class="zero-btn" type="button" title="Centrar Galaxia">&#8962;</button>
                         <button id="btn-fullscreen-map" class="zero-btn" type="button" title="Pantalla Completa (Tecla F)">&#9974;</button>
                     </div>
 
-                    <!-- CAJÓN DESPLEGABLE DE CAPAS Y FILTROS (Oculto por defecto) -->
                     <div id="zero-filters-drawer" class="zero-hud-drawer hidden">
-                        <div style="font-family: var(--font-mono); font-size: 0.69rem; color: #00f0ff; font-weight: 700;">FILTROS DE CONSTELACIÓN</div>
+                        <div style="font-family: var(--font-mono); font-size: 0.69rem; color: #00f0ff; font-weight: 700;">FILTROS DE CONSTELACION</div>
                         <select id="filter-explorer-select" class="cp-select">
                             <option value="ALL">Explorador: Todos (Enjambre)</option>
                         </select>
                         <select id="filter-sector-select" class="cp-select">
                             <option value="ALL">Sector: Todos los Sistemas</option>
-                            <option value="ACTIVE">Solo con Tráfico Activo</option>
-                            <option value="INFECTED">Con Infiltración / Infección (&gt;0%)</option>
+                            <option value="ACTIVE">Solo con Trafico Activo</option>
+                            <option value="INFECTED">Con Infiltracion / Infeccion (&gt;0%)</option>
                             <option value="HOSTIL">Etiqueta: Hostil (Rojo)</option>
                             <option value="PROVEEDOR">Etiqueta: Proveedor (Naranja)</option>
                             <option value="SOCIAL">Etiqueta: Social (Cian)</option>
-                            <option value="ALIADO">Etiqueta: Aliado (Púrpura)</option>
+                            <option value="ALIADO">Etiqueta: Aliado (Purpura)</option>
                             <option value="CENIZA">Estado: Ceniza (Raideados)</option>
                         </select>
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: 2px;">
                             <button id="btn-toggle-strategic" class="zero-btn" type="button">MODO CLANES: AUTO</button>
                             <button id="btn-toggle-routes" class="zero-btn active" type="button">RUTAS SALTO: ON</button>
                             <button id="btn-toggle-alliances" class="zero-btn active" type="button">ALIANZAS: ON</button>
-                            <button id="btn-toggle-empty-srv" class="zero-btn" type="button">SIN VACÍOS: OFF</button>
+                            <button id="btn-toggle-empty-srv" class="zero-btn" type="button">SIN VACIOS: OFF</button>
                             <button id="btn-toggle-bridges" class="zero-btn" type="button">SOLO PUENTES: OFF</button>
                             <button id="btn-toggle-minimap" class="zero-btn" type="button">RADAR: OFF</button>
                         </div>
                     </div>
 
-                    <!-- PANEL IZQUIERDO PLEGABLE: LISTA RÁPIDA DE SISTEMAS -->
                     <aside id="left-sector-dock" class="floating-dock-left collapsed">
                         <div style="padding: 8px 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); display: flex; justify-content: space-between; align-items: center;">
                             <span style="font-family: var(--font-mono); font-size: 0.72rem; font-weight: 700; color: #00f0ff;">SISTEMAS ESTELARES</span>
@@ -359,15 +344,12 @@ window.C4ISR_Views.red = {
                         <div id="sector-quick-list" style="flex: 1; overflow-y: auto;"></div>
                     </aside>
 
-                    <!-- MINIMAPA RADAR OPCIONAL (Oculto por defecto) -->
                     <div id="minimap-container" class="hidden">
                         <canvas id="minimap-canvas" width="175" height="120" style="width: 100%; height: 100%; display: block; cursor: crosshair;"></canvas>
                     </div>
 
-                    <!-- TOOLTIP INSTANTÁNEO -->
                     <div id="canvas-hover-tooltip" class="hidden" style="position: absolute; pointer-events: none; z-index: 30; background: rgba(6, 7, 14, 0.94); border: 1px solid rgba(0, 240, 255, 0.45); border-left: 3px solid #00f0ff; padding: 7px 11px; border-radius: 6px; font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-main); box-shadow: 0 8px 24px rgba(0,0,0,0.92); max-width: 320px;"></div>
 
-                    <!-- PANEL DERECHO CONTEXTUAL (Se abre automáticamente al clicar un nodo y se cierra al clicar el espacio) -->
                     <aside id="right-inspector-dock" class="floating-dock-right collapsed">
                         <div style="padding: 8px 10px; display: flex; gap: 5px; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.08);">
                             <button id="tab-btn-inspector" class="zero-btn active" type="button" style="flex: 1;">INSPECTOR</button>
@@ -574,7 +556,7 @@ window.C4ISR_Views.red = {
         if (btnEmptySrv) {
             btnEmptySrv.addEventListener('click', () => {
                 this.hideEmptyServers = !this.hideEmptyServers;
-                btnEmptySrv.textContent = `SIN VACÍOS: ${this.hideEmptyServers ? 'ON' : 'OFF'}`;
+                btnEmptySrv.textContent = `SIN VACIOS: ${this.hideEmptyServers ? 'ON' : 'OFF'}`;
                 btnEmptySrv.classList.toggle('active', this.hideEmptyServers);
                 this.renderSectorQuickList();
             });
@@ -803,7 +785,7 @@ window.C4ISR_Views.red = {
         }
         for (const srvNode of this.serverNodesList) {
             for (const t of (srvNode.meta?.exploradores || [])) {
-                if (t && t !== 'Archivo Histórico' && !t.includes('Radar de Alianzas') && !t.includes('VPS')) {
+                if (t && !t.includes('Archivo') && !t.includes('Radar') && !t.includes('VPS')) {
                     tagsSet.add(t);
                 }
             }
@@ -881,7 +863,7 @@ window.C4ISR_Views.red = {
                 ? `<span style="background:rgba(255,255,255,0.12);padding:1px 5px;border-radius:3px;color:${COLORES_ETIQUETA_SERVIDOR[tagObj.tipo] || '#00f0ff'};margin-left:5px;">[${DOMPurify.sanitize(tagObj.texto)}]</span>`
                 : '';
             const infHtml = infCount > 0
-                ? `<div style="color:#f97316;font-weight:700;margin-top:2px;">&#9888; Infiltración Hostil: ${infCount} sujeto(s) (${infPct}%)</div>`
+                ? `<div style="color:#f97316;font-weight:700;margin-top:2px;">&#9888; Infiltracion Hostil: ${infCount} sujeto(s) (${infPct}%)</div>`
                 : '';
 
             tooltip.style.borderLeftColor = esCeniza ? '#94a3b8' : (infPct >= 25 ? '#f97316' : '#ff0055');
@@ -1094,12 +1076,6 @@ window.C4ISR_Views.red = {
         };
     },
 
-    /**
-     * Detector Dual de Alts v6.0:
-     * 1. Ping-Pong Estilométrico en Vivo (0 colisiones simultáneas + mismo patrón de habla).
-     * 2. Reencarnación / Hermandad VPS (Cuenta nueva/limpia que hereda los mismos servidores y amigos de un baneado en XN/VPS,
-     *    o dos cuentas que comparten pasado en el mismo servidor del VPS 5604).
-     */
     analyzeMirrorAccounts(usuarios, interacciones) {
         const chatNeighbors = new Map();
         const directWeights = new Map();
@@ -1144,7 +1120,6 @@ window.C4ISR_Views.red = {
                 const vSrvKeys = Object.keys(v.servidores || {});
                 const vVpsIds = new Set((v.pasadoVps || []).map(p => p.guildId));
 
-                // Verificar si comparten pasado criminal en el mismo servidor del VPS 5604
                 let vpsComunes = 0;
                 uVpsIds.forEach(id => { if (vVpsIds.has(id)) vpsComunes++; });
 
@@ -1164,7 +1139,6 @@ window.C4ISR_Views.red = {
                 const unionCount = featuresU.size + featuresV.size - interCount;
                 const jaccard = unionCount > 0 ? (interCount / unionCount) : 0;
 
-                // Detectar Reencarnación: uno está sancionado en XN/VPS o fichado grave, y el otro es una cuenta nueva/burner en los mismos servers
                 const unoBaneadoYOtroBurner = (
                     ((u.intelExterna?.amenazaConfirmada || u.infracciones >= 2) && v.esBurner) ||
                     ((v.intelExterna?.amenazaConfirmada || v.infracciones >= 2) && u.esBurner)
@@ -1181,8 +1155,8 @@ window.C4ISR_Views.red = {
                 const indiceCombinado = simHabla !== null ? ((jaccard * 0.45) + (scoreHabla * 0.55)) : jaccard;
                 const esCritico = unoBaneadoYOtroBurner || (scoreHabla >= 0.78 && altTemporal.relevos >= 1);
                 const tipoRelacion = unoBaneadoYOtroBurner
-                    ? 'REENCARNACIÓN'
-                    : (vpsComunes >= 1 ? 'PASADO VPS' : (esCritico ? 'CRÍTICO' : 'ADVERTENCIA'));
+                    ? 'REENCARNACION'
+                    : (vpsComunes >= 1 ? 'PASADO VPS' : (esCritico ? 'CRITICO' : 'ADVERTENCIA'));
 
                 const record = {
                     uId: u.id,
@@ -1214,7 +1188,7 @@ window.C4ISR_Views.red = {
         if (tabBtnAlts) tabBtnAlts.textContent = `ALTS (${paresDetectados.length})`;
         const btnOpenAlerts = document.getElementById('btn-open-alerts-panel');
         if (btnOpenAlerts) {
-            btnOpenAlerts.textContent = paresDetectados.length > 0 ? `◎ ALTS (${paresDetectados.length}) / DVR` : '◎ ALTS / DVR';
+            btnOpenAlerts.textContent = paresDetectados.length > 0 ? `ALTS (${paresDetectados.length}) / DVR` : 'ALTS / DVR';
             btnOpenAlerts.style.borderColor = paresDetectados.length > 0 ? '#fcee0a' : 'rgba(255,255,255,0.14)';
         }
         if (this.rightPanelTab === 'alts') this.renderAltsRadarList();
@@ -1484,7 +1458,7 @@ window.C4ISR_Views.red = {
                         source: k1,
                         target: k2,
                         jaccard: pair.jaccard,
-                        critical: pair.nivelAlerta === 'CRÍTICO' || pair.nivelAlerta === 'REENCARNACIÓN'
+                        critical: pair.nivelAlerta === 'CRITICO' || pair.nivelAlerta === 'REENCARNACION'
                     });
                     addNeighbor(k1, k2);
                 }
@@ -1535,7 +1509,7 @@ window.C4ISR_Views.red = {
                 }
             }
         } catch (err) {
-            console.error('[Vista Red] Error sincronizando topología:', err);
+            console.error('[Vista Red] Error sincronizando topologia:', err);
         }
     },
 
@@ -1653,14 +1627,12 @@ window.C4ISR_Views.red = {
         ctx.fillStyle = '#030408';
         ctx.fillRect(0, 0, w, h);
 
-        // 1. Nebulosas pre-cacheadas con ligero desplazamiento de paralaje (0% impacto en FPS)
         if (this.nebulaCanvas) {
             const nebX = (w * 0.5 - 512) + (this.camera.x - w * 0.5) * 0.08;
             const nebY = (h * 0.5 - 512) + (this.camera.y - h * 0.5) * 0.08;
             ctx.drawImage(this.nebulaCanvas, nebX - 350, nebY - 350, 1724, 1724);
         }
 
-        // 2. Paralaje Estelar Multicapa 3D
         const camOffsetX = this.camera.x - w * 0.5;
         const camOffsetY = this.camera.y - h * 0.5;
 
@@ -1744,7 +1716,6 @@ window.C4ISR_Views.red = {
         ctx.translate(this.camera.x, this.camera.y);
         ctx.scale(this.camera.zoom, this.camera.zoom);
 
-        // 1. Autopistas de Salto entre Servidores (EVE Constellation Jump Lanes)
         if (this.showConstellationRoutes) {
             for (let i = 0; i < this.constellationBridges.length; i++) {
                 const br = this.constellationBridges[i];
@@ -1778,7 +1749,6 @@ window.C4ISR_Views.red = {
             }
         }
 
-        // 2. Hilos Conectores de Chat (Usuario -> Servidor Actual)
         for (let i = 0; i < this.edges.length; i++) {
             const edge = this.edges[i];
             if (edge.kind === 'CHAT' && !this.showUserLinks) continue;
@@ -1848,7 +1818,6 @@ window.C4ISR_Views.red = {
             }
         }
 
-        // 3. Rutas Hiperespaciales de Alianzas
         if (this.showAllianceLinks) {
             for (let i = 0; i < this.allianceEdges.length; i++) {
                 const ally = this.allianceEdges[i];
@@ -1886,7 +1855,6 @@ window.C4ISR_Views.red = {
             }
         }
 
-        // 4. Enlaces Punteados de Cuentas Espejo / Reencarnación
         if (this.showAltLinks) {
             for (const altEdge of this.altEdges) {
                 const s = this.nodes.get(altEdge.source);
@@ -1911,7 +1879,6 @@ window.C4ISR_Views.red = {
             }
         }
 
-        // 5. Trazas de Migración de Usuarios y Cámara DVR
         for (let i = this.dvrTraces.length - 1; i >= 0; i--) {
             const tr = this.dvrTraces[i];
             tr.progress = Math.min(1.0, tr.progress + 0.018);
@@ -1951,7 +1918,6 @@ window.C4ISR_Views.red = {
             ctx.restore();
         }
 
-        // 6. Partículas de Mensajes en Vivo
         for (let i = this.particles.length - 1; i >= 0; i--) {
             const p = this.particles[i];
             p.progress += p.speed;
@@ -1972,7 +1938,6 @@ window.C4ISR_Views.red = {
             ctx.fill();
         }
 
-        // 7. Dibujar Sistemas Estelares (Servidores) y Satélites (Usuarios)
         for (const node of this.nodes.values()) {
             if (!this.isNodeVisible(node)) continue;
             if (!inViewport(node.x, node.y)) continue;
@@ -1992,7 +1957,6 @@ window.C4ISR_Views.red = {
                 const infCount = node.meta?.infeccionCount || 0;
                 const infPct = node.meta?.infeccionPct || 0;
 
-                // Corona Parasitaria de Infección Silenciosa (Si hay usuarios con GlobalBan/VPS/Infracciones infiltrados)
                 if (!esCeniza && infCount > 0) {
                     ctx.save();
                     ctx.beginPath();
@@ -2103,14 +2067,14 @@ window.C4ISR_Views.red = {
             container.innerHTML = `
                 <div style="padding: 1rem 0.4rem; color: var(--text-muted); line-height: 1.5;">
                     <div style="color: var(--accent-green); font-weight: 700; margin-bottom: 0.4rem;">[ SIN ALTS NI REENCARNACIONES ]</div>
-                    El motor estilométrico y de sucesión filtra coincidencias casuales de huso horario y busca patrones de habla idénticos, relevos sin colisión o cuentas nuevas que heredan el círculo de un baneado.
+                    El motor estilometrico y de sucesion filtra coincidencias casuales de huso horario y busca patrones de habla identicos, relevos sin colision o cuentas nuevas que heredan el circulo de un baneado.
                 </div>
             `;
             return;
         }
 
         container.innerHTML = this.suspectPairs.map((pair, idx) => {
-            const isCrit = pair.nivelAlerta === 'CRÍTICO' || pair.nivelAlerta === 'REENCARNACIÓN';
+            const isCrit = pair.nivelAlerta === 'CRITICO' || pair.nivelAlerta === 'REENCARNACION';
             const badgeColor = isCrit ? '#ff003c' : '#fcee0a';
             const uSafe = DOMPurify.sanitize(pair.uTag);
             const vSafe = DOMPurify.sanitize(pair.vTag);
@@ -2119,7 +2083,7 @@ window.C4ISR_Views.red = {
                 <div class="alt-pair-card" data-u="${DOMPurify.sanitize(String(pair.uId))}" data-v="${DOMPurify.sanitize(String(pair.vId))}" style="border: 1px solid ${badgeColor}; border-left: 4px solid ${badgeColor}; background: rgba(255, 255, 255, 0.02); padding: 0.65rem 0.75rem; margin-bottom: 0.65rem; border-radius: 4px; cursor: pointer;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
                         <span style="color: ${badgeColor}; font-weight: 700; font-size: 0.72rem;">#${idx + 1} [${pair.nivelAlerta}]</span>
-                        <span style="color: var(--text-main); font-weight: 700; font-size: 0.74rem;">ÍNDICE: ${(pair.jaccard * 100).toFixed(1)}%</span>
+                        <span style="color: var(--text-main); font-weight: 700; font-size: 0.74rem;">INDICE: ${(pair.jaccard * 100).toFixed(1)}%</span>
                     </div>
                     <div style="color: #ffffff; font-weight: 600; margin-bottom: 4px;">
                         ${uSafe} &harr; ${vSafe}
@@ -2148,8 +2112,8 @@ window.C4ISR_Views.red = {
         if (this.dvrEvents.length === 0) {
             container.innerHTML = `
                 <div style="padding: 1rem 0.4rem; color: var(--text-muted); line-height: 1.55;">
-                    <div style="color: #00f0ff; font-weight: 700; margin-bottom: 0.4rem;">[ CÁMARA DVR EN GRABACIÓN ]</div>
-                    Registra automáticamente cada salto de un usuario entre servidores distintos y los ataques Ceniza.
+                    <div style="color: #00f0ff; font-weight: 700; margin-bottom: 0.4rem;">[ CAMARA DVR EN GRABACION ]</div>
+                    Registra automaticamente cada salto de un usuario entre servidores distintos y los ataques Ceniza.
                 </div>
             `;
             return;
@@ -2157,7 +2121,7 @@ window.C4ISR_Views.red = {
 
         const headerPlayHtml = `
             <div style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center;">
-                <span style="color: #fcee0a; font-weight: 700; font-size: 0.72rem;">ÚLTIMOS ${this.dvrEvents.length} EVENTOS</span>
+                <span style="color: #fcee0a; font-weight: 700; font-size: 0.72rem;">ULTIMOS ${this.dvrEvents.length} EVENTOS</span>
                 <button id="btn-play-all-dvr" class="zero-btn" type="button">&#9654; REPRODUCIR SALTOS</button>
             </div>
         `;
@@ -2230,16 +2194,16 @@ window.C4ISR_Views.red = {
             const srv = node.meta || {};
             const exploradores = Array.isArray(srv.exploradores) && srv.exploradores.length > 0
                 ? srv.exploradores.join(', ')
-                : 'Archivo Histórico';
+                : 'Archivo Historico';
             const numExploradores = srv.redundancia || (Array.isArray(srv.exploradores) ? srv.exploradores.length : 0);
             const redundanciaBadge = numExploradores >= 2
-                ? `<span style="color:#34d399;font-weight:700;">ÓPTIMA (${numExploradores})</span>`
+                ? `<span style="color:#34d399;font-weight:700;">OPTIMA (${numExploradores})</span>`
                 : `<span style="color:#fbbf24;font-weight:700;">1 UNIDAD</span>`;
 
             const infCount = srv.infeccionCount || 0;
             const infPct = srv.infeccionPct || 0;
             const infeccionHtml = infCount > 0
-                ? `<div style="margin-bottom:0.65rem;padding:0.5rem 0.65rem;background:rgba(249,115,22,0.1);border:1px solid rgba(249,115,22,0.45);border-radius:4px;color:#fbbf24;font-size:0.72rem;">&#9888; <strong>Infiltración Detectada:</strong> ${infCount} sujeto(s) con antecedentes (${infPct}% de la órbita).</div>`
+                ? `<div style="margin-bottom:0.65rem;padding:0.5rem 0.65rem;background:rgba(249,115,22,0.1);border:1px solid rgba(249,115,22,0.45);border-radius:4px;color:#fbbf24;font-size:0.72rem;">&#9888; <strong>Infiltracion Detectada:</strong> ${infCount} sujeto(s) con antecedentes (${infPct}% de la orbita).</div>`
                 : '';
 
             let cenizaDossierHtml = '';
@@ -2277,7 +2241,7 @@ window.C4ISR_Views.red = {
                             <option value="HOSTIL" ${currentTagType === 'HOSTIL' ? 'selected' : ''}>ROJO</option>
                             <option value="PROVEEDOR" ${currentTagType === 'PROVEEDOR' ? 'selected' : ''}>NARANJA</option>
                             <option value="SOCIAL" ${currentTagType === 'SOCIAL' ? 'selected' : ''}>CIAN</option>
-                            <option value="ALIADO" ${currentTagType === 'ALIADO' ? 'selected' : ''}>PÚRPURA</option>
+                            <option value="ALIADO" ${currentTagType === 'ALIADO' ? 'selected' : ''}>PURPURA</option>
                             <option value="OBJETIVO" ${currentTagType === 'OBJETIVO' ? 'selected' : ''}>AMARILLO</option>
                         </select>
                     </div>
@@ -2293,7 +2257,7 @@ window.C4ISR_Views.red = {
                 const safeUrl = DOMPurify.sanitize(String(srv.inviteUrl));
                 inviteBlockHtml = `
                     <div style="margin-bottom: 0.85rem; padding: 0.55rem 0.7rem; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.45); border-radius: 4px;">
-                        <div style="color: var(--accent-green); font-weight: 700; font-size: 0.69rem; margin-bottom: 2px;">[ INVITACIÓN CAZADA DE ESTE SERVIDOR ]</div>
+                        <div style="color: var(--accent-green); font-weight: 700; font-size: 0.69rem; margin-bottom: 2px;">[ INVITACION CAZADA DE ESTE SERVIDOR ]</div>
                         <a href="${safeUrl}" target="_blank" rel="noopener noreferrer" style="color: #ffffff; font-weight: 700; font-size: 0.8rem; text-decoration: underline;">${safeUrl}</a>
                     </div>
                 `;
@@ -2327,11 +2291,11 @@ window.C4ISR_Views.red = {
                 ${cenizaDossierHtml}
                 ${tagEditorHtml}
                 ${inviteBlockHtml}
-                <div style="margin-bottom: 0.35rem;"><strong>Sujetos en Órbita:</strong> <span style="color: #00f0ff;">${members.length}</span> &nbsp;|&nbsp; <strong>Redundancia:</strong> ${redundanciaBadge}</div>
+                <div style="margin-bottom: 0.35rem;"><strong>Sujetos en Orbita:</strong> <span style="color: #00f0ff;">${members.length}</span> &nbsp;|&nbsp; <strong>Redundancia:</strong> ${redundanciaBadge}</div>
                 <div style="margin-bottom: 0.7rem; font-size: 0.71rem; color: var(--text-secondary);"><strong>Exploradores:</strong> ${DOMPurify.sanitize(exploradores)}</div>
                 <div style="color: #00f0ff; font-weight: 700; margin-bottom: 0.35rem;">SUJETOS EN ESTE SISTEMA (${members.length}):</div>
                 <div style="max-height: 220px; overflow-y: auto; border: var(--border-subtle); border-radius: 4px; background: rgba(0,0,0,0.25);">
-                    ${membersHtml || '<div style="padding:0.75rem;color:var(--text-muted);">Sin usuarios registrados aún.</div>'}
+                    ${membersHtml || '<div style="padding:0.75rem;color:var(--text-muted);">Sin usuarios registrados aun.</div>'}
                 </div>
             `;
 
@@ -2349,7 +2313,7 @@ window.C4ISR_Views.red = {
                         const res = await window.C4ISR_API.guardarEtiquetaServidor(String(node.rawId), texto, tipo);
                         node.meta.etiquetaManual = res.etiqueta;
                         this.renderSectorQuickList();
-                        btnSaveTag.textContent = '¡FIJADO!';
+                        btnSaveTag.textContent = 'FIJADO!';
                         setTimeout(() => { if (btnSaveTag) btnSaveTag.textContent = 'FIJAR EN MAPA'; }, 900);
                     } catch (_) {
                         btnSaveTag.textContent = 'ERROR';
@@ -2381,12 +2345,12 @@ window.C4ISR_Views.red = {
             const geoBoxHtml = (osint.pais || osint.region || osint.ciudadDeclarada || osint.edad || osint.nombreReal)
                 ? `
                     <div style="margin-bottom:0.75rem;padding:0.55rem 0.7rem;background:rgba(56,189,248,0.08);border:1px solid rgba(56,189,248,0.35);border-radius:4px;font-size:0.72rem;line-height:1.45;">
-                        <div style="color:#38bdf8;font-weight:700;margin-bottom:2px;">[ GEOLOCALIZACIÓN E IDENTIDAD OSINT ]</div>
-                        ${osint.pais ? `<div><strong>País Deducido:</strong> <span style="color:#fff;">${DOMPurify.sanitize(osint.pais)}</span></div>` : ''}
-                        ${osint.region ? `<div><strong>Región / Huso:</strong> <span style="color:#00f0ff;">${DOMPurify.sanitize(osint.region)}</span></div>` : ''}
+                        <div style="color:#38bdf8;font-weight:700;margin-bottom:2px;">[ GEOLOCALIZACION E IDENTIDAD OSINT ]</div>
+                        ${osint.pais ? `<div><strong>Pais Deducido:</strong> <span style="color:#fff;">${DOMPurify.sanitize(osint.pais)}</span></div>` : ''}
+                        ${osint.region ? `<div><strong>Region / Huso:</strong> <span style="color:#00f0ff;">${DOMPurify.sanitize(osint.region)}</span></div>` : ''}
                         ${osint.ciudadDeclarada ? `<div><strong>Localidad Declarada:</strong> <span style="color:#fcee0a;">${DOMPurify.sanitize(osint.ciudadDeclarada)}</span></div>` : ''}
-                        ${osint.nombreReal ? `<div><strong>Nombre Extraído:</strong> ${DOMPurify.sanitize(osint.nombreReal)}</div>` : ''}
-                        ${osint.edad ? `<div><strong>Edad Extraída:</strong> ${DOMPurify.sanitize(osint.edad)}</div>` : ''}
+                        ${osint.nombreReal ? `<div><strong>Nombre Extraido:</strong> ${DOMPurify.sanitize(osint.nombreReal)}</div>` : ''}
+                        ${osint.edad ? `<div><strong>Edad Extraida:</strong> ${DOMPurify.sanitize(osint.edad)}</div>` : ''}
                     </div>
                 `
                 : '';
@@ -2429,12 +2393,12 @@ window.C4ISR_Views.red = {
 
             if (altsDeUsuario.length > 0) {
                 altsHtml = altsDeUsuario.map(alt => {
-                    const col = (alt.nivelAlerta === 'CRÍTICO' || alt.nivelAlerta === 'REENCARNACIÓN') ? '#ff003c' : '#fcee0a';
+                    const col = (alt.nivelAlerta === 'CRITICO' || alt.nivelAlerta === 'REENCARNACION') ? '#ff003c' : '#fcee0a';
                     return `
                         <div class="btn-focus-alt" data-mirror="${DOMPurify.sanitize(String(alt.mirrorId))}" style="border-left: 3px solid ${col}; background: rgba(255,255,255,0.03); padding: 6px 8px; margin-bottom: 6px; cursor: pointer;">
                             <div style="color: ${col}; font-weight: 700; font-size: 0.72rem;">[${alt.nivelAlerta}] ${DOMPurify.sanitize(alt.mirrorTag)}</div>
                             <div style="font-size: 0.71rem; color: var(--text-secondary);">
-                                Índice: <strong>${(alt.jaccard * 100).toFixed(1)}%</strong> | Habla: <strong>${alt.sharedSleepHours}%</strong> | Relevos: <strong>${alt.fastHandoffs}</strong>
+                                Indice: <strong>${(alt.jaccard * 100).toFixed(1)}%</strong> | Habla: <strong>${alt.sharedSleepHours}%</strong> | Relevos: <strong>${alt.fastHandoffs}</strong>
                             </div>
                         </div>
                     `;
@@ -2454,8 +2418,8 @@ window.C4ISR_Views.red = {
                     &#9733; ${node.enWatchlist ? 'DESACTIVAR SEGUIMIENTO VIP' : 'ACTIVAR SEGUIMIENTO VIP (WATCHLIST)'}
                 </button>
 
-                <div style="margin-bottom: 0.35rem;"><strong>Última Transmisión:</strong> <span style="color: #00f0ff;">${formatearTiempoRelativo(node.lastMessageTs) || 'N/A'}</span></div>
-                <div style="margin-bottom: 0.35rem;"><strong>Creación Cuenta:</strong> <span style="color: var(--text-secondary);">${snowflakeInfo}</span></div>
+                <div style="margin-bottom: 0.35rem;"><strong>Ultima Transmision:</strong> <span style="color: #00f0ff;">${formatearTiempoRelativo(node.lastMessageTs) || 'N/A'}</span></div>
+                <div style="margin-bottom: 0.35rem;"><strong>Creacion Cuenta:</strong> <span style="color: var(--text-secondary);">${snowflakeInfo}</span></div>
                 <div style="margin-bottom: 0.35rem;"><strong>Historial Alias:</strong> <span style="color: var(--text-secondary);">${aliasesPrevios}</span></div>
                 <div style="margin-bottom: 0.7rem;"><strong>Infracciones Locales:</strong> <span style="color: ${node.infracciones > 0 ? '#ff003c' : 'var(--text-muted)'};">${node.infracciones}</span></div>
 
