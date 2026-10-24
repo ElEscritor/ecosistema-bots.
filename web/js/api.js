@@ -19,6 +19,13 @@ window.C4ISR_API = {
         }
     },
 
+   async agregarTokenExplorador(token, sector = 'General') {
+        return await this.request('/api/enjambre/token', {
+            method: 'POST',
+            body: JSON.stringify({ token, sector })
+        });
+    },
+
     getHeaders() {
         return {
             'Content-Type': 'application/json',
