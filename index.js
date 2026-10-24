@@ -23,8 +23,8 @@ const MAX_USUARIOS_RADAR_RAM = 2500;
 const MAX_INTERACCIONES_RAM = 3000;
 const MAX_EVENTOS_DVR = 250;
 const VENTANA_RESPUESTA_MS = 30000;
-const VENTANA_RAFAGA_EVERYONE_MS = 90000; // 90 segundos para medir bombardeo @everyone de un raid real
-const UMBRAL_CENIZA_EVERYONE = 15;        // A partir de 15 menciones @everyone en ráfaga (escala hasta 100+) marca Servidor Ceniza
+const VENTANA_RAFAGA_EVERYONE_MS = 90000;
+const UMBRAL_CENIZA_EVERYONE = 15;
 const COOLDOWN_USUARIO_MS = 10000;
 const TTL_FIRMA_MENSAJE_MS = 120000;
 const TTL_DEDUP_MENSAJE_MS = 30000;
@@ -32,7 +32,6 @@ const DELAY_DESPLIEGUE_MS = 45000;
 const INTERVALO_PURGA_MEMORIA_MS = 60000;
 const INTERVALO_PERSISTENCIA_RED_MS = 60000;
 
-// Patrones de nombres que ponen los raiders al destruir/renombrar un servidor
 const REGEX_NOMBRE_SERVIDOR_RAIDEADO = /\b(raid(?:ed)?\s*by|nuked\s*by|pwned\s*by|fucked\s*by|hacked\s*by|domados\s*por|owned\s*by|destroyed\s*by|raideado\s*por)\b/i;
 
 function cargarWhitelist() {
@@ -53,6 +52,7 @@ const whitelistUsuarios = cargarWhitelist();
 // ESTRUCTURAS DE CONTROL EN MEMORIA
 const exploradoresActivos = new Map();
 const clientesInstanciados = new Set();
+const tokensYaDesplegados = new Set();
 const cacheHistorialCanales = new Map();
 const memoriaCooldown = new Map();
 const hashMensajesRecientes = new Map();
@@ -62,9 +62,11 @@ const mensajesProcesadosGlobal = new Map();
 const radarServidores = new Map();
 const radarUsuarios = new Map();
 const radarInteracciones = new Map();
-const rafagasEveryoneServidor = new Map(); // Map<guildId, { count, firstTs, lastAttackerTag, lastAttackerId, inviteLink }>
+const rafagasEveryoneServidor = new Map();
 const eventosRecientesPulso = [];
-const bitacoraDvr = []; // Grabación tipo cámara de seguridad de saltos entre servidores, raids y objetivos VIP
+const bitacoraDvr = [];
+
+let contadorUnidades = 0;
 
 function registrarEventoDvr(evento) {
     bitacoraDvr.push({
@@ -136,7 +138,6 @@ function registrarServidoresDeExplorador(explorador) {
             estadoCeniza: null
         };
 
-        // Si el servidor ya tiene un nombre típico de haber sido raideado ("Raided by..."), marcar estado Ceniza
         if (REGEX_NOMBRE_SERVIDOR_RAIDEADO.test(nombreActual)) {
             if (!existente.estadoCeniza) {
                 existente.estadoCeniza = {
@@ -162,10 +163,6 @@ function registrarServidoresDeExplorador(explorador) {
     }
 }
 
-/**
- * Evalúa si un servidor está sufriendo un Raid Real (Bombardeo masivo de @everyone / @here + links),
- * diferenciándolo de los servidores donde simplemente se escriben comandos para pedir bots.
- */
 function evaluarBombardeoCeniza(message, nodoServidor) {
     if (!message.guild || !nodoServidor) return;
     const contenido = String(message.content || '');
@@ -178,7 +175,6 @@ function evaluarBombardeoCeniza(message, nodoServidor) {
     const ahora = Date.now();
     const guildId = message.guild.id;
 
-    // Contar cuántas veces aparece @everyone/@here dentro del propio mensaje (a veces meten 5 o 10 en un solo mensaje)
     const matchesPing = contenido.match(/@(everyone|here)/g);
     const pesoPings = matchesPing ? Math.max(1, matchesPing.length) : 1;
 
@@ -204,7 +200,6 @@ function evaluarBombardeoCeniza(message, nodoServidor) {
 
     rafagasEveryoneServidor.set(guildId, rafaga);
 
-    // Si alcanza el umbral de bombardeo masivo, declarar Servidor Ceniza (Raideado)
     if (rafaga.count >= UMBRAL_CENIZA_EVERYONE) {
         const yaEstabaEnCeniza = Boolean(nodoServidor.estadoCeniza?.raideado);
         nodoServidor.estadoCeniza = {
@@ -242,7 +237,6 @@ function registrarActividadRadar(message, contextoLocal) {
         ? message.guild.iconURL({ format: 'png', size: 64 })
         : null;
 
-    // 1. Actualizar Nodo Rojo (Servidor) y verificar si está siendo reducido a cenizas
     let nodoServidor = radarServidores.get(guildId);
     if (!nodoServidor) {
         nodoServidor = {
@@ -264,7 +258,6 @@ function registrarActividadRadar(message, contextoLocal) {
     evaluarBombardeoCeniza(message, nodoServidor);
     radarServidores.set(guildId, nodoServidor);
 
-    // 2. Actualizar Nodo Verde (Usuario) y detectar Saltos entre Servidores para la Grabadora DVR
     const userId = message.author.id;
     const userTag = message.author.tag || message.author.username || 'Usuario';
     const avatarUrl = typeof message.author.displayAvatarURL === 'function'
@@ -299,7 +292,6 @@ function registrarActividadRadar(message, contextoLocal) {
         };
     }
 
-    // Si el usuario acaba de saltar de un servidor A a un servidor B distinto, grabarlo en la cámara DVR
     if (
         ultimoServerIdPrevio &&
         ultimoServerIdPrevio !== guildId &&
@@ -314,10 +306,9 @@ function registrarActividadRadar(message, contextoLocal) {
             fromGuildName: ultimoServerNamePrevio || 'Servidor Previo',
             toGuildId: guildId,
             toGuildName: guildName,
-            detalle: `${userTag} se desplazó de "${ultimoServerNamePrevio}" hacia "${guildName}"`
+            detalle: `${userTag} saltó de "${ultimoServerNamePrevio}" a "${guildName}"`
         });
     } else if (typeof servidorWeb.esObjetivoWatchlist === 'function' && servidorWeb.esObjetivoWatchlist(userId)) {
-        // Si es un objetivo VIP en seguimiento, registrar su actividad aunque no haya cambiado de servidor
         registrarEventoDvr({
             tipo: 'MOVIMIENTO_VIP',
             userId,
@@ -326,7 +317,7 @@ function registrarActividadRadar(message, contextoLocal) {
             fromGuildName: guildName,
             toGuildId: guildId,
             toGuildName: guildName,
-            detalle: `[VIP] ${userTag} activo en "${guildName}"`
+            detalle: `[VIP] ${userTag} escribió en "${guildName}"`
         });
     }
 
@@ -360,7 +351,6 @@ function registrarActividadRadar(message, contextoLocal) {
 
     radarUsuarios.set(userId, nodoUsuario);
 
-    // 3. Correlación Temporal en Canal (< 30s)
     if (Array.isArray(contextoLocal) && contextoLocal.length >= 2) {
         const msgAnterior = contextoLocal[contextoLocal.length - 2];
         if (
@@ -395,6 +385,7 @@ function registrarActividadRadar(message, contextoLocal) {
         userTag,
         guildId,
         guildName,
+        fromGuildId: ultimoServerIdPrevio && ultimoServerIdPrevio !== guildId ? ultimoServerIdPrevio : null,
         ts: ahora
     });
     if (eventosRecientesPulso.length > 40) {
@@ -479,10 +470,10 @@ if (timerPersistenciaRed.unref) timerPersistenciaRed.unref();
 
 function obtenerTokensEntorno() {
     const listaTokens = [];
-    for (let i = 1; i <= 10; i++) {
+    for (let i = 1; i <= 40; i++) {
         const rawToken = process.env[`TOKEN_EXPLORADOR_${i}`];
         if (rawToken && rawToken.trim().length > 0) {
-            listaTokens.push({ indice: i, token: rawToken.trim() });
+            listaTokens.push({ token: rawToken.trim(), sector: `ENV_#${i}` });
         }
     }
     return listaTokens;
@@ -512,7 +503,6 @@ async function procesarMensajeEntrante(explorador, message) {
     if (tieneBloqueoActivo(mensajesProcesadosGlobal, message.id, ahora)) return;
     mensajesProcesadosGlobal.set(message.id, ahora + TTL_DEDUP_MENSAJE_MS);
 
-    // Si es un bot que está lanzando un ataque @everyone masivo en el servidor, evaluar el bombardeo antes de ignorar bots
     if (message.author.bot) {
         if (message.guild && (message.mentionEveryone || String(message.content || '').includes('@everyone'))) {
             const srv = radarServidores.get(message.guild.id);
@@ -533,7 +523,6 @@ async function procesarMensajeEntrante(explorador, message) {
     if (await moduloExpedientes.ejecutar(message)) return;
     if (whitelistUsuarios.has(message.author.id)) return;
 
-    // 1. Ejecutar SIEMPRE en paralelo el Motor OSINT 2.0 (sin bloquearlo detrás de else-if)
     moduloOsint.ejecutar(message, contextoLocal).catch(err => {
         console.error('[ERROR OSINT PARALELO]:', err.message);
     });
@@ -542,7 +531,6 @@ async function procesarMensajeEntrante(explorador, message) {
     const firmaMensaje = `${message.author.id}:${message.content}`;
     if (tieneBloqueoActivo(hashMensajesRecientes, firmaMensaje, ahora)) return;
 
-    // 2. Evaluar módulos tácticos de alertas (Squads, Raids, Links, Org)
     try {
         let interceptadoPor = null;
 
@@ -580,17 +568,18 @@ async function procesarMensajeEntrante(explorador, message) {
     }
 }
 
-function crearUnidadExploradora(indiceUnidad) {
+function crearUnidadExploradora(indiceUnidad, sectorAsignado = 'General') {
     const explorador = new Client({
         checkUpdate: false,
         presence: { status: 'invisible' }
     });
 
     explorador.on('ready', () => {
-        console.log(`[PANÓPTICO-${indiceUnidad}] Infiltración activa: ${explorador.user.tag}`);
+        console.log(`[PANÓPTICO-${indiceUnidad}] Infiltración activa: ${explorador.user.tag} (Sector: ${sectorAsignado})`);
         exploradoresActivos.set(explorador.user.id, {
             tag: explorador.user.tag,
             id: explorador.user.id,
+            sector: sectorAsignado,
             avatar: explorador.user.displayAvatarURL({ format: 'png', size: 64 }),
             guildsCount: explorador.guilds?.cache?.size || 0
         });
@@ -603,7 +592,6 @@ function crearUnidadExploradora(indiceUnidad) {
         sincronizarTelemetriaWeb();
     });
 
-    // Detector pasivo de cambio de nombre a "Raided by / Nuked by" (Servidor Ceniza)
     explorador.on('guildUpdate', (oldGuild, newGuild) => {
         if (!newGuild || !newGuild.id) return;
         const srv = radarServidores.get(newGuild.id);
@@ -661,36 +649,63 @@ function crearUnidadExploradora(indiceUnidad) {
     return explorador;
 }
 
-async function iniciarEnjambre() {
-    const tokensConfigurados = obtenerTokensEntorno();
-    if (tokensConfigurados.length === 0) {
-        console.error('[ERROR CRÍTICO] Matriz de tokens vacía. Defina al menos TOKEN_EXPLORADOR_1.');
-        process.exit(1);
+/**
+ * Despliega un nuevo token explorador en caliente (añadido desde la Web o desde BD).
+ */
+async function desplegarUnidadEnCaliente(rawToken, sector = 'General') {
+    const cleanToken = String(rawToken || '').replace(/^(Bot|Bearer)\s+/i, '').trim();
+    if (!cleanToken || tokensYaDesplegados.has(cleanToken)) {
+        return { exito: false, motivo: 'El token ya está desplegado o es inválido.' };
     }
 
+    tokensYaDesplegados.add(cleanToken);
+    const numUnidad = ++contadorUnidades;
+    const explorador = crearUnidadExploradora(numUnidad, sector);
+    clientesInstanciados.add(explorador);
+
+    try {
+        await explorador.login(cleanToken);
+        return {
+            exito: true,
+            tag: explorador.user?.tag || `Unidad #${numUnidad}`,
+            guilds: explorador.guilds?.cache?.size || 0
+        };
+    } catch (error) {
+        console.error(`[FALLO DE INFILTRACIÓN] Token inválido en la unidad #${numUnidad}: ${error.message}`);
+        tokensYaDesplegados.delete(cleanToken);
+        clientesInstanciados.delete(explorador);
+        try { explorador.destroy(); } catch (_) {}
+        return { exito: false, motivo: 'Token rechazado por Discord (inválido o revocado).' };
+    }
+}
+
+async function iniciarEnjambre() {
     if (typeof servidorWeb.iniciar === 'function') {
         servidorWeb.iniciar();
+    }
+    if (typeof servidorWeb.registrarCallbackNuevoToken === 'function') {
+        servidorWeb.registrarCallbackNuevoToken(desplegarUnidadEnCaliente);
     }
 
     await database.conectarBaseDatos();
     await restaurarMemoriaTopologica();
 
-    console.log(`[ENJAMBRE] Desplegando ${tokensConfigurados.length} unidades de reconocimiento (Modo Stealth)...`);
+    const tokensEnv = obtenerTokensEntorno();
+    const tokensBd = await database.cargarTokensDinamicos();
+    const listaUnificada = [...tokensEnv, ...tokensBd];
 
-    for (let i = 0; i < tokensConfigurados.length; i++) {
-        const { indice, token } = tokensConfigurados[i];
-        const explorador = crearUnidadExploradora(indice);
-        clientesInstanciados.add(explorador);
+    if (listaUnificada.length === 0) {
+        console.warn('[AVISO] No hay tokens en variables de entorno. Puedes añadirlos desde el Panel Web en Telemetría.');
+        return;
+    }
 
-        try {
-            await explorador.login(token);
-            if (i < tokensConfigurados.length - 1) {
-                await delay(DELAY_DESPLIEGUE_MS);
-            }
-        } catch (error) {
-            console.error(`[FALLO DE INFILTRACIÓN] Token inválido o revocado en la unidad #${indice}: ${error.message}`);
-            clientesInstanciados.delete(explorador);
-            try { explorador.destroy(); } catch (_) {}
+    console.log(`[ENJAMBRE] Desplegando ${listaUnificada.length} unidades de reconocimiento (Modo Stealth)...`);
+
+    for (let i = 0; i < listaUnificada.length; i++) {
+        const { token, sector } = listaUnificada[i];
+        const res = await desplegarUnidadEnCaliente(token, sector || `Explorador #${i + 1}`);
+        if (res.exito && i < listaUnificada.length - 1) {
+            await delay(DELAY_DESPLIEGUE_MS);
         }
     }
 }
