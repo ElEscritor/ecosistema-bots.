@@ -65,10 +65,11 @@ async function conectarBaseDatos() {
             asegurarIndiceSeguro(dbCollection, { userId: 1 }, { background: true }),
             asegurarIndiceSeguro(dbCollection, { ultimoAlias: 'text' }, { background: true }),
             asegurarIndiceSeguro(dbCollection, { totalInfracciones: -1 }, { background: true }),
-            asegurarIndiceSeguro(dbCollection, { primerFichaje: -1 }, { background: true })
+            asegurarIndiceSeguro(dbCollection, { primerFichaje: -1 }, { background: true }),
+            asegurarIndiceSeguro(dbCollection, { actualizadoEn: -1 }, { background: true })
         ]);
 
-        console.log('[SISTEMA] Clúster MongoDB enlazado (Blacklist + Memoria Topológica + DVR).');
+        console.log('[SISTEMA] Clúster MongoDB enlazado (Blacklist + Memoria Estelar + Enjambre Dinámico).');
         return dbCollection;
     })();
 
@@ -81,11 +82,6 @@ function verificarConexion() {
     }
 }
 
-/**
- * Registra o actualiza el expediente de un infractor o sujeto perfilado.
- * Si esSoloOsint = true, no infla artificialmente el contador de infracciones de ataque,
- * pero guarda toda la evidencia y actualiza el historial inmutable de alias (historialAliases).
- */
 async function ficharInfractor(
     userId,
     userTag,
@@ -120,7 +116,8 @@ async function ficharInfractor(
                     perfiladoAutomatico: []
                 },
                 $set: {
-                    ultimoAlias: aliasLimpio
+                    ultimoAlias: aliasLimpio,
+                    actualizadoEn: timestampActual
                 },
                 $addToSet: {
                     historialAliases: aliasLimpio
@@ -153,8 +150,8 @@ async function obtenerExpedientes(filtro = {}) {
         const queryFiltro = (filtro && typeof filtro === 'object') ? filtro : {};
         return await dbCollection
             .find(queryFiltro)
-            .sort({ totalInfracciones: -1, primerFichaje: -1 })
-            .limit(600)
+            .sort({ actualizadoEn: -1, totalInfracciones: -1, primerFichaje: -1 })
+            .limit(800)
             .toArray();
     } catch (error) {
         console.error('[ERROR BD] Fallo en obtenerExpedientes:', error.message);
@@ -210,7 +207,7 @@ async function actualizarNotaOSINT(userId, nota) {
         const notaSaneada = typeof nota === 'string' ? nota.slice(0, 10000) : '';
         await dbCollection.updateOne(
             { userId: String(userId).trim() },
-            { $set: { notasAnalista: notaSaneada } }
+            { $set: { notasAnalista: notaSaneada, actualizadoEn: new Date().toISOString() } }
         );
         return true;
     } catch (error) {
@@ -224,13 +221,15 @@ async function inyectarObjetivoManual(userId) {
     const idLimpio = String(userId).trim();
     if (!/^\d{17,20}$/.test(idLimpio)) return false;
 
+    const ahora = new Date().toISOString();
     try {
         await dbCollection.updateOne(
             { userId: idLimpio },
             {
+                $set: { actualizadoEn: ahora },
                 $setOnInsert: {
                     ultimoAlias: 'Identidad Desconocida',
-                    primerFichaje: new Date().toISOString(),
+                    primerFichaje: ahora,
                     notasAnalista: '[ INYECCIÓN MANUAL ] Pendiente de perfilado.',
                     perfiladoAutomatico: [],
                     historialAliases: [],
@@ -267,6 +266,7 @@ async function importarMatriz(usuariosArray) {
                 updateOne: {
                     filter: { userId: cleanId },
                     update: {
+                        $set: { actualizadoEn: timestampActual },
                         $setOnInsert: {
                             ultimoAlias: String(user.ultimoAlias || user.username || 'Identidad Desconocida').trim(),
                             primerFichaje: user.primerFichaje || user.fecha || timestampActual,
@@ -292,16 +292,12 @@ async function importarMatriz(usuariosArray) {
     }
 }
 
-/**
- * Guarda en MongoDB el estado completo del radar: servidores (incluyendo estado Ceniza),
- * usuarios activos, interacciones, invitaciones, etiquetas personalizadas, Watchlist VIP y DVR.
- */
 async function guardarSnapshotRed(snapshotData) {
     if (!topologyCollection || !snapshotData) return false;
     try {
         const updateDoc = {
             actualizadoEn: new Date().toISOString(),
-            servidores: Array.isArray(snapshotData.servidores) ? snapshotData.servidores.slice(0, 600) : [],
+            servidores: Array.isArray(snapshotData.servidores) ? snapshotData.servidores.slice(0, 800) : [],
             usuarios: Array.isArray(snapshotData.usuarios) ? snapshotData.usuarios.slice(0, 2500) : [],
             interacciones: Array.isArray(snapshotData.interacciones) ? snapshotData.interacciones.slice(0, 3000) : [],
             bitacoraDvr: Array.isArray(snapshotData.bitacoraDvr) ? snapshotData.bitacoraDvr.slice(-250) : []
@@ -338,6 +334,45 @@ async function cargarSnapshotRed() {
     }
 }
 
+/**
+ * Guarda un token explorador añadido desde la interfaz web para que persista en MongoDB.
+ */
+async function guardarTokenDinamico(tokenStr, etiquetaSector = 'General') {
+    if (!topologyCollection || !tokenStr) return false;
+    const cleanToken = String(tokenStr).replace(/^(Bot|Bearer)\s+/i, '').trim();
+    if (cleanToken.length < 40) return false;
+
+    try {
+        await topologyCollection.updateOne(
+            { _id: 'SWARM_DYNAMIC_TOKENS' },
+            {
+                $addToSet: {
+                    tokens: {
+                        token: cleanToken,
+                        sector: String(etiquetaSector || 'General').slice(0, 30),
+                        agregadoEn: new Date().toISOString()
+                    }
+                }
+            },
+            { upsert: true }
+        );
+        return true;
+    } catch (error) {
+        console.error('[ERROR BD] Fallo al guardar token dinámico:', error.message);
+        return false;
+    }
+}
+
+async function cargarTokensDinamicos() {
+    if (!topologyCollection) return [];
+    try {
+        const doc = await topologyCollection.findOne({ _id: 'SWARM_DYNAMIC_TOKENS' });
+        return Array.isArray(doc?.tokens) ? doc.tokens : [];
+    } catch (_) {
+        return [];
+    }
+}
+
 async function cerrarBaseDatos() {
     try {
         await client.close();
@@ -363,5 +398,7 @@ module.exports = {
     importarMatriz,
     guardarSnapshotRed,
     cargarSnapshotRed,
+    guardarTokenDinamico,
+    cargarTokensDinamicos,
     cerrarBaseDatos
 };
