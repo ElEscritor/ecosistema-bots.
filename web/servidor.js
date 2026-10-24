@@ -1215,7 +1215,8 @@ app.get('/api/intel/:id', autenticar, async (req, res) => {
 
     try {
         const resultado = await intelExterna.consultarPerfilExternoCompleto(userId, true);
-
+        await database.guardarIntelExternaUsuario(userId, null, resultado);
+        
         // Si la API del VPS 5604 reveló servidores donde ejecutó comandos (ej. .cbot en servidor NBM),
         // los agregamos automáticamente a la memoria del radar para iluminarlos en el Mapa Estelar
         if (resultado.vpsSquads?.detectado && Array.isArray(resultado.vpsSquads.registros)) {
