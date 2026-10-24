@@ -1,7 +1,7 @@
 'use strict';
 
 /* ==========================================================================
-   MÓDULO DE INTELIGENCIA Y PERFILADO OSINT 2.0 (DIALECTOS + SNOWFLAKE + PII)
+   MÓDULO DE INTELIGENCIA Y PERFILADO OSINT 3.0 (PAÍS + REGIÓN + CIUDAD + UTC)
    Archivo: modulos/modulo_osint.js
    ========================================================================== */
 
@@ -17,46 +17,156 @@ const LISTA_NEGACIONES = [
     'broma', 'sarcasmo', 'mentira', 'ni que fuera', 'no tengo', 'ojalá tener', 'ojala tener'
 ];
 
-// 1. DICCIONARIO DE HUELLA DIALECTAL POR PAÍS (Inferencia pasiva por modismos)
+// 1. DICCIONARIO DE CIUDADES Y REGIONES EXPLÍCITAS -> PAÍS Y REGIÓN EXACTA
+const GAZETTEER_CIUDADES_REGIONES = {
+    // México
+    'cdmx': { pais: 'México', region: 'Centro / Valle de México (UTC-6)' },
+    'df': { pais: 'México', region: 'Centro / Valle de México (UTC-6)' },
+    'edomex': { pais: 'México', region: 'Centro / Valle de México (UTC-6)' },
+    'puebla': { pais: 'México', region: 'Centro-Sur (UTC-6)' },
+    'queretaro': { pais: 'México', region: 'Bajío / Centro (UTC-6)' },
+    'leon': { pais: 'México', region: 'Bajío / Guanajuato (UTC-6)' },
+    'guanajuato': { pais: 'México', region: 'Bajío (UTC-6)' },
+    'guadalajara': { pais: 'México', region: 'Occidente / Jalisco (UTC-6)' },
+    'jalisco': { pais: 'México', region: 'Occidente / Jalisco (UTC-6)' },
+    'monterrey': { pais: 'México', region: 'Noreste / Nuevo León (UTC-6)' },
+    'nuevo leon': { pais: 'México', region: 'Noreste / Nuevo León (UTC-6)' },
+    'tamaulipas': { pais: 'México', region: 'Noreste / Frontera (UTC-6)' },
+    'coahuila': { pais: 'México', region: 'Norte (UTC-6)' },
+    'chihuahua': { pais: 'México', region: 'Norte (UTC-6)' },
+    'juarez': { pais: 'México', region: 'Frontera Norte / Chihuahua (UTC-6)' },
+    'sinaloa': { pais: 'México', region: 'Noroeste / Pacífico (UTC-7)' },
+    'culiacan': { pais: 'México', region: 'Noroeste / Sinaloa (UTC-7)' },
+    'mazatlan': { pais: 'México', region: 'Noroeste / Sinaloa (UTC-7)' },
+    'sonora': { pais: 'México', region: 'Noroeste / Pacífico (UTC-7)' },
+    'hermosillo': { pais: 'México', region: 'Noroeste / Sonora (UTC-7)' },
+    'tijuana': { pais: 'México', region: 'Noroeste Extremo / Baja California (UTC-8)' },
+    'mexicali': { pais: 'México', region: 'Noroeste Extremo / Baja California (UTC-8)' },
+    'veracruz': { pais: 'México', region: 'Golfo / Oriente (UTC-6)' },
+    'merida': { pais: 'México', region: 'Península de Yucatán (UTC-6)' },
+    'yucatan': { pais: 'México', region: 'Península de Yucatán (UTC-6)' },
+    'cancun': { pais: 'México', region: 'Sureste / Quintana Roo (UTC-5)' },
+
+    // España
+    'madrid': { pais: 'España', region: 'Comunidad de Madrid / Centro (CET)' },
+    'barcelona': { pais: 'España', region: 'Cataluña / Noreste (CET)' },
+    'cataluña': { pais: 'España', region: 'Cataluña / Noreste (CET)' },
+    'valencia': { pais: 'España', region: 'Comunidad Valenciana / Levante (CET)' },
+    'alicante': { pais: 'España', region: 'Comunidad Valenciana / Levante (CET)' },
+    'sevilla': { pais: 'España', region: 'Andalucía / Sur (CET)' },
+    'malaga': { pais: 'España', region: 'Andalucía / Costa del Sol (CET)' },
+    'cadiz': { pais: 'España', region: 'Andalucía / Sur (CET)' },
+    'granada': { pais: 'España', region: 'Andalucía Oriental (CET)' },
+    'andalucia': { pais: 'España', region: 'Andalucía / Sur (CET)' },
+    'bilbao': { pais: 'España', region: 'País Vasco / Norte (CET)' },
+    'galicia': { pais: 'España', region: 'Galicia / Noroeste (CET)' },
+    'vigo': { pais: 'España', region: 'Galicia / Noroeste (CET)' },
+    'asturias': { pais: 'España', region: 'Asturias / Norte (CET)' },
+    'zaragoza': { pais: 'España', region: 'Aragón (CET)' },
+    'murcia': { pais: 'España', region: 'Región de Murcia / Sureste (CET)' },
+    'canarias': { pais: 'España', region: 'Islas Canarias (WET / UTC+0)' },
+    'tenerife': { pais: 'España', region: 'Islas Canarias / Tenerife (WET / UTC+0)' },
+    'las palmas': { pais: 'España', region: 'Islas Canarias / Gran Canaria (WET / UTC+0)' },
+
+    // Argentina y Uruguay
+    'buenos aires': { pais: 'Argentina', region: 'AMBA / Provincia de Buenos Aires (UTC-3)' },
+    'baires': { pais: 'Argentina', region: 'AMBA / Buenos Aires (UTC-3)' },
+    'caba': { pais: 'Argentina', region: 'Capital Federal / CABA (UTC-3)' },
+    'cordoba': { pais: 'Argentina', region: 'Región Centro / Córdoba (UTC-3)' },
+    'rosario': { pais: 'Argentina', region: 'Santa Fe / Litoral (UTC-3)' },
+    'santa fe': { pais: 'Argentina', region: 'Litoral / Santa Fe (UTC-3)' },
+    'mendoza': { pais: 'Argentina', region: 'Cuyo / Mendoza (UTC-3)' },
+    'tucuman': { pais: 'Argentina', region: 'Noroeste / Tucumán (UTC-3)' },
+    'salta': { pais: 'Argentina', region: 'Noroeste / Salta (UTC-3)' },
+    'mar del plata': { pais: 'Argentina', region: 'Costa Atlántica / PBA (UTC-3)' },
+    'montevideo': { pais: 'Uruguay', region: 'Montevideo / Sur (UTC-3)' },
+
+    // Colombia
+    'bogota': { pais: 'Colombia', region: 'Cundinamarca / Altiplano Andino (UTC-5)' },
+    'medellin': { pais: 'Colombia', region: 'Antioquia / Región Paisa (UTC-5)' },
+    'antioquia': { pais: 'Colombia', region: 'Antioquia / Región Paisa (UTC-5)' },
+    'cali': { pais: 'Colombia', region: 'Valle del Cauca / Pacífico (UTC-5)' },
+    'barranquilla': { pais: 'Colombia', region: 'Costa Caribe / Atlántico (UTC-5)' },
+    'cartagena': { pais: 'Colombia', region: 'Costa Caribe / Bolívar (UTC-5)' },
+    'bucaramanga': { pais: 'Colombia', region: 'Santander / Oriente (UTC-5)' },
+
+    // Chile, Perú, Venezuela
+    'santiago': { pais: 'Chile', region: 'Región Metropolitana (UTC-3/UTC-4)' },
+    'valparaiso': { pais: 'Chile', region: 'Zona Central / Valparaíso (UTC-3/UTC-4)' },
+    'concepcion': { pais: 'Chile', region: 'Zona Centro-Sur / Biobío (UTC-3/UTC-4)' },
+    'lima': { pais: 'Perú', region: 'Lima Metropolitana / Costa Central (UTC-5)' },
+    'arequipa': { pais: 'Perú', region: 'Sur / Arequipa (UTC-5)' },
+    'trujillo': { pais: 'Perú', region: 'Costa Norte / La Libertad (UTC-5)' },
+    'caracas': { pais: 'Venezuela', region: 'Región Capital (UTC-4)' },
+    'maracaibo': { pais: 'Venezuela', region: 'Occidente / Zulia (UTC-4)' },
+    'valencia venezuela': { pais: 'Venezuela', region: 'Región Central / Carabobo (UTC-4)' }
+};
+
+// 2. MATRIZ DIALECTAL CON SUB-REGIONES Y CORRELACIÓN HORARIA UTC
 const DICCIONARIO_DIALECTOS = [
     {
         pais: 'México',
-        husosEsperados: [0, 1, 2, 3, 4, 5, 19, 20, 21, 22, 23],
-        regex: /\b(wey|weyes|nmms|no mames|chido|alv|neta|carnal|morro|morra|feria|chamba|jalar|pedo|pinche|vato|banda|ahorita|simon|nel)\b/gi
+        husosEsperados: [0, 1, 2, 3, 4, 5, 6, 19, 20, 21, 22, 23],
+        regex: /\b(wey|weyes|nmms|no mames|chido|alv|neta|carnal|morro|morra|feria|chamba|jalar|pedo|pinche|vato|banda|ahorita|simon|nel|chale|valedor|chilango|plebe|plebes|fierro|machin|huerco|raza|cura)\b/gi,
+        subregiones: [
+            { nombre: 'Noroeste / Pacífico (Sinaloa, Sonora, BC)', regex: /\b(plebe|plebes|fierro|machin|bato|cura)\b/i },
+            { nombre: 'Norte / Noreste (Monterrey, Nuevo León)', regex: /\b(huerco|huerca|raza|chiriwillo|compare)\b/i },
+            { nombre: 'Centro / Valle de México (CDMX, Edomex)', regex: /\b(chale|valedor|chilango|carnal|banda|cámara)\b/i }
+        ]
     },
     {
         pais: 'España',
-        husosEsperados: [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22],
-        regex: /\b(chaval|chavales|ostia|hostia|currar|curro|colega|flipar|flipas|mola|mogollon|gilipollas|capullo|pavo|pavos|guay|pillar|tio|tia)\b/gi
+        husosEsperados: [9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23],
+        regex: /\b(chaval|chavales|ostia|hostia|currar|curro|colega|flipar|flipas|mola|mogollon|gilipollas|capullo|pavo|pavos|guay|pillar|tio|tia|quillo|illo|pisha|miarma|guagua|chacho|muyayo|mazo|renta|tronco|tete|nano)\b/gi,
+        subregiones: [
+            { nombre: 'Andalucía / Sur', regex: /\b(quillo|illo|pisha|miarma|coraje|malaje)\b/i },
+            { nombre: 'Islas Canarias (UTC+0)', regex: /\b(guagua|chacho|muyayo|fleje|baifo)\b/i },
+            { nombre: 'Comunidad de Madrid / Centro', regex: /\b(mazo|renta|tronco|cani)\b/i },
+            { nombre: 'Levante / Cataluña (Valencia, Barcelona)', regex: /\b(tete|nano|nen|apa)\b/i }
+        ]
     },
     {
         pais: 'Argentina / Uruguay',
         husosEsperados: [0, 1, 2, 3, 15, 16, 17, 18, 19, 20, 21, 22, 23],
-        regex: /\b(boludo|boluda|pelotudo|quilombo|laburo|laburar|bondi|pibe|piba|chabon|guita|morfar|re piola|mal ahi|posta|chamuyo|birra)\b/gi
+        regex: /\b(boludo|boluda|pelotudo|quilombo|laburo|laburar|bondi|pibe|piba|chabon|guita|morfar|re piola|mal ahi|posta|chamuyo|birra|culiau|culiado|nero|guri|ta luego|bo)\b/gi,
+        subregiones: [
+            { nombre: 'Córdoba / Región Centro (Argentina)', regex: /\b(culiau|culiado|nero| fernet)\b/i },
+            { nombre: 'Uruguay / Litoral', regex: /\b(guri|gurises|salado|championes)\b/i },
+            { nombre: 'AMBA / Buenos Aires (Argentina)', regex: /\b(bondi|chabon|guita|morfar|quilombo)\b/i }
+        ]
     },
     {
         pais: 'Chile',
         husosEsperados: [0, 1, 2, 3, 16, 17, 18, 19, 20, 21, 22, 23],
-        regex: /\b(weon|weona|wn|qlo|culiao|cachai|fome|pololo|polola|cuatico|bacan|altiro|caleta|paco|filete|piola)\b/gi
+        regex: /\b(weon|weona|wn|qlo|culiao|cachai|fome|pololo|polola|cuatico|bacan|altiro|caleta|paco|filete|piola)\b/gi,
+        subregiones: []
     },
     {
         pais: 'Colombia',
         husosEsperados: [0, 1, 2, 3, 4, 17, 18, 19, 20, 21, 22, 23],
-        regex: /\b(parce|parcero|gonorrea|chimba|bacano|marica|mk|camello|camellar|pola|rumbear|vaina|pelao|berraco)\b/gi
+        regex: /\b(parce|parcero|gonorrea|chimba|bacano|marica|mk|camello|camellar|pola|rumbear|vaina|pelao|berraco|ome|sisas|paila|rola|eche|monda|cule)\b/gi,
+        subregiones: [
+            { nombre: 'Antioquia / Medellín (Región Paisa)', regex: /\b(ome|parce|parcero|sisas|chimba)\b/i },
+            { nombre: 'Costa Caribe (Barranquilla, Cartagena)', regex: /\b(eche|monda|cule| cuadros)\b/i },
+            { nombre: 'Bogotá / Altiplano Cundiboyacense', regex: /\b(paila|rola|rolo|chino|sumerce)\b/i }
+        ]
     },
     {
         pais: 'Perú',
         husosEsperados: [0, 1, 2, 3, 4, 17, 18, 19, 20, 21, 22, 23],
-        regex: /\b(causa|causita|pata|jato|chibolo|chibola|palta|que palta|asado|bravazo|chevere|chamba|fercho|jerma)\b/gi
+        regex: /\b(causa|causita|pata|jato|chibolo|chibola|palta|que palta|asado|bravazo|chevere|fercho|jerma|oe|pe)\b/gi,
+        subregiones: []
     },
     {
         pais: 'Venezuela',
         husosEsperados: [0, 1, 2, 3, 16, 17, 18, 19, 20, 21, 22, 23],
-        regex: /\b(chamo|chama|marico|vaina|arrecho|burda|coroto|ladilla|pajuo|beta|fino|pana|mamaguevo|mmg)\b/gi
+        regex: /\b(chamo|chama|marico|arrecho|burda|coroto|ladilla|pajuo|beta|pana|mamaguevo|mmg|verga|mardicion)\b/gi,
+        subregiones: [
+            { nombre: 'Occidente / Zulia (Maracaibo)', regex: /\b(verga|mardicion|molleja|trimardito)\b/i }
+        ]
     }
 ];
 
-// 2. REGLAS FLEXIBLES DE EXTRACCIÓN PII (Sin exigir mayúsculas ni ortografía perfecta)
 const REGLAS_PII_AVANZADAS = [
     {
         etiqueta: 'DEMOGRAFÍA_EDAD',
@@ -68,11 +178,11 @@ const REGLAS_PII_AVANZADAS = [
     },
     {
         etiqueta: 'GEOLOCALIZACIÓN_DECLARADA',
-        regex: /(?:^|\s)(?:soy de|vivo en|aca en|acá en|aqui en|aquí en|mi pais es|mi país es)\s+([a-záéíóúñ]{3,18}(?:\s+[a-záéíóúñ]{3,18})?)(?=\s|[.,;!?]|$)/gi
+        regex: /(?:^|\s)(?:soy de|vivo en|aca en|acá en|aqui en|aquí en|mi pais es|mi país es|mi ciudad es)\s+([a-záéíóúñ]{3,18}(?:\s+[a-záéíóúñ]{2,18})?)(?=\s|[.,;!?]|$)/gi
     },
     {
         etiqueta: 'GENTILICIO_ORIGEN',
-        regex: /\b(?:soy|nosotros somos)\s+(mexican[oa]|español[a]?|argentin[oa]|chilen[oa]|colombian[oa]|peruan[oa]|venezolan[oa]|uruguay[oa]|ecuatorian[oa]|bolivian[oa]|paraguay[oa]|dominican[oa]|puertorriqueñ[oa])\b/gi
+        regex: /\b(?:soy|nosotros somos)\s+(mexican[oa]|español[a]?|argentin[oa]|chilen[oa]|colombian[oa]|peruan[oa]|venezolan[oa]|uruguay[oa]|ecuatorian[oa]|bolivian[oa]|paraguay[oa]|dominican[oa]|puertorriqueñ[oa]|regi[oa]|tapat[ií][oa]|chilang[oa]|paisa|costeñ[oa]|porteñ[oa]|cordob[eé]s[a]?|andaluz[a]?|canari[oa]|catal[aá]n[a]?)\b/gi
     },
     {
         etiqueta: 'IDENTIDAD_NOMBRE_REAL',
@@ -84,6 +194,24 @@ const REGLAS_PII_AVANZADAS = [
     }
 ];
 
+const MAPA_GENTILICIOS = {
+    'regio': { pais: 'México', region: 'Noreste / Monterrey (Nuevo León)' },
+    'regia': { pais: 'México', region: 'Noreste / Monterrey (Nuevo León)' },
+    'tapatio': { pais: 'México', region: 'Occidente / Guadalajara (Jalisco)' },
+    'tapatia': { pais: 'México', region: 'Occidente / Guadalajara (Jalisco)' },
+    'chilango': { pais: 'México', region: 'Centro / CDMX' },
+    'chilanga': { pais: 'México', region: 'Centro / CDMX' },
+    'paisa': { pais: 'Colombia', region: 'Antioquia / Medellín' },
+    'porteño': { pais: 'Argentina', region: 'AMBA / Buenos Aires' },
+    'porteña': { pais: 'Argentina', region: 'AMBA / Buenos Aires' },
+    'cordobes': { pais: 'Argentina', region: 'Córdoba' },
+    'andaluz': { pais: 'España', region: 'Andalucía / Sur' },
+    'andaluza': { pais: 'España', region: 'Andalucía / Sur' },
+    'canario': { pais: 'España', region: 'Islas Canarias (UTC+0)' },
+    'canaria': { pais: 'España', region: 'Islas Canarias (UTC+0)' },
+    'catalan': { pais: 'España', region: 'Cataluña' }
+};
+
 const PALABRAS_EXCLUIDAS_LUGAR_O_NOMBRE = new Set([
     'aqui', 'aca', 'alla', 'alli', 'casa', 'nadie', 'alguien', 'todos', 'broma',
     'verdad', 'mentira', 'server', 'discord', 'clan', 'squad', 'raid', 'mejor',
@@ -92,7 +220,37 @@ const PALABRAS_EXCLUIDAS_LUGAR_O_NOMBRE = new Set([
 
 const colaTrabajosOSINT = [];
 let procesandoCola = false;
-const memoriaHuellaReciente = new Map(); // Evita guardar la misma entidad repetida del mismo usuario cada minuto
+const memoriaHuellaReciente = new Map();
+
+function normalizarSinTildes(str) {
+    return String(str || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim();
+}
+
+/**
+ * Estima la sub-región horaria cuando disponemos de las horas activas UTC del usuario
+ * y ya sabemos su país probable (por ejemplo, diferenciar Tijuana UTC-8 de CDMX UTC-6).
+ */
+function estimarRegionPorCurvaHoraria(pais, horasActivas = [], horaActualUtc = 18) {
+    const muestra = Array.isArray(horasActivas) && horasActivas.length > 0 ? horasActivas : [horaActualUtc];
+    const tieneActividadMadrugadaTardia = muestra.some(h => h >= 6 && h <= 9); // 06-09 UTC = 22h-01h en UTC-8, pero 00h-03h en UTC-6
+
+    if (pais === 'México') {
+        if (tieneActividadMadrugadaTardia && !muestra.some(h => h >= 12 && h <= 15)) {
+            return 'Huso Pacífico / Noroeste (Sinaloa, Sonora, BC — UTC-7/UTC-8)';
+        }
+        return 'Huso Centro / Golfo (CDMX, Monterrey, Guadalajara — UTC-6)';
+    }
+    if (pais === 'España') {
+        const trasnochaUtc = muestra.some(h => h === 2 || h === 3);
+        if (trasnochaUtc) return 'Horario Atlántico / Canarias o Nocturno Peninsular (WET/CET)';
+        return 'Huso Peninsular (Madrid, Barcelona, Andalucía — CET)';
+    }
+    return null;
+}
 
 async function procesarColaOSINT() {
     if (procesandoCola || colaTrabajosOSINT.length === 0) return;
@@ -108,8 +266,16 @@ async function procesarColaOSINT() {
                 trabajo.casoId,
                 trabajo.evidenciaHTML,
                 trabajo.servidorOrigen,
-                true // esSoloOsint = true (no infla infracciones de ataques)
+                true
             );
+
+            if (trabajo.perfilEstructurado) {
+                await database.guardarPerfilOsintEstructurado(
+                    trabajo.authorId,
+                    trabajo.authorTag,
+                    trabajo.perfilEstructurado
+                );
+            }
 
             if (respuestaBD === 'BD Inactiva' || respuestaBD.startsWith('Error de escritura')) {
                 throw new Error(respuestaBD);
@@ -161,10 +327,6 @@ function evaluarContextoLexico(mensajeMinusculas, coincidenciaMinusculas) {
     return true;
 }
 
-/**
- * Extrae matemáticamente la fecha de creación de la cuenta desde el Snowflake ID de Discord
- * sin realizar ninguna petición HTTP a la API.
- */
 function analizarAntiguedadSnowflake(userId) {
     try {
         const cleanId = String(userId || '').replace(/\D/g, '');
@@ -200,7 +362,7 @@ function extraerPatronVida(timestamp) {
     return { hora, texto: `Hora UTC: ${String(hora).padStart(2, '0')}:00 - ${ciclo}` };
 }
 
-function empaquetarEvidenciaEstructurada(authorTag, authorId, apodoServidor, infoSnowflake, vectores, entidades, contextoSaneado, metadataVida) {
+function empaquetarEvidenciaEstructurada(authorTag, authorId, apodoServidor, infoSnowflake, perfilEstructurado, vectores, entidades, contextoSaneado, metadataVida) {
     const tagSeguro = escaparHTML(authorTag);
     const idSeguro = escaparHTML(authorId);
     const apodoSeguro = escaparHTML(apodoServidor || 'Sin apodo local');
@@ -212,11 +374,18 @@ function empaquetarEvidenciaEstructurada(authorTag, authorId, apodoServidor, inf
         ? `${infoSnowflake.fechaCreacion} (${infoSnowflake.diasAntiguedad} días) ${infoSnowflake.esBurner ? '[!] ALERTA CUENTA BURNER RECIENTE' : ''}`
         : 'Desconocida';
 
+    const geoResumen = [
+        perfilEstructurado.pais ? `País: ${perfilEstructurado.pais}` : null,
+        perfilEstructurado.region ? `Región: ${perfilEstructurado.region}` : null,
+        perfilEstructurado.ciudadDeclarada ? `Localidad: ${perfilEstructurado.ciudadDeclarada}` : null
+    ].filter(Boolean).join(' // ') || 'En análisis';
+
     let paqueteHTML = `<div style="font-family: var(--font-mono); font-size: 0.84rem; line-height: 1.45;">`;
-    paqueteHTML += `<div style="color: var(--accent-rz); font-weight: bold; margin-bottom: 0.5rem; text-transform: uppercase;">[ DOSSIER DE PERFILADO OSINT 2.0 ]</div>`;
+    paqueteHTML += `<div style="color: var(--accent-rz); font-weight: bold; margin-bottom: 0.5rem; text-transform: uppercase;">[ DOSSIER DE PERFILADO OSINT 3.0 // GEOLOCALIZACIÓN REGIONAL ]</div>`;
     paqueteHTML += `<div style="color: var(--text-main); margin-bottom: 0.9rem;">`;
     paqueteHTML += `<strong>Sujeto:</strong> ${tagSeguro} <span style="color: var(--text-muted);">(${idSeguro})</span><br>`;
     paqueteHTML += `<strong>Apodo en Servidor:</strong> <span style="color: var(--text-secondary);">${apodoSeguro}</span><br>`;
+    paqueteHTML += `<strong>Ubicación Deducida:</strong> <span style="color: #00f0ff; font-weight: bold;">${escaparHTML(geoResumen)}</span><br>`;
     paqueteHTML += `<strong>Creación de Cuenta (Snowflake):</strong> <span style="color: ${infoSnowflake?.esBurner ? 'var(--accent-red)' : 'var(--accent-green)'};">${escaparHTML(textoBurner)}</span><br>`;
     paqueteHTML += `<strong>Vectores Detectados:</strong> <span style="color: var(--accent-amber);">${vectoresSeguros}</span><br>`;
     paqueteHTML += `<strong>Patrón Cronobiológico:</strong> <span style="color: var(--accent-info);">${metadataSegura}</span><br>`;
@@ -240,18 +409,30 @@ function empaquetarEvidenciaEstructurada(authorTag, authorId, apodoServidor, inf
     return paqueteHTML;
 }
 
-async function ejecutar(message, contextoCache) {
-    if (!message?.content) return false;
+async function ejecutar(message, contextoCache, horasActivasUsuario = []) {
+    if (!message?.content) return null;
 
     const contenidoSinRuido = limpiarRuido(message.content);
-    if (contenidoSinRuido.length < 3) return false;
+    if (contenidoSinRuido.length < 3) return null;
 
     const contenidoMinusculas = contenidoSinRuido.toLowerCase();
     const patronVida = extraerPatronVida(message.createdTimestamp);
     const etiquetasDisparadas = new Set();
     const entidadesProcesadas = [];
 
-    // 1. Evaluar Reglas PII explícitas (Edad, Nacimiento, Ubicación, Gentilicio, Nombre, Redes)
+    const perfilEstructurado = {
+        pais: null,
+        region: null,
+        ciudadDeclarada: null,
+        husoEstimado: null,
+        edad: null,
+        nombreReal: null,
+        gentilicio: null,
+        modismos: [],
+        redes: []
+    };
+
+    // 1. Evaluar Reglas PII explícitas y Gazetteer de Ciudades/Regiones
     for (const regla of REGLAS_PII_AVANZADAS) {
         const regex = new RegExp(regla.regex.source, 'gi');
         let match;
@@ -261,41 +442,77 @@ async function ejecutar(message, contextoCache) {
             if (!capturado) continue;
             if (!evaluarContextoLexico(contenidoMinusculas, fullMatch.toLowerCase())) continue;
 
-            const capLower = capturado.toLowerCase();
-            if (PALABRAS_EXCLUIDAS_LUGAR_O_NOMBRE.has(capLower)) continue;
+            const capNorm = normalizarSinTildes(capturado);
+            if (PALABRAS_EXCLUIDAS_LUGAR_O_NOMBRE.has(capNorm)) continue;
 
-            const dedupKey = `${message.author.id}:${regla.etiqueta}:${capLower}`;
+            const dedupKey = `${message.author.id}:${regla.etiqueta}:${capNorm}`;
             if (memoriaHuellaReciente.has(dedupKey)) continue;
             memoriaHuellaReciente.set(dedupKey, Date.now());
+
+            if (regla.etiqueta === 'GEOLOCALIZACIÓN_DECLARADA') {
+                perfilEstructurado.ciudadDeclarada = capturado;
+                if (GAZETTEER_CIUDADES_REGIONES[capNorm]) {
+                    perfilEstructurado.pais = GAZETTEER_CIUDADES_REGIONES[capNorm].pais;
+                    perfilEstructurado.region = GAZETTEER_CIUDADES_REGIONES[capNorm].region;
+                }
+            } else if (regla.etiqueta === 'GENTILICIO_ORIGEN') {
+                perfilEstructurado.gentilicio = capturado;
+                if (MAPA_GENTILICIOS[capNorm]) {
+                    perfilEstructurado.pais = MAPA_GENTILICIOS[capNorm].pais;
+                    perfilEstructurado.region = MAPA_GENTILICIOS[capNorm].region;
+                }
+            } else if (regla.etiqueta === 'DEMOGRAFÍA_EDAD') {
+                perfilEstructurado.edad = `${capturado} años`;
+            } else if (regla.etiqueta === 'IDENTIDAD_NOMBRE_REAL') {
+                perfilEstructurado.nombreReal = capturado;
+            } else if (regla.etiqueta === 'VINCULACIÓN_REDES') {
+                perfilEstructurado.redes.push(fullMatch);
+            }
 
             etiquetasDisparadas.add(regla.etiqueta);
             entidadesProcesadas.push({
                 etiqueta: regla.etiqueta,
                 valorNormalizado: `${capturado} (en "${fullMatch}")`,
-                confianza: 88
+                confianza: 92
             });
         }
     }
 
-    // 2. Evaluar Huella Dialectal (Jerga regional + validación de huso horario UTC)
+    // 2. Evaluar Matriz Dialectal por País + Sub-Región + Correlación UTC
     for (const dialecto of DICCIONARIO_DIALECTOS) {
         const regex = new RegExp(dialecto.regex.source, 'gi');
         const matches = contenidoSinRuido.match(regex);
         if (matches && matches.length > 0) {
             const unicos = [...new Set(matches.map(m => m.toLowerCase()))];
-            // Para evitar ruido, exigir al menos 2 modismos en el mensaje o 1 modismo muy específico con horario coherente
             const horarioCoherente = dialecto.husosEsperados.includes(patronVida.hora);
-            if (unicos.length >= 2 || (unicos.length === 1 && horarioCoherente)) {
-                const dedupKey = `${message.author.id}:DIALECTO:${dialecto.pais}`;
+
+            // Detectar si alguno de los modismos pertenece a una sub-región específica
+            let subregionDetectada = null;
+            for (const sub of (dialecto.subregiones || [])) {
+                if (sub.regex.test(contenidoSinRuido)) {
+                    subregionDetectada = sub.nombre;
+                    break;
+                }
+            }
+
+            if (unicos.length >= 2 || subregionDetectada || (unicos.length === 1 && horarioCoherente)) {
+                const dedupKey = `${message.author.id}:DIALECTO:${dialecto.pais}:${subregionDetectada || 'GEN'}`;
                 const ultimoRegistro = memoriaHuellaReciente.get(dedupKey) || 0;
-                // Solo registrar huella dialectal del mismo país una vez cada 12 horas por usuario
-                if (Date.now() - ultimoRegistro > 43200000) {
+
+                if (Date.now() - ultimoRegistro > 21600000) {
                     memoriaHuellaReciente.set(dedupKey, Date.now());
-                    etiquetasDisparadas.add('HUELLA_DIALECTAL_PAÍS');
+                    const regionPorCurva = estimarRegionPorCurvaHoraria(dialecto.pais, horasActivasUsuario, patronVida.hora);
+                    const regionFinal = subregionDetectada || regionPorCurva || 'Huso Compatible UTC';
+
+                    perfilEstructurado.pais = perfilEstructurado.pais || dialecto.pais;
+                    perfilEstructurado.region = perfilEstructurado.region || regionFinal;
+                    perfilEstructurado.modismos.push(...unicos);
+
+                    etiquetasDisparadas.add('HUELLA_REGIONAL_UTC');
                     entidadesProcesadas.push({
-                        etiqueta: 'HUELLA_DIALECTAL_PAÍS',
-                        valorNormalizado: `Probable origen ${dialecto.pais} (Modismos: ${unicos.join(', ')})`,
-                        confianza: unicos.length >= 2 && horarioCoherente ? 92 : 76
+                        etiqueta: 'HUELLA_REGIONAL_UTC',
+                        valorNormalizado: `${dialecto.pais} — ${regionFinal} (Modismos: ${unicos.join(', ')})`,
+                        confianza: subregionDetectada && horarioCoherente ? 95 : (unicos.length >= 2 && horarioCoherente ? 90 : 78)
                     });
                 }
             }
@@ -303,10 +520,9 @@ async function ejecutar(message, contextoCache) {
     }
 
     if (etiquetasDisparadas.size === 0 || entidadesProcesadas.length === 0) {
-        return false;
+        return null;
     }
 
-    // Purga preventiva del mapa de deduplicación
     if (memoriaHuellaReciente.size > 4000) {
         memoriaHuellaReciente.clear();
     }
@@ -337,6 +553,7 @@ async function ejecutar(message, contextoCache) {
         message.author.id,
         apodoServidor,
         infoSnowflake,
+        perfilEstructurado,
         listaEtiquetas,
         entidadesProcesadas,
         contextoSaneado,
@@ -350,15 +567,16 @@ async function ejecutar(message, contextoCache) {
     colaTrabajosOSINT.push({
         authorId: message.author.id,
         authorTag: message.author.tag,
-        accionContexto: `Perfilado OSINT 2.0 [${listaEtiquetas.join(', ')}]`,
+        accionContexto: `Perfilado OSINT 3.0 [${listaEtiquetas.join(', ')}]`,
         casoId: casoIdGenerado,
         evidenciaHTML,
         servidorOrigen,
+        perfilEstructurado,
         reintentos: 0
     });
 
     procesarColaOSINT();
-    return true;
+    return perfilEstructurado;
 }
 
 module.exports = { ejecutar, analizarAntiguedadSnowflake };
