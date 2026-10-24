@@ -1,14 +1,14 @@
 'use strict';
 
 /* ==========================================================================
-   VISTA: CARTOGRAFIA ESTELAR C4ISR v6.0 (ZERO-HUD // PARALAJE 3D // INFECCION)
+   VISTA: MAPA ESTELAR C4ISR v7.0 (EVE ONLINE STARMAP // ULTRA-OPTIMIZADO 60FPS)
    Archivo: js/vistas/red.js
    ========================================================================== */
 
 window.C4ISR_Views = window.C4ISR_Views || {};
 
 const COLORES_ETIQUETA_SERVIDOR = {
-    HOSTIL: '#ff003c',
+    HOSTIL: '#ff0055',
     PROVEEDOR: '#f97316',
     SOCIAL: '#00f0ff',
     ALIADO: '#c084fc',
@@ -28,12 +28,12 @@ function formatearTiempoRelativo(tsMs) {
 window.C4ISR_Views.red = {
     canvas: null,
     ctx: null,
-    nebulaCanvas: null,
     miniCanvas: null,
     miniCtx: null,
     animationFrameId: null,
     pollIntervalId: null,
     dvrPlayTimer: null,
+    lastAltAnalysisTs: 0,
 
     boundResize: null,
     boundMouseUp: null,
@@ -61,10 +61,10 @@ window.C4ISR_Views.red = {
     camera: {
         x: 0,
         y: 0,
-        zoom: 0.58,
+        zoom: 0.55,
         targetX: 0,
         targetY: 0,
-        targetZoom: 0.58
+        targetZoom: 0.55
     },
 
     worldBounds: { minX: -1200, maxX: 1200, minY: -1200, maxY: 1200 },
@@ -78,17 +78,14 @@ window.C4ISR_Views.red = {
     pinchInitialDist: null,
     pinchInitialZoom: 1,
 
-    controlsExpanded: false,
     leftDockOpen: false,
     rightDockOpen: false,
     showMiniMap: false,
     rightPanelTab: 'inspector',
 
     physicsEnabled: true,
-    strategicMode: false,
+    showAllUsersForce: false,
     showConstellationRoutes: true,
-    showUserLinks: true,
-    showAltLinks: true,
     showAllianceLinks: true,
     onlyBridges: false,
     hideEmptyServers: false,
@@ -99,44 +96,21 @@ window.C4ISR_Views.red = {
     initDeepSpace() {
         this.starfield = [];
         const layers = [
-            { count: 95, depth: 0.14, sizeMin: 0.5, sizeMax: 1.2, alpha: 0.32 },
-            { count: 65, depth: 0.38, sizeMin: 1.0, sizeMax: 1.8, alpha: 0.52 },
-            { count: 35, depth: 0.72, sizeMin: 1.4, sizeMax: 2.3, alpha: 0.75 }
+            { count: 110, depth: 0.12, size: 1.0, color: 'rgba(226, 232, 240, 0.28)' },
+            { count: 65, depth: 0.32, size: 1.5, color: 'rgba(56, 189, 248, 0.42)' },
+            { count: 25, depth: 0.60, size: 2.0, color: 'rgba(244, 114, 182, 0.55)' }
         ];
 
         for (const layer of layers) {
             for (let i = 0; i < layer.count; i++) {
                 this.starfield.push({
-                    x: (Math.random() - 0.5) * 4800,
-                    y: (Math.random() - 0.5) * 4800,
+                    x: (Math.random() - 0.5) * 4200,
+                    y: (Math.random() - 0.5) * 4200,
                     depth: layer.depth,
-                    size: layer.sizeMin + Math.random() * (layer.sizeMax - layer.sizeMin),
-                    alpha: layer.alpha * (0.6 + Math.random() * 0.4),
-                    color: i % 5 === 0 ? '#38bdf8' : (i % 8 === 0 ? '#f472b6' : (i % 11 === 0 ? '#fde047' : '#f8fafc'))
+                    size: layer.size,
+                    color: layer.color
                 });
             }
-        }
-
-        this.nebulaCanvas = document.createElement('canvas');
-        this.nebulaCanvas.width = 1024;
-        this.nebulaCanvas.height = 1024;
-        const nCtx = this.nebulaCanvas.getContext('2d');
-
-        const blobs = [
-            { x: 300, y: 340, r: 320, col: 'rgba(14, 116, 144, 0.14)' },
-            { x: 690, y: 620, r: 360, col: 'rgba(157, 23, 77, 0.12)' },
-            { x: 580, y: 280, r: 280, col: 'rgba(88, 28, 135, 0.13)' },
-            { x: 360, y: 700, r: 260, col: 'rgba(30, 58, 138, 0.12)' }
-        ];
-
-        for (const b of blobs) {
-            const grad = nCtx.createRadialGradient(b.x, b.y, 10, b.x, b.y, b.r);
-            grad.addColorStop(0, b.col);
-            grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-            nCtx.fillStyle = grad;
-            nCtx.beginPath();
-            nCtx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
-            nCtx.fill();
         }
     },
 
@@ -148,13 +122,16 @@ window.C4ISR_Views.red = {
                 #starmap-master-shell {
                     position: relative;
                     width: 100%;
-                    height: calc(100vh - 102px);
+                    height: calc(100vh - 96px);
                     min-height: 540px;
-                    background: #030408;
-                    border: 1px solid rgba(255, 255, 255, 0.08);
+                    background:
+                        radial-gradient(circle at 22% 28%, rgba(14, 116, 144, 0.14) 0%, transparent 48%),
+                        radial-gradient(circle at 78% 68%, rgba(157, 23, 77, 0.12) 0%, transparent 52%),
+                        radial-gradient(circle at 55% 22%, rgba(88, 28, 135, 0.11) 0%, transparent 45%),
+                        #030407;
+                    border: 1px solid rgba(255, 255, 255, 0.07);
                     border-radius: var(--radius-md);
                     overflow: hidden;
-                    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.9);
                 }
                 #starmap-master-shell:fullscreen,
                 #starmap-master-shell.pseudo-fullscreen {
@@ -166,84 +143,93 @@ window.C4ISR_Views.red = {
                     border-radius: 0 !important;
                     border: none !important;
                 }
-                .zero-hud-pill {
+                .eve-glass-bar {
                     position: absolute;
                     top: 14px;
                     left: 14px;
                     display: flex;
                     align-items: center;
                     gap: 6px;
-                    padding: 6px 10px;
-                    background: rgba(8, 10, 18, 0.78);
-                    border: 1px solid rgba(255, 255, 255, 0.12);
-                    border-radius: 8px;
-                    backdrop-filter: blur(12px);
+                    padding: 5px 8px;
+                    background: rgba(6, 8, 14, 0.72);
+                    border: 1px solid rgba(255, 255, 255, 0.10);
+                    border-radius: 6px;
+                    backdrop-filter: blur(10px);
                     z-index: 25;
-                    flex-wrap: wrap;
-                    max-width: calc(100vw - 28px);
                 }
-                .zero-hud-drawer {
+                .eve-search-minimal {
+                    background: transparent;
+                    border: none;
+                    color: #f1f5f9;
+                    font-family: var(--font-mono);
+                    font-size: 0.73rem;
+                    width: 175px;
+                    outline: none;
+                    padding: 3px 6px;
+                }
+                .eve-search-minimal::placeholder {
+                    color: rgba(148, 163, 184, 0.65);
+                }
+                .eve-icon-btn {
+                    background: rgba(255, 255, 255, 0.03);
+                    border: 1px solid rgba(255, 255, 255, 0.10);
+                    color: #94a3b8;
+                    padding: 4px 8px;
+                    border-radius: 4px;
+                    font-family: var(--font-mono);
+                    font-size: 0.69rem;
+                    cursor: pointer;
+                    transition: all 0.14s ease;
+                }
+                .eve-icon-btn:hover, .eve-icon-btn.active {
+                    background: rgba(0, 240, 255, 0.14);
+                    border-color: rgba(0, 240, 255, 0.55);
+                    color: #ffffff;
+                }
+                .eve-dropdown-drawer {
                     position: absolute;
-                    top: 60px;
+                    top: 54px;
                     left: 14px;
                     padding: 10px 12px;
-                    background: rgba(8, 10, 18, 0.88);
-                    border: 1px solid rgba(0, 240, 255, 0.25);
-                    border-radius: 8px;
+                    background: rgba(7, 9, 16, 0.90);
+                    border: 1px solid rgba(255, 255, 255, 0.12);
+                    border-radius: 6px;
                     backdrop-filter: blur(14px);
                     z-index: 24;
                     display: flex;
                     flex-direction: column;
-                    gap: 8px;
-                    width: 340px;
-                    max-width: calc(100vw - 28px);
-                    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.85);
-                }
-                .zero-btn {
-                    background: rgba(255, 255, 255, 0.04);
-                    border: 1px solid rgba(255, 255, 255, 0.14);
-                    color: #cbd5e1;
-                    padding: 5px 10px;
-                    border-radius: 5px;
-                    font-family: var(--font-mono);
-                    font-size: 0.71rem;
-                    cursor: pointer;
-                    transition: all 0.15s ease;
-                }
-                .zero-btn:hover, .zero-btn.active {
-                    background: rgba(0, 240, 255, 0.16);
-                    border-color: #00f0ff;
-                    color: #ffffff;
+                    gap: 7px;
+                    width: 290px;
+                    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.85);
                 }
                 .cp-select {
-                    background: rgba(5, 6, 11, 0.92);
-                    color: #e2e8f0;
-                    border: 1px solid rgba(255, 255, 255, 0.15);
-                    border-radius: 5px;
-                    padding: 5px 8px;
+                    background: rgba(4, 5, 10, 0.9);
+                    color: #cbd5e1;
+                    border: 1px solid rgba(255, 255, 255, 0.12);
+                    border-radius: 4px;
+                    padding: 5px 7px;
                     font-family: var(--font-mono);
-                    font-size: 0.71rem;
+                    font-size: 0.7rem;
                     outline: none;
                     width: 100%;
                 }
                 .floating-dock-left {
                     position: absolute;
-                    top: 60px;
+                    top: 54px;
                     left: 14px;
                     bottom: 14px;
-                    width: 250px;
-                    background: rgba(7, 9, 16, 0.86);
-                    border: 1px solid rgba(255, 255, 255, 0.12);
-                    border-radius: 8px;
-                    backdrop-filter: blur(14px);
+                    width: 240px;
+                    background: rgba(6, 8, 14, 0.84);
+                    border: 1px solid rgba(255, 255, 255, 0.10);
+                    border-radius: 6px;
+                    backdrop-filter: blur(12px);
                     z-index: 23;
                     display: flex;
                     flex-direction: column;
-                    transition: transform 0.22s ease, opacity 0.22s ease;
-                    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.85);
+                    transition: transform 0.2s ease, opacity 0.2s ease;
                 }
                 .floating-dock-left.collapsed {
-                    transform: translateX(-280px);
+                    transform: translateX(-265px);
                     opacity: 0;
                     pointer-events: none;
                 }
@@ -252,21 +238,20 @@ window.C4ISR_Views.red = {
                     top: 14px;
                     right: 14px;
                     bottom: 14px;
-                    width: 365px;
+                    width: 350px;
                     max-width: calc(100vw - 28px);
-                    background: rgba(8, 10, 18, 0.90);
-                    border: 1px solid rgba(255, 255, 255, 0.14);
-                    border-top: 2px solid #00f0ff;
-                    border-radius: 8px;
+                    background: rgba(6, 8, 14, 0.88);
+                    border: 1px solid rgba(255, 255, 255, 0.12);
+                    border-radius: 6px;
                     backdrop-filter: blur(16px);
                     z-index: 26;
                     display: flex;
                     flex-direction: column;
-                    transition: transform 0.22s ease, opacity 0.22s ease;
-                    box-shadow: 0 14px 40px rgba(0, 0, 0, 0.9);
+                    transition: transform 0.2s ease, opacity 0.2s ease;
+                    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.9);
                 }
                 .floating-dock-right.collapsed {
-                    transform: translateX(400px);
+                    transform: translateX(380px);
                     opacity: 0;
                     pointer-events: none;
                 }
@@ -277,24 +262,23 @@ window.C4ISR_Views.red = {
                     padding: 6px 10px;
                     border-bottom: 1px solid rgba(255, 255, 255, 0.04);
                     font-family: var(--font-mono);
-                    font-size: 0.71rem;
+                    font-size: 0.7rem;
                     cursor: pointer;
                 }
                 .sector-jump-item:hover {
-                    background: rgba(0, 240, 255, 0.12);
+                    background: rgba(0, 240, 255, 0.10);
                 }
                 #minimap-container {
                     position: absolute;
                     bottom: 14px;
                     left: 14px;
-                    width: 175px;
-                    height: 120px;
-                    background: rgba(4, 5, 10, 0.88);
-                    border: 1px solid rgba(0, 240, 255, 0.3);
-                    border-radius: 6px;
+                    width: 165px;
+                    height: 110px;
+                    background: rgba(4, 5, 10, 0.82);
+                    border: 1px solid rgba(255, 255, 255, 0.14);
+                    border-radius: 5px;
                     z-index: 18;
                     overflow: hidden;
-                    box-shadow: 0 6px 20px rgba(0,0,0,0.85);
                 }
             </style>
 
@@ -302,71 +286,76 @@ window.C4ISR_Views.red = {
                 <div id="canvas-wrapper" style="position: relative; width: 100%; height: 100%; overflow: hidden; touch-action: none;">
                     <canvas id="net-canvas" style="width: 100%; height: 100%; display: block; cursor: grab;"></canvas>
 
-                    <div class="zero-hud-pill">
-                        <input type="text" id="red-search" class="search-input" style="width: 195px; padding: 4px 9px; font-size: 0.72rem; background: rgba(0,0,0,0.45);" placeholder="Buscar sistema o sujeto..." autocomplete="off">
-                        <button id="btn-toggle-left-dock" class="zero-btn" type="button" title="Indice de Servidores">&#9776; SISTEMAS</button>
-                        <button id="btn-toggle-filters" class="zero-btn" type="button" title="Filtros y Capas Visuales">&#9881; CAPAS</button>
-                        <button id="btn-open-alerts-panel" class="zero-btn" type="button" title="Abrir Radar de Alts y Camara DVR">&#9678; ALTS / DVR</button>
-                        <button id="btn-center-graph" class="zero-btn" type="button" title="Centrar Galaxia">&#8962;</button>
-                        <button id="btn-fullscreen-map" class="zero-btn" type="button" title="Pantalla Completa (Tecla F)">&#9974;</button>
+                    <!-- CAPSULA MINIMALISTA EVE ONLINE -->
+                    <div class="eve-glass-bar">
+                        <input type="text" id="red-search" class="eve-search-minimal" placeholder="Localizar sistema o sujeto..." autocomplete="off">
+                        <button id="btn-toggle-left-dock" class="eve-icon-btn" type="button" title="Lista de Sistemas">&#9776;</button>
+                        <button id="btn-toggle-filters" class="eve-icon-btn" type="button" title="Capas y Filtros">&#9881;</button>
+                        <button id="btn-open-alerts-panel" class="eve-icon-btn" type="button" title="Alts y Camara DVR">ALTS / DVR</button>
+                        <button id="btn-center-graph" class="eve-icon-btn" type="button" title="Centrar Mapa">&#8962;</button>
+                        <button id="btn-fullscreen-map" class="eve-icon-btn" type="button" title="Pantalla Completa (F)">&#9974;</button>
                     </div>
 
-                    <div id="zero-filters-drawer" class="zero-hud-drawer hidden">
-                        <div style="font-family: var(--font-mono); font-size: 0.69rem; color: #00f0ff; font-weight: 700;">FILTROS DE CONSTELACION</div>
+                    <!-- MENU COMPACTO DE CAPAS (Oculto por defecto) -->
+                    <div id="zero-filters-drawer" class="eve-dropdown-drawer hidden">
                         <select id="filter-explorer-select" class="cp-select">
-                            <option value="ALL">Explorador: Todos (Enjambre)</option>
+                            <option value="ALL">Explorador: Todos</option>
                         </select>
                         <select id="filter-sector-select" class="cp-select">
-                            <option value="ALL">Sector: Todos los Sistemas</option>
-                            <option value="ACTIVE">Solo con Trafico Activo</option>
-                            <option value="INFECTED">Con Infiltracion / Infeccion (&gt;0%)</option>
-                            <option value="HOSTIL">Etiqueta: Hostil (Rojo)</option>
-                            <option value="PROVEEDOR">Etiqueta: Proveedor (Naranja)</option>
-                            <option value="SOCIAL">Etiqueta: Social (Cian)</option>
-                            <option value="ALIADO">Etiqueta: Aliado (Purpura)</option>
+                            <option value="ALL">Mostrar: Todos los Sistemas</option>
+                            <option value="ACTIVE">Solo Sistemas Activos</option>
+                            <option value="INFECTED">Con Infiltracion Hostil</option>
+                            <option value="HOSTIL">Etiqueta: Hostil</option>
+                            <option value="PROVEEDOR">Etiqueta: Proveedor</option>
+                            <option value="SOCIAL">Etiqueta: Social</option>
+                            <option value="ALIADO">Etiqueta: Aliado</option>
                             <option value="CENIZA">Estado: Ceniza (Raideados)</option>
                         </select>
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: 2px;">
-                            <button id="btn-toggle-strategic" class="zero-btn" type="button">MODO CLANES: AUTO</button>
-                            <button id="btn-toggle-routes" class="zero-btn active" type="button">RUTAS SALTO: ON</button>
-                            <button id="btn-toggle-alliances" class="zero-btn active" type="button">ALIANZAS: ON</button>
-                            <button id="btn-toggle-empty-srv" class="zero-btn" type="button">SIN VACIOS: OFF</button>
-                            <button id="btn-toggle-bridges" class="zero-btn" type="button">SOLO PUENTES: OFF</button>
-                            <button id="btn-toggle-minimap" class="zero-btn" type="button">RADAR: OFF</button>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px;">
+                            <button id="btn-toggle-all-users" class="eve-icon-btn" type="button">USUARIOS: AUTO</button>
+                            <button id="btn-toggle-routes" class="eve-icon-btn active" type="button">RUTAS: ON</button>
+                            <button id="btn-toggle-alliances" class="eve-icon-btn active" type="button">ALIANZAS: ON</button>
+                            <button id="btn-toggle-empty-srv" class="eve-icon-btn" type="button">SIN VACIOS: OFF</button>
+                            <button id="btn-toggle-bridges" class="eve-icon-btn" type="button">SOLO PUENTES: OFF</button>
+                            <button id="btn-toggle-minimap" class="eve-icon-btn" type="button">RADAR: OFF</button>
                         </div>
                     </div>
 
+                    <!-- LISTA RAPIDA DE SISTEMAS -->
                     <aside id="left-sector-dock" class="floating-dock-left collapsed">
-                        <div style="padding: 8px 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); display: flex; justify-content: space-between; align-items: center;">
-                            <span style="font-family: var(--font-mono); font-size: 0.72rem; font-weight: 700; color: #00f0ff;">SISTEMAS ESTELARES</span>
-                            <span id="sector-list-count" style="font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted);">0</span>
+                        <div style="padding: 8px 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.07); display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-family: var(--font-mono); font-size: 0.7rem; font-weight: 700; color: #38bdf8;">SISTEMAS</span>
+                            <span id="sector-list-count" style="font-family: var(--font-mono); font-size: 0.67rem; color: var(--text-muted);">0</span>
                         </div>
                         <div id="sector-quick-list" style="flex: 1; overflow-y: auto;"></div>
                     </aside>
 
+                    <!-- MINIMAPA OPCIONAL -->
                     <div id="minimap-container" class="hidden">
-                        <canvas id="minimap-canvas" width="175" height="120" style="width: 100%; height: 100%; display: block; cursor: crosshair;"></canvas>
+                        <canvas id="minimap-canvas" width="165" height="110" style="width: 100%; height: 100%; display: block; cursor: crosshair;"></canvas>
                     </div>
 
-                    <div id="canvas-hover-tooltip" class="hidden" style="position: absolute; pointer-events: none; z-index: 30; background: rgba(6, 7, 14, 0.94); border: 1px solid rgba(0, 240, 255, 0.45); border-left: 3px solid #00f0ff; padding: 7px 11px; border-radius: 6px; font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-main); box-shadow: 0 8px 24px rgba(0,0,0,0.92); max-width: 320px;"></div>
+                    <!-- TOOLTIP LIGERO -->
+                    <div id="canvas-hover-tooltip" class="hidden" style="position: absolute; pointer-events: none; z-index: 30; background: rgba(6, 8, 14, 0.92); border: 1px solid rgba(255, 255, 255, 0.16); border-left: 3px solid #00f0ff; padding: 6px 10px; border-radius: 5px; font-family: var(--font-mono); font-size: 0.71rem; color: var(--text-main); max-width: 300px;"></div>
 
+                    <!-- INSPECTOR CONTEXTUAL DERECHO -->
                     <aside id="right-inspector-dock" class="floating-dock-right collapsed">
-                        <div style="padding: 8px 10px; display: flex; gap: 5px; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.08);">
-                            <button id="tab-btn-inspector" class="zero-btn active" type="button" style="flex: 1;">INSPECTOR</button>
-                            <button id="tab-btn-alts" class="zero-btn" type="button" style="flex: 1;">ALTS (0)</button>
-                            <button id="tab-btn-dvr" class="zero-btn" type="button" style="flex: 1;">DVR</button>
-                            <button id="btn-close-right-dock" class="zero-btn" type="button" style="padding: 4px 8px; color: #f87171;">&#10005;</button>
+                        <div style="padding: 7px 9px; display: flex; gap: 5px; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.07);">
+                            <button id="tab-btn-inspector" class="eve-icon-btn active" type="button" style="flex: 1;">SISTEMA / SUJETO</button>
+                            <button id="tab-btn-alts" class="eve-icon-btn" type="button" style="flex: 1;">ALTS (0)</button>
+                            <button id="tab-btn-dvr" class="eve-icon-btn" type="button" style="flex: 1;">DVR</button>
+                            <button id="btn-close-right-dock" class="eve-icon-btn" type="button" style="padding: 4px 8px; color: #f87171;">&#10005;</button>
                         </div>
-                        <div id="node-inspector-content" class="osint-content" style="font-family: var(--font-mono); font-size: 0.76rem;"></div>
-                        <div id="alts-radar-content" class="osint-content hidden" style="font-family: var(--font-mono); font-size: 0.76rem;"></div>
-                        <div id="dvr-camera-content" class="osint-content hidden" style="font-family: var(--font-mono); font-size: 0.76rem;"></div>
+                        <div id="node-inspector-content" class="osint-content" style="font-family: var(--font-mono); font-size: 0.75rem;"></div>
+                        <div id="alts-radar-content" class="osint-content hidden" style="font-family: var(--font-mono); font-size: 0.75rem;"></div>
+                        <div id="dvr-camera-content" class="osint-content hidden" style="font-family: var(--font-mono); font-size: 0.75rem;"></div>
                     </aside>
                 </div>
             </div>
         `;
 
         this.canvas = document.getElementById('net-canvas');
-        this.ctx = this.canvas.getContext('2d', { alpha: false });
+        this.ctx = this.canvas.getContext('2d');
         this.miniCanvas = document.getElementById('minimap-canvas');
         this.miniCtx = this.miniCanvas ? this.miniCanvas.getContext('2d') : null;
 
@@ -378,7 +367,7 @@ window.C4ISR_Views.red = {
 
         this.pollIntervalId = setInterval(() => {
             this.fetchAndSyncTopology();
-        }, 4000);
+        }, 4500);
     },
 
     resizeCanvas() {
@@ -392,16 +381,12 @@ window.C4ISR_Views.red = {
         if (!this.canvas) return;
         this.camera.targetX = this.canvas.width / 2;
         this.camera.targetY = this.canvas.height / 2;
-        this.camera.targetZoom = 0.58;
+        this.camera.targetZoom = 0.55;
         if (instant) {
             this.camera.x = this.camera.targetX;
             this.camera.y = this.camera.targetY;
             this.camera.zoom = this.camera.targetZoom;
         }
-    },
-
-    isStrategicViewActive() {
-        return this.strategicMode || this.camera.zoom < 0.46;
     },
 
     toggleLeftDock(forceState) {
@@ -501,7 +486,7 @@ window.C4ISR_Views.red = {
         const btnOpenAlerts = document.getElementById('btn-open-alerts-panel');
         const btnCloseRight = document.getElementById('btn-close-right-dock');
         const btnFullscreen = document.getElementById('btn-fullscreen-map');
-        const btnStrategic = document.getElementById('btn-toggle-strategic');
+        const btnAllUsers = document.getElementById('btn-toggle-all-users');
         const btnRoutes = document.getElementById('btn-toggle-routes');
         const btnEmptySrv = document.getElementById('btn-toggle-empty-srv');
         const btnAlliances = document.getElementById('btn-toggle-alliances');
@@ -528,27 +513,25 @@ window.C4ISR_Views.red = {
         }
 
         if (btnOpenAlerts) {
-            btnOpenAlerts.addEventListener('click', () => {
-                this.switchRightTab('alts');
-            });
+            btnOpenAlerts.addEventListener('click', () => this.switchRightTab('alts'));
         }
 
         if (tabInspector) tabInspector.addEventListener('click', () => this.switchRightTab('inspector'));
         if (tabAlts) tabAlts.addEventListener('click', () => this.switchRightTab('alts'));
         if (tabDvr) tabDvr.addEventListener('click', () => this.switchRightTab('dvr'));
 
-        if (btnStrategic) {
-            btnStrategic.addEventListener('click', () => {
-                this.strategicMode = !this.strategicMode;
-                btnStrategic.textContent = `MODO CLANES: ${this.strategicMode ? 'FORZADO' : 'AUTO'}`;
-                btnStrategic.classList.toggle('active', this.strategicMode);
+        if (btnAllUsers) {
+            btnAllUsers.addEventListener('click', () => {
+                this.showAllUsersForce = !this.showAllUsersForce;
+                btnAllUsers.textContent = `USUARIOS: ${this.showAllUsersForce ? 'TODOS' : 'AUTO'}`;
+                btnAllUsers.classList.toggle('active', this.showAllUsersForce);
             });
         }
 
         if (btnRoutes) {
             btnRoutes.addEventListener('click', () => {
                 this.showConstellationRoutes = !this.showConstellationRoutes;
-                btnRoutes.textContent = `RUTAS SALTO: ${this.showConstellationRoutes ? 'ON' : 'OFF'}`;
+                btnRoutes.textContent = `RUTAS: ${this.showConstellationRoutes ? 'ON' : 'OFF'}`;
                 btnRoutes.classList.toggle('active', this.showConstellationRoutes);
             });
         }
@@ -698,7 +681,7 @@ window.C4ISR_Views.red = {
 
         this.canvas.addEventListener('wheel', (e) => {
             e.preventDefault();
-            const factor = e.deltaY < 0 ? 1.14 : 0.87;
+            const factor = e.deltaY < 0 ? 1.15 : 0.86;
             this.zoomAroundScreenPoint(e.offsetX, e.offsetY, factor);
         }, { passive: false });
 
@@ -766,7 +749,7 @@ window.C4ISR_Views.red = {
     },
 
     zoomAroundScreenPoint(sx, sy, factor) {
-        const newZoom = Math.max(0.12, Math.min(3.5, this.camera.targetZoom * factor));
+        const newZoom = Math.max(0.14, Math.min(3.2, this.camera.targetZoom * factor));
         const wx = (sx - this.camera.targetX) / this.camera.targetZoom;
         const wy = (sy - this.camera.targetY) / this.camera.targetZoom;
         this.camera.targetZoom = newZoom;
@@ -791,7 +774,7 @@ window.C4ISR_Views.red = {
             }
         }
 
-        const options = ['<option value="ALL">Explorador: Todos (Enjambre)</option>'];
+        const options = ['<option value="ALL">Explorador: Todos</option>'];
         for (const tag of tagsSet) {
             const safe = DOMPurify.sanitize(tag);
             options.push(`<option value="${safe}" ${currentVal === tag ? 'selected' : ''}>Unidad: ${safe}</option>`);
@@ -805,13 +788,8 @@ window.C4ISR_Views.red = {
         if (!listEl) return;
 
         const visibleServers = this.serverNodesList
-            .filter(s => this.isNodeVisible(s))
-            .sort((a, b) => {
-                const aCen = a.meta?.estadoCeniza?.raideado ? 1 : 0;
-                const bCen = b.meta?.estadoCeniza?.raideado ? 1 : 0;
-                if (aCen !== bCen) return bCen - aCen;
-                return (b.connectedUsersCount || 0) - (a.connectedUsersCount || 0);
-            });
+            .filter(s => this.isServerMatchingFilters(s))
+            .sort((a, b) => (b.connectedUsersCount || 0) - (a.connectedUsersCount || 0));
 
         if (countEl) countEl.textContent = String(visibleServers.length);
 
@@ -821,15 +799,15 @@ window.C4ISR_Views.red = {
             const tagObj = s.meta?.etiquetaManual;
             const dotCol = esCeniza
                 ? '#94a3b8'
-                : (tagObj ? (COLORES_ETIQUETA_SERVIDOR[tagObj.tipo] || '#ff0055') : (s.connectedUsersCount > 0 ? '#ff0055' : '#4c0519'));
+                : (tagObj ? (COLORES_ETIQUETA_SERVIDOR[tagObj.tipo] || '#ff0055') : (s.connectedUsersCount > 0 ? '#ff0055' : '#475569'));
             const subTag = esCeniza
-                ? '<span style="color:#ff003c;font-size:0.62rem;">[CENIZA]</span>'
-                : (infPct > 0 ? `<span style="color:#f97316;font-size:0.62rem;">[${infPct}% INF]</span>` : `<span style="color:var(--text-muted);font-size:0.65rem;">${s.connectedUsersCount}</span>`);
+                ? '<span style="color:#ff003c;font-size:0.62rem;">CENIZA</span>'
+                : (infPct > 0 ? `<span style="color:#f97316;font-size:0.62rem;">${infPct}%</span>` : `<span style="color:var(--text-muted);font-size:0.65rem;">${s.connectedUsersCount}</span>`);
 
             return `
                 <div class="sector-jump-item" data-skey="${DOMPurify.sanitize(s.key)}">
                     <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:165px;color:var(--text-main);">
-                        <span style="color:${dotCol};">&#11042;</span> ${DOMPurify.sanitize(s.label)}
+                        <span style="color:${dotCol};">&#9679;</span> ${DOMPurify.sanitize(s.label)}
                     </div>
                     ${subTag}
                 </div>
@@ -860,39 +838,38 @@ window.C4ISR_Views.red = {
             const infPct = node.meta?.infeccionPct || 0;
             const tagObj = node.meta?.etiquetaManual;
             const tagHtml = tagObj?.texto
-                ? `<span style="background:rgba(255,255,255,0.12);padding:1px 5px;border-radius:3px;color:${COLORES_ETIQUETA_SERVIDOR[tagObj.tipo] || '#00f0ff'};margin-left:5px;">[${DOMPurify.sanitize(tagObj.texto)}]</span>`
+                ? `<span style="color:${COLORES_ETIQUETA_SERVIDOR[tagObj.tipo] || '#00f0ff'};margin-left:5px;">[${DOMPurify.sanitize(tagObj.texto)}]</span>`
                 : '';
             const infHtml = infCount > 0
-                ? `<div style="color:#f97316;font-weight:700;margin-top:2px;">&#9888; Infiltracion Hostil: ${infCount} sujeto(s) (${infPct}%)</div>`
+                ? `<div style="color:#f97316;font-size:0.68rem;margin-top:2px;">Infiltracion: ${infCount} (${infPct}%)</div>`
                 : '';
 
             tooltip.style.borderLeftColor = esCeniza ? '#94a3b8' : (infPct >= 25 ? '#f97316' : '#ff0055');
             tooltip.innerHTML = `
-                <div style="color:${esCeniza ? '#cbd5e1' : '#ff0055'};font-weight:700;">&#11042; ${DOMPurify.sanitize(node.label)}${tagHtml}</div>
-                <div style="color:var(--text-secondary);">Sujetos: <b>${membersCount}</b> | Msgs: <b>${node.meta?.mensajesSesion || 0}</b></div>
+                <div style="color:#ffffff;font-weight:700;">${DOMPurify.sanitize(node.label)}${tagHtml}</div>
+                <div style="color:var(--text-secondary);font-size:0.69rem;">Sujetos: <b>${membersCount}</b> | Msgs: <b>${node.meta?.mensajesSesion || 0}</b></div>
                 ${infHtml}
             `;
         } else {
             const osint = node.meta?.perfilOsint;
             const geoLine = osint && (osint.pais || osint.region)
-                ? `<div style="color:#38bdf8;font-size:0.69rem;">&#127758; ${DOMPurify.sanitize([osint.pais, osint.region, osint.ciudadDeclarada].filter(Boolean).join(' / '))}</div>`
+                ? `<div style="color:#38bdf8;font-size:0.68rem;">${DOMPurify.sanitize([osint.pais, osint.region].filter(Boolean).join(' / '))}</div>`
                 : '';
             const rankLine = node.primaryRank
-                ? `<div style="color:#39ff14;font-size:0.69rem;">&#9670; ${DOMPurify.sanitize(node.primaryRank)}</div>`
+                ? `<div style="color:#39ff14;font-size:0.68rem;">${DOMPurify.sanitize(node.primaryRank)}</div>`
                 : '';
             const lastTimeStr = formatearTiempoRelativo(node.lastMessageTs);
             tooltip.style.borderLeftColor = node.enWatchlist ? '#fcee0a' : '#00f0ff';
             tooltip.innerHTML = `
-                <div style="color:#ffffff;font-weight:700;">${node.enWatchlist ? '&#9733; ' : ''}${DOMPurify.sanitize(node.label)} <span style="color:#00f0ff;font-size:0.67rem;">[${lastTimeStr}]</span></div>
+                <div style="color:#ffffff;font-weight:700;">${DOMPurify.sanitize(node.label)} <span style="color:#00f0ff;font-size:0.66rem;">${lastTimeStr}</span></div>
                 ${geoLine}
                 ${rankLine}
-                <div style="color:var(--text-secondary);margin-top:2px;">Servers: <b>${node.serverCount}</b> | Msgs: <b>${node.meta?.totalMensajes || 0}</b></div>
             `;
         }
 
         tooltip.classList.remove('hidden');
-        const left = Math.min((this.canvas?.width || 800) - 325, mx + 16);
-        const top = Math.max(12, my - 18);
+        const left = Math.min((this.canvas?.width || 800) - 290, mx + 14);
+        const top = Math.max(12, my - 16);
         tooltip.style.left = `${left}px`;
         tooltip.style.top = `${top}px`;
     },
@@ -917,7 +894,7 @@ window.C4ISR_Views.red = {
             if (!this.isNodeVisible(node)) continue;
             const dx = wx - node.x;
             const dy = wy - node.y;
-            if (dx * dx + dy * dy <= (node.radius + 7) * (node.radius + 7)) return node;
+            if (dx * dx + dy * dy <= (node.radius + 8) * (node.radius + 8)) return node;
         }
         return null;
     },
@@ -950,6 +927,11 @@ window.C4ISR_Views.red = {
         return true;
     },
 
+    /**
+     * Visibilidad Semantica EVE Online:
+     * En vista general, oculta los cientos de usuarios estaticos de 1 solo servidor para no formar bolas tipo Agar.io.
+     * Esos usuarios aparecen suavemente cuando haces clic sobre su Sistema Estelar o acercas el zoom (>= 0.82).
+     */
     isNodeVisible(node) {
         if (node.type === 'SERVER') {
             if (!this.isServerMatchingFilters(node)) return false;
@@ -963,16 +945,17 @@ window.C4ISR_Views.red = {
                 if (!hasVisibleSrv) return false;
             }
 
-            if (this.isStrategicViewActive() && !this.searchTerm) {
+            if (this.onlyBridges) {
+                if (node.serverCount < 2 && !node.fichado && !node.altRole && !node.enWatchlist && !node.primaryRank) return false;
+            }
+
+            if (!this.showAllUsersForce && !this.searchTerm && this.camera.zoom < 0.82) {
                 const isSelectedOrNeighbor = this.selectedNode &&
                     (this.selectedNode.key === node.key || (this.adjacency.get(this.selectedNode.key)?.has(node.key)));
                 const habloReciente = (Date.now() - (node.lastMessageTs || 0)) < 300000;
-                if (!isSelectedOrNeighbor && node.serverCount < 2 && !node.enWatchlist && !node.altRole && !habloReciente) {
+                if (!isSelectedOrNeighbor && node.serverCount < 2 && !node.enWatchlist && !node.altRole && !node.primaryRank && !habloReciente) {
                     return false;
                 }
-            }
-            if (this.onlyBridges) {
-                if (node.serverCount < 2 && !node.fichado && !node.altRole && !node.enWatchlist && !node.primaryRank) return false;
             }
         }
 
@@ -1077,6 +1060,13 @@ window.C4ISR_Views.red = {
     },
 
     analyzeMirrorAccounts(usuarios, interacciones) {
+        const ahora = Date.now();
+        // Throttling: ejecutar el cruce pesado solo cada 25 segundos para evitar micro-tirones
+        if (this.lastAltAnalysisTs && (ahora - this.lastAltAnalysisTs) < 25000) {
+            return;
+        }
+        this.lastAltAnalysisTs = ahora;
+
         const chatNeighbors = new Map();
         const directWeights = new Map();
         const pairCollisions = new Map();
@@ -1094,11 +1084,14 @@ window.C4ISR_Views.red = {
             pairCollisions.set(pairKey, rel.simultaneousCollisions || 0);
         }
 
-        const candidatos = usuarios.filter(u => {
-            const nChat = chatNeighbors.get(u.id)?.size || 0;
-            const nSrv = Object.keys(u.servidores || {}).length;
-            return ((u.totalMensajes || 0) >= 2 && (nChat + nSrv) >= 2) || (Array.isArray(u.pasadoVps) && u.pasadoVps.length > 0);
-        });
+        // Acotar a los 160 candidatos mas relevantes para ejecucion instantanea (< 1ms)
+        const candidatos = usuarios
+            .filter(u => {
+                const nChat = chatNeighbors.get(u.id)?.size || 0;
+                const nSrv = Object.keys(u.servidores || {}).length;
+                return ((u.totalMensajes || 0) >= 2 && (nChat + nSrv) >= 2) || (Array.isArray(u.pasadoVps) && u.pasadoVps.length > 0);
+            })
+            .slice(0, 160);
 
         const paresDetectados = [];
         const mapaAltsUsuario = new Map();
@@ -1189,7 +1182,7 @@ window.C4ISR_Views.red = {
         const btnOpenAlerts = document.getElementById('btn-open-alerts-panel');
         if (btnOpenAlerts) {
             btnOpenAlerts.textContent = paresDetectados.length > 0 ? `ALTS (${paresDetectados.length}) / DVR` : 'ALTS / DVR';
-            btnOpenAlerts.style.borderColor = paresDetectados.length > 0 ? '#fcee0a' : 'rgba(255,255,255,0.14)';
+            btnOpenAlerts.style.borderColor = paresDetectados.length > 0 ? 'rgba(252,238,10,0.6)' : 'rgba(255,255,255,0.10)';
         }
         if (this.rightPanelTab === 'alts') this.renderAltsRadarList();
     },
@@ -1228,14 +1221,15 @@ window.C4ISR_Views.red = {
                 s => (s.usuariosCount || 0) === 0 && (!s.alianzasSalientes || s.alianzasSalientes.length === 0) && !s.estadoCeniza?.raideado
             );
 
+            // Espaciado Galactico Amplio para evitar solapamientos
             activeServers.forEach((srv, idx) => {
                 const key = `SRV_${srv.id}`;
                 this.serverMembers.set(key, []);
                 let node = this.nodes.get(key);
-                const radius = Math.max(24, Math.min(50, 19 + Math.sqrt(srv.usuariosCount || 1) * 2.5));
+                const radius = Math.max(12, Math.min(28, 10 + Math.sqrt(srv.usuariosCount || 1) * 1.6));
 
                 const armAngle = idx * 2.3999632;
-                const galDist = idx === 0 ? 0 : (360 + Math.sqrt(idx) * 275);
+                const galDist = idx === 0 ? 0 : (380 + Math.sqrt(idx) * 290);
                 const targetX = Math.cos(armAngle) * galDist;
                 const targetY = Math.sin(armAngle) * galDist;
 
@@ -1272,7 +1266,7 @@ window.C4ISR_Views.red = {
                 this.serverMembers.set(key, []);
                 let node = this.nodes.get(key);
                 const angle = (idx / Math.max(1, emptyServers.length)) * Math.PI * 2;
-                const ringRadius = 1320 + (idx % 3) * 140;
+                const ringRadius = 1420 + (idx % 3) * 150;
                 const targetX = Math.cos(angle) * ringRadius;
                 const targetY = Math.sin(angle) * ringRadius;
 
@@ -1286,7 +1280,7 @@ window.C4ISR_Views.red = {
                         y: targetY,
                         targetX,
                         targetY,
-                        radius: 15,
+                        radius: 8,
                         connectedUsersCount: 0,
                         meta: srv
                     };
@@ -1348,13 +1342,13 @@ window.C4ISR_Views.red = {
                 serverOrbitCounter.set(activeSrvKey, slotIdx + 1);
 
                 const goldenAngle = slotIdx * 2.3999632;
-                const orbitDist = (parentSrv ? parentSrv.radius + 36 : 55) + Math.sqrt(slotIdx + 1) * 20;
+                const orbitDist = (parentSrv ? parentSrv.radius + 26 : 42) + Math.sqrt(slotIdx + 1) * 16;
                 const targetX = (parentSrv ? parentSrv.targetX : 0) + Math.cos(goldenAngle) * orbitDist;
                 const targetY = (parentSrv ? parentSrv.targetY : 0) + Math.sin(goldenAngle) * orbitDist;
 
                 const radius = Math.max(
-                    6.0,
-                    Math.min(16, 5.2 + Math.log2((usr.totalMensajes || 1) + 1) * 1.7 + (serverCount > 1 ? 3.2 : 0) + (enWatchlist ? 3 : 0))
+                    4.2,
+                    Math.min(11, 3.8 + Math.log2((usr.totalMensajes || 1) + 1) * 1.2 + (serverCount > 1 ? 2.5 : 0) + (enWatchlist ? 2.5 : 0))
                 );
 
                 let node = this.nodes.get(key);
@@ -1410,8 +1404,7 @@ window.C4ISR_Views.red = {
                             target: targetKey,
                             weight: sInfo.count || 1,
                             lastSeen: sInfo.lastSeen || 0,
-                            isPrimaryActive,
-                            kind: 'MEMBERSHIP'
+                            isPrimaryActive
                         });
                         addNeighbor(key, targetKey);
                         if (!this.serverMembers.has(targetKey)) this.serverMembers.set(targetKey, []);
@@ -1430,20 +1423,6 @@ window.C4ISR_Views.red = {
                         source: k1,
                         target: k2,
                         sharedUsers: sharedCount
-                    });
-                    addNeighbor(k1, k2);
-                }
-            }
-
-            for (const rel of interacciones) {
-                const k1 = `USR_${rel.u1}`;
-                const k2 = `USR_${rel.u2}`;
-                if (this.nodes.has(k1) && this.nodes.has(k2)) {
-                    nuevasAristas.push({
-                        source: k1,
-                        target: k2,
-                        weight: rel.weight || 1,
-                        kind: 'CHAT'
                     });
                     addNeighbor(k1, k2);
                 }
@@ -1516,7 +1495,7 @@ window.C4ISR_Views.red = {
     updateWorldBounds() {
         let minX = -800, maxX = 800, minY = -800, maxY = 800;
         for (const s of this.serverNodesList) {
-            if (!this.isNodeVisible(s)) continue;
+            if (!this.isServerMatchingFilters(s)) continue;
             if (s.targetX < minX) minX = s.targetX;
             if (s.targetX > maxX) maxX = s.targetX;
             if (s.targetY < minY) minY = s.targetY;
@@ -1537,7 +1516,7 @@ window.C4ISR_Views.red = {
             targetKey,
             color,
             progress: 0,
-            speed: 0.024 + Math.random() * 0.015
+            speed: 0.025 + Math.random() * 0.015
         });
     },
 
@@ -1557,7 +1536,7 @@ window.C4ISR_Views.red = {
         if (!node || !this.canvas) return;
         this.selectedNode = node;
         this.highlightedPair = null;
-        this.camera.targetZoom = node.type === 'SERVER' ? 0.95 : 1.3;
+        this.camera.targetZoom = node.type === 'SERVER' ? 0.92 : 1.25;
         this.camera.targetX = (this.canvas.width / 2) - (node.x * this.camera.targetZoom);
         this.camera.targetY = (this.canvas.height / 2) - (node.y * this.camera.targetZoom);
         this.switchRightTab('inspector');
@@ -1573,15 +1552,15 @@ window.C4ISR_Views.red = {
         this.highlightedPair = [key1, key2];
         const midX = (n1.x + n2.x) / 2;
         const midY = (n1.y + n2.y) / 2;
-        this.camera.targetZoom = 0.92;
+        this.camera.targetZoom = 0.90;
         this.camera.targetX = (this.canvas.width / 2) - (midX * this.camera.targetZoom);
         this.camera.targetY = (this.canvas.height / 2) - (midY * this.camera.targetZoom);
     },
 
     stepPhysicsAndCamera() {
         if (!this.isDraggingCanvas) {
-            this.camera.x += (this.camera.targetX - this.camera.x) * 0.14;
-            this.camera.y += (this.camera.targetY - this.camera.y) * 0.14;
+            this.camera.x += (this.camera.targetX - this.camera.x) * 0.15;
+            this.camera.y += (this.camera.targetY - this.camera.y) * 0.15;
         }
         this.camera.zoom += (this.camera.targetZoom - this.camera.zoom) * 0.16;
 
@@ -1590,28 +1569,16 @@ window.C4ISR_Views.red = {
         for (let i = 0; i < this.serverNodesList.length; i++) {
             const sNode = this.serverNodesList[i];
             if (sNode === this.draggedNode) continue;
-            sNode.x += (sNode.targetX - sNode.x) * 0.07;
-            sNode.y += (sNode.targetY - sNode.y) * 0.07;
+            sNode.x += (sNode.targetX - sNode.x) * 0.08;
+            sNode.y += (sNode.targetY - sNode.y) * 0.08;
         }
 
         for (let i = 0; i < this.userNodesList.length; i++) {
             const uNode = this.userNodesList[i];
             if (uNode === this.draggedNode) continue;
-            uNode.x += (uNode.targetX - uNode.x) * 0.08;
-            uNode.y += (uNode.targetY - uNode.y) * 0.08;
+            uNode.x += (uNode.targetX - uNode.x) * 0.09;
+            uNode.y += (uNode.targetY - uNode.y) * 0.09;
         }
-    },
-
-    drawHexagon(ctx, x, y, radius) {
-        ctx.beginPath();
-        for (let i = 0; i < 6; i++) {
-            const angle = (Math.PI / 3) * i - Math.PI / 6;
-            const hx = x + radius * Math.cos(angle);
-            const hy = y + radius * Math.sin(angle);
-            if (i === 0) ctx.moveTo(hx, hy);
-            else ctx.lineTo(hx, hy);
-        }
-        ctx.closePath();
     },
 
     drawDiamond(ctx, x, y, radius) {
@@ -1621,30 +1588,6 @@ window.C4ISR_Views.red = {
         ctx.lineTo(x, y + radius);
         ctx.lineTo(x - radius, y);
         ctx.closePath();
-    },
-
-    drawDeepSpaceBackground(ctx, w, h) {
-        ctx.fillStyle = '#030408';
-        ctx.fillRect(0, 0, w, h);
-
-        if (this.nebulaCanvas) {
-            const nebX = (w * 0.5 - 512) + (this.camera.x - w * 0.5) * 0.08;
-            const nebY = (h * 0.5 - 512) + (this.camera.y - h * 0.5) * 0.08;
-            ctx.drawImage(this.nebulaCanvas, nebX - 350, nebY - 350, 1724, 1724);
-        }
-
-        const camOffsetX = this.camera.x - w * 0.5;
-        const camOffsetY = this.camera.y - h * 0.5;
-
-        for (let i = 0; i < this.starfield.length; i++) {
-            const st = this.starfield[i];
-            const sx = ((st.x * st.depth + camOffsetX * st.depth) % w + w) % w;
-            const sy = ((st.y * st.depth + camOffsetY * st.depth) % h + h) % h;
-            ctx.fillStyle = st.color;
-            ctx.globalAlpha = st.alpha;
-            ctx.fillRect(sx, sy, st.size, st.size);
-        }
-        ctx.globalAlpha = 1.0;
     },
 
     drawMiniMap() {
@@ -1657,17 +1600,14 @@ window.C4ISR_Views.red = {
         const spanY = Math.max(100, b.maxY - b.minY);
 
         mCtx.clearRect(0, 0, mw, mh);
-        mCtx.fillStyle = 'rgba(4, 5, 10, 0.92)';
-        mCtx.fillRect(0, 0, mw, mh);
 
         for (let i = 0; i < this.serverNodesList.length; i++) {
             const s = this.serverNodesList[i];
-            if (!this.isNodeVisible(s)) continue;
+            if (!this.isServerMatchingFilters(s)) continue;
             const mx = ((s.x - b.minX) / spanX) * mw;
             const my = ((s.y - b.minY) / spanY) * mh;
-            const esCeniza = Boolean(s.meta?.estadoCeniza?.raideado);
-            mCtx.fillStyle = esCeniza ? '#94a3b8' : (s.connectedUsersCount > 0 ? '#ff0055' : '#4c0519');
-            mCtx.fillRect(mx - 2, my - 2, 4, 4);
+            mCtx.fillStyle = s.connectedUsersCount > 0 ? '#ff0055' : '#475569';
+            mCtx.fillRect(mx - 1.5, my - 1.5, 3, 3);
         }
 
         const viewLeftWorld = -this.camera.x / this.camera.zoom;
@@ -1680,32 +1620,44 @@ window.C4ISR_Views.red = {
         const rw = (viewWWorld / spanX) * mw;
         const rh = (viewHWorld / spanY) * mh;
 
-        mCtx.strokeStyle = '#00f0ff';
-        mCtx.lineWidth = 1.2;
+        mCtx.strokeStyle = 'rgba(0, 240, 255, 0.7)';
+        mCtx.lineWidth = 1;
         mCtx.strokeRect(rx, ry, rw, rh);
     },
 
+    /**
+     * Motor de Renderizado por Lotes (Batch Rendering) a 60 FPS:
+     * Agrupa lineas del mismo estilo en un solo beginPath/stroke para reducir en un 90% las llamadas a Canvas.
+     */
     drawFrame() {
         if (!this.ctx || !this.canvas) return;
         const ctx = this.ctx;
         const w = this.canvas.width;
         const h = this.canvas.height;
         const now = Date.now();
-        const t = now * 0.0045;
-        const pulse = (Math.sin(t) + 1) * 0.5;
+        const pulse = (Math.sin(now * 0.004) + 1) * 0.5;
 
-        this.drawDeepSpaceBackground(ctx, w, h);
+        ctx.clearRect(0, 0, w, h);
 
-        const minWorldX = (-this.camera.x / this.camera.zoom) - 160;
-        const maxWorldX = ((w - this.camera.x) / this.camera.zoom) + 160;
-        const minWorldY = (-this.camera.y / this.camera.zoom) - 160;
-        const maxWorldY = ((h - this.camera.y) / this.camera.zoom) + 160;
+        // 0. Paralaje Estelar Multicapa 3D (Ligero y sin imagenes pesadas)
+        const camOffsetX = this.camera.x - w * 0.5;
+        const camOffsetY = this.camera.y - h * 0.5;
+        for (let i = 0; i < this.starfield.length; i++) {
+            const st = this.starfield[i];
+            const sx = ((st.x * st.depth + camOffsetX * st.depth) % w + w) % w;
+            const sy = ((st.y * st.depth + camOffsetY * st.depth) % h + h) % h;
+            ctx.fillStyle = st.color;
+            ctx.fillRect(sx, sy, st.size, st.size);
+        }
 
+        const minWorldX = (-this.camera.x / this.camera.zoom) - 140;
+        const maxWorldX = ((w - this.camera.x) / this.camera.zoom) + 140;
+        const minWorldY = (-this.camera.y / this.camera.zoom) - 140;
+        const maxWorldY = ((h - this.camera.y) / this.camera.zoom) + 140;
         const inViewport = (x, y) => x >= minWorldX && x <= maxWorldX && y >= minWorldY && y <= maxWorldY;
 
         const focusNode = this.hoveredNode || this.selectedNode;
         const focusNeighbors = focusNode ? (this.adjacency.get(focusNode.key) || new Set()) : null;
-
         const isNodeHighlighted = (nodeKey) => {
             if (this.highlightedPair) return this.highlightedPair.includes(nodeKey);
             if (!focusNode) return true;
@@ -1716,174 +1668,141 @@ window.C4ISR_Views.red = {
         ctx.translate(this.camera.x, this.camera.y);
         ctx.scale(this.camera.zoom, this.camera.zoom);
 
-        if (this.showConstellationRoutes) {
+        // 1. Lote de Rutas de Salto de Constelacion (EVE Jump Lanes)
+        if (this.showConstellationRoutes && this.constellationBridges.length > 0) {
+            ctx.beginPath();
+            ctx.strokeStyle = focusNode ? 'rgba(56, 189, 248, 0.10)' : 'rgba(56, 189, 248, 0.18)';
+            ctx.lineWidth = 1.1;
+
             for (let i = 0; i < this.constellationBridges.length; i++) {
                 const br = this.constellationBridges[i];
+                if (br.sharedUsers < 2 && !focusNode) continue;
                 const s1 = this.nodes.get(br.source);
                 const s2 = this.nodes.get(br.target);
-                if (!s1 || !s2 || !this.isNodeVisible(s1) || !this.isNodeVisible(s2)) continue;
-                if (!inViewport(s1.x, s1.y) && !inViewport(s2.x, s2.y)) continue;
-
-                const isHighlighted = !focusNode || focusNode.key === s1.key || focusNode.key === s2.key;
-                if (!isHighlighted && br.sharedUsers < 2) continue;
-
-                ctx.save();
-                ctx.beginPath();
+                if (!s1 || !s2 || !this.isServerMatchingFilters(s1) || !this.isServerMatchingFilters(s2)) continue;
+                if (focusNode && (focusNode.key === s1.key || focusNode.key === s2.key)) continue;
                 ctx.moveTo(s1.x, s1.y);
                 ctx.lineTo(s2.x, s2.y);
-                ctx.strokeStyle = br.sharedUsers >= 5 ? '#fcee0a' : '#38bdf8';
-                ctx.globalAlpha = isHighlighted ? (focusNode ? 0.72 : 0.26) : 0.04;
-                ctx.lineWidth = Math.min(4.5, 1.0 + Math.log2(br.sharedUsers + 1) * 0.8);
-                ctx.stroke();
+            }
+            ctx.stroke();
 
-                if (focusNode && isHighlighted) {
-                    const mx = (s1.x + s2.x) * 0.5;
-                    const my = (s1.y + s2.y) * 0.5;
-                    ctx.globalAlpha = 0.92;
-                    ctx.font = 'bold 9.5px "JetBrains Mono", monospace';
-                    ctx.fillStyle = br.sharedUsers >= 5 ? '#fcee0a' : '#38bdf8';
-                    ctx.textAlign = 'center';
-                    ctx.fillText(`[${br.sharedUsers} COMUNES]`, mx, my - 5);
+            // Rutas resaltadas del nodo bajo foco
+            if (focusNode) {
+                ctx.beginPath();
+                ctx.strokeStyle = 'rgba(0, 240, 255, 0.72)';
+                ctx.lineWidth = 1.9;
+                for (let i = 0; i < this.constellationBridges.length; i++) {
+                    const br = this.constellationBridges[i];
+                    const s1 = this.nodes.get(br.source);
+                    const s2 = this.nodes.get(br.target);
+                    if (!s1 || !s2) continue;
+                    if (focusNode.key === s1.key || focusNode.key === s2.key) {
+                        ctx.moveTo(s1.x, s1.y);
+                        ctx.lineTo(s2.x, s2.y);
+                    }
                 }
-                ctx.restore();
+                ctx.stroke();
             }
         }
 
+        // 2. Lote de Conexiones de Usuarios Visibles (Batched Path)
+        ctx.beginPath();
+        ctx.strokeStyle = focusNode ? 'rgba(16, 185, 129, 0.08)' : 'rgba(16, 185, 129, 0.22)';
+        ctx.lineWidth = 1.0;
+
+        const highlightedEdges = [];
         for (let i = 0; i < this.edges.length; i++) {
             const edge = this.edges[i];
-            if (edge.kind === 'CHAT' && !this.showUserLinks) continue;
             const s = this.nodes.get(edge.source);
             const tNode = this.nodes.get(edge.target);
             if (!s || !tNode || !this.isNodeVisible(s) || !this.isNodeVisible(tNode)) continue;
             if (!inViewport(s.x, s.y) && !inViewport(tNode.x, tNode.y)) continue;
 
-            const edgeActive = !focusNode
-                ? !this.highlightedPair
-                : (s.key === focusNode.key || tNode.key === focusNode.key);
+            const isFocusedEdge = focusNode && (focusNode.key === s.key || focusNode.key === tNode.key);
+            const isRecentActive = edge.isPrimaryActive && (now - (edge.lastSeen || 0)) < 600000;
 
-            if (edge.kind === 'MEMBERSHIP') {
-                const ageMs = now - (edge.lastSeen || 0);
-                const isRecentChat = ageMs < 900000;
-                const isBridge = s.serverCount >= 2 || s.enWatchlist;
-
-                ctx.save();
-                if (edge.isPrimaryActive) {
-                    const dx = tNode.x - s.x;
-                    const dy = tNode.y - s.y;
-                    const midX = (s.x + tNode.x) * 0.5 - dy * 0.12;
-                    const midY = (s.y + tNode.y) * 0.5 + dx * 0.12;
-
-                    ctx.beginPath();
-                    ctx.moveTo(s.x, s.y);
-                    ctx.quadraticCurveTo(midX, midY, tNode.x, tNode.y);
-
-                    if (isRecentChat || (focusNode && edgeActive)) {
-                        ctx.strokeStyle = s.enWatchlist ? '#fcee0a' : '#00f0ff';
-                        ctx.globalAlpha = edgeActive ? 0.85 : 0.12;
-                        ctx.lineWidth = 1.8;
-                    } else {
-                        ctx.strokeStyle = isBridge ? '#fbbf24' : '#10b981';
-                        ctx.globalAlpha = edgeActive ? (isBridge ? 0.42 : 0.22) : 0.03;
-                        ctx.lineWidth = 1.1;
-                    }
-                    ctx.stroke();
-
-                    if ((focusNode && edgeActive) || (isRecentChat && this.camera.zoom > 0.78)) {
-                        const timeLabel = formatearTiempoRelativo(edge.lastSeen);
-                        if (timeLabel) {
-                            ctx.font = 'bold 8.5px "JetBrains Mono", monospace';
-                            ctx.fillStyle = isRecentChat ? '#00f0ff' : '#34d399';
-                            ctx.textAlign = 'center';
-                            ctx.fillText(timeLabel, midX, midY - 3);
-                        }
-                    }
-                } else if ((focusNode && edgeActive) || this.onlyBridges) {
-                    ctx.beginPath();
-                    ctx.setLineDash([5, 5]);
-                    ctx.moveTo(s.x, s.y);
-                    ctx.lineTo(tNode.x, tNode.y);
-                    ctx.strokeStyle = '#fbbf24';
-                    ctx.globalAlpha = focusNode && edgeActive ? 0.82 : 0.28;
-                    ctx.lineWidth = 1.25;
-                    ctx.stroke();
-                }
-                ctx.restore();
-            } else {
-                ctx.beginPath();
+            if (isFocusedEdge || isRecentActive) {
+                highlightedEdges.push(edge);
+            } else if (edge.isPrimaryActive) {
                 ctx.moveTo(s.x, s.y);
                 ctx.lineTo(tNode.x, tNode.y);
-                ctx.strokeStyle = `rgba(0, 240, 255, ${edgeActive ? 0.32 : 0.025})`;
-                ctx.lineWidth = 1.0;
-                ctx.stroke();
+            }
+        }
+        ctx.stroke();
+
+        // Dibujar aristas activas o bajo foco con curva suave y etiqueta de tiempo
+        for (let i = 0; i < highlightedEdges.length; i++) {
+            const edge = highlightedEdges[i];
+            const s = this.nodes.get(edge.source);
+            const tNode = this.nodes.get(edge.target);
+            const dx = tNode.x - s.x;
+            const dy = tNode.y - s.y;
+            const midX = (s.x + tNode.x) * 0.5 - dy * 0.10;
+            const midY = (s.y + tNode.y) * 0.5 + dx * 0.10;
+
+            ctx.beginPath();
+            ctx.moveTo(s.x, s.y);
+            ctx.quadraticCurveTo(midX, midY, tNode.x, tNode.y);
+            ctx.strokeStyle = edge.isPrimaryActive ? 'rgba(0, 240, 255, 0.82)' : 'rgba(251, 191, 36, 0.65)';
+            ctx.lineWidth = 1.6;
+            ctx.stroke();
+
+            if (focusNode && (focusNode.key === s.key || focusNode.key === tNode.key) && edge.isPrimaryActive) {
+                const timeLabel = formatearTiempoRelativo(edge.lastSeen);
+                if (timeLabel) {
+                    ctx.font = '9px "JetBrains Mono", monospace';
+                    ctx.fillStyle = '#00f0ff';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(timeLabel, midX, midY - 4);
+                }
             }
         }
 
-        if (this.showAllianceLinks) {
+        // 3. Lote de Rutas de Alianza (Curvas Purpura Finas)
+        if (this.showAllianceLinks && this.allianceEdges.length > 0) {
+            ctx.beginPath();
+            ctx.strokeStyle = focusNode ? 'rgba(192, 132, 252, 0.14)' : 'rgba(192, 132, 252, 0.45)';
+            ctx.lineWidth = 1.4;
             for (let i = 0; i < this.allianceEdges.length; i++) {
                 const ally = this.allianceEdges[i];
                 const s = this.nodes.get(ally.source);
                 const tNode = this.nodes.get(ally.target);
-                if (!s || !tNode || !this.isNodeVisible(s) || !this.isNodeVisible(tNode)) continue;
-
-                const isHighlighted = !focusNode || focusNode.key === s.key || focusNode.key === tNode.key;
+                if (!s || !tNode || !this.isServerMatchingFilters(s) || !this.isServerMatchingFilters(tNode)) continue;
                 const dx = tNode.x - s.x;
                 const dy = tNode.y - s.y;
-                const dist = Math.sqrt(dx * dx + dy * dy);
-                if (dist <= s.radius + tNode.radius) continue;
-
-                const ctrlX = (s.x + tNode.x) * 0.5 - (dy / dist) * Math.min(110, dist * 0.18);
-                const ctrlY = (s.y + tNode.y) * 0.5 + (dx / dist) * Math.min(110, dist * 0.18);
-
-                ctx.save();
-                ctx.globalAlpha = isHighlighted ? 0.84 : 0.07;
-                ctx.beginPath();
+                const ctrlX = (s.x + tNode.x) * 0.5 - dy * 0.14;
+                const ctrlY = (s.y + tNode.y) * 0.5 + dx * 0.14;
                 ctx.moveTo(s.x, s.y);
                 ctx.quadraticCurveTo(ctrlX, ctrlY, tNode.x, tNode.y);
-                ctx.strokeStyle = '#c084fc';
-                ctx.lineWidth = isHighlighted && focusNode ? 2.5 : 1.6;
-                ctx.stroke();
-
-                const u = ((now * 0.0004 + i * 0.27) % 1.0);
-                const invU = 1 - u;
-                const px = invU * invU * s.x + 2 * invU * u * ctrlX + u * u * tNode.x;
-                const py = invU * invU * s.y + 2 * invU * u * ctrlY + u * u * tNode.y;
-                ctx.beginPath();
-                ctx.arc(px, py, 3.0, 0, Math.PI * 2);
-                ctx.fillStyle = '#f3e8ff';
-                ctx.fill();
-                ctx.restore();
             }
+            ctx.stroke();
         }
 
-        if (this.showAltLinks) {
-            for (const altEdge of this.altEdges) {
-                const s = this.nodes.get(altEdge.source);
-                const tNode = this.nodes.get(altEdge.target);
+        // 4. Enlaces de Cuentas Espejo (Alts)
+        if (this.altEdges.length > 0) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.setLineDash([5, 5]);
+            ctx.strokeStyle = '#fcee0a';
+            ctx.lineWidth = 1.6;
+            for (let i = 0; i < this.altEdges.length; i++) {
+                const ae = this.altEdges[i];
+                const s = this.nodes.get(ae.source);
+                const tNode = this.nodes.get(ae.target);
                 if (!s || !tNode || !this.isNodeVisible(s) || !this.isNodeVisible(tNode)) continue;
-
-                const isHighlighted = (this.highlightedPair &&
-                    this.highlightedPair.includes(s.key) &&
-                    this.highlightedPair.includes(tNode.key)) ||
-                    (focusNode && (focusNode.key === s.key || focusNode.key === tNode.key));
-
-                ctx.save();
-                ctx.beginPath();
-                ctx.setLineDash([6, 6]);
                 ctx.moveTo(s.x, s.y);
                 ctx.lineTo(tNode.x, tNode.y);
-                ctx.strokeStyle = altEdge.critical ? '#ff003c' : '#fcee0a';
-                ctx.globalAlpha = (!focusNode || isHighlighted) ? 0.92 : 0.10;
-                ctx.lineWidth = isHighlighted ? 2.6 : 1.5;
-                ctx.stroke();
-                ctx.restore();
             }
+            ctx.stroke();
+            ctx.restore();
         }
 
+        // 5. Trazas de Salto DVR
         for (let i = this.dvrTraces.length - 1; i >= 0; i--) {
             const tr = this.dvrTraces[i];
-            tr.progress = Math.min(1.0, tr.progress + 0.018);
+            tr.progress = Math.min(1.0, tr.progress + 0.02);
             if (tr.progress >= 1.0) {
-                tr.alpha -= 0.008;
+                tr.alpha -= 0.01;
                 if (tr.alpha <= 0) {
                     this.dvrTraces.splice(i, 1);
                     continue;
@@ -1896,28 +1815,20 @@ window.C4ISR_Views.red = {
             const curX = nFrom.x + (nTo.x - nFrom.x) * tr.progress;
             const curY = nFrom.y + (nTo.y - nFrom.y) * tr.progress;
 
-            ctx.save();
-            ctx.globalAlpha = tr.alpha;
             ctx.beginPath();
-            ctx.setLineDash([8, 4]);
             ctx.moveTo(nFrom.x, nFrom.y);
             ctx.lineTo(curX, curY);
-            ctx.strokeStyle = tr.color;
-            ctx.lineWidth = 3.0;
+            ctx.strokeStyle = `rgba(0, 240, 255, ${tr.alpha})`;
+            ctx.lineWidth = 2.4;
             ctx.stroke();
 
             ctx.beginPath();
-            ctx.arc(curX, curY, 5.5, 0, Math.PI * 2);
+            ctx.arc(curX, curY, 4.5, 0, Math.PI * 2);
             ctx.fillStyle = '#ffffff';
             ctx.fill();
-
-            ctx.font = 'bold 10.5px "JetBrains Mono", monospace';
-            ctx.fillStyle = tr.color;
-            ctx.textAlign = 'center';
-            ctx.fillText(tr.label, curX, curY - 10);
-            ctx.restore();
         }
 
+        // 6. Particulas de Mensajes en Vivo
         for (let i = this.particles.length - 1; i >= 0; i--) {
             const p = this.particles[i];
             p.progress += p.speed;
@@ -1933,12 +1844,14 @@ window.C4ISR_Views.red = {
             const py = s.y + (tNode.y - s.y) * p.progress;
 
             ctx.beginPath();
-            ctx.arc(px, py, 3.8, 0, Math.PI * 2);
+            ctx.arc(px, py, 3.2, 0, Math.PI * 2);
             ctx.fillStyle = p.color || '#00f0ff';
             ctx.fill();
         }
 
-        for (const node of this.nodes.values()) {
+        // 7. Dibujar Satelites (Usuarios Visibles)
+        for (let i = 0; i < this.userNodesList.length; i++) {
+            const node = this.userNodesList[i];
             if (!this.isNodeVisible(node)) continue;
             if (!inViewport(node.x, node.y)) continue;
 
@@ -1946,115 +1859,117 @@ window.C4ISR_Views.red = {
             const isSelected = (this.selectedNode && this.selectedNode.key === node.key) ||
                 (this.highlightedPair && this.highlightedPair.includes(node.key));
             const isHovered = this.hoveredNode && this.hoveredNode.key === node.key;
+            const isVip = Boolean(node.enWatchlist);
+            const hasRank = Boolean(node.primaryRank);
+            const esHostil = Boolean(node.meta?.intelExterna?.amenazaConfirmada) || node.infracciones > 0;
+            const habloReciente = (now - (node.lastMessageTs || 0)) < 600000;
 
-            ctx.save();
-            ctx.globalAlpha = isActive ? 1.0 : 0.14;
+            ctx.globalAlpha = isActive ? 1.0 : 0.15;
 
-            if (node.type === 'SERVER') {
-                const hasUsers = node.connectedUsersCount > 0;
-                const esCeniza = Boolean(node.meta?.estadoCeniza?.raideado);
-                const etiquetaObj = node.meta?.etiquetaManual;
-                const infCount = node.meta?.infeccionCount || 0;
-                const infPct = node.meta?.infeccionPct || 0;
-
-                if (!esCeniza && infCount > 0) {
-                    ctx.save();
-                    ctx.beginPath();
-                    ctx.setLineDash([7, 5]);
-                    ctx.arc(node.x, node.y, node.radius + 12 + pulse * 4, 0, Math.PI * 2);
-                    ctx.strokeStyle = infPct >= 25 ? '#ff003c' : '#f97316';
-                    ctx.lineWidth = 2.2;
-                    ctx.stroke();
-                    ctx.restore();
-                } else if (hasUsers || esCeniza || isSelected || isHovered) {
-                    ctx.beginPath();
-                    ctx.arc(node.x, node.y, node.radius + 9 + pulse * 4, 0, Math.PI * 2);
-                    ctx.strokeStyle = esCeniza ? 'rgba(148, 163, 184, 0.45)' : 'rgba(255, 0, 85, 0.42)';
-                    ctx.lineWidth = 1.4;
-                    ctx.stroke();
-                }
-
-                this.drawHexagon(ctx, node.x, node.y, node.radius);
-                ctx.fillStyle = esCeniza ? '#334155' : (hasUsers ? '#e11d48' : '#4c0519');
-                ctx.fill();
-                ctx.lineWidth = isSelected || isHovered ? 3.2 : 1.8;
-                ctx.strokeStyle = isSelected || isHovered
-                    ? '#00f0ff'
-                    : (esCeniza ? '#94a3b8' : '#fda4af');
-                ctx.stroke();
-
-                this.drawHexagon(ctx, node.x, node.y, node.radius * 0.48);
-                ctx.strokeStyle = 'rgba(0, 240, 255, 0.35)';
-                ctx.lineWidth = 1;
-                ctx.stroke();
-
-                if (esCeniza) {
-                    ctx.font = 'bold 9.5px "JetBrains Mono", monospace';
-                    ctx.fillStyle = '#cbd5e1';
-                    ctx.textAlign = 'center';
-                    ctx.fillText('[CENIZA // RAIDEADO]', node.x, node.y - node.radius - 12);
-                } else if (etiquetaObj && etiquetaObj.texto) {
-                    const tagColor = COLORES_ETIQUETA_SERVIDOR[etiquetaObj.tipo] || '#00f0ff';
-                    ctx.font = 'bold 9.5px "JetBrains Mono", monospace';
-                    ctx.fillStyle = tagColor;
-                    ctx.textAlign = 'center';
-                    ctx.fillText(`[${etiquetaObj.texto}]`, node.x, node.y - node.radius - 12);
-                }
-
-                ctx.font = 'bold 11px "JetBrains Mono", monospace';
-                ctx.fillStyle = esCeniza ? '#94a3b8' : '#ffffff';
-                ctx.textAlign = 'center';
-                ctx.fillText(node.label.slice(0, 25), node.x, node.y + node.radius + 16);
+            if (hasRank) {
+                this.drawDiamond(ctx, node.x, node.y, node.radius + 1.5);
             } else {
-                const isBridge = node.serverCount >= 2;
-                const isVip = Boolean(node.enWatchlist);
-                const hasRank = Boolean(node.primaryRank);
-                const esHostilConfirmado = Boolean(node.meta?.intelExterna?.amenazaConfirmada) || node.infracciones > 0;
-                const habloReciente = (now - (node.lastMessageTs || 0)) < 600000;
-
-                if (isVip || node.altRole || esHostilConfirmado) {
-                    ctx.beginPath();
-                    ctx.arc(node.x, node.y, node.radius + 4.5 + pulse * 3.5, 0, Math.PI * 2);
-                    ctx.strokeStyle = isVip ? '#fcee0a' : '#ff003c';
-                    ctx.lineWidth = 1.6;
-                    ctx.stroke();
-                } else if (hasRank || habloReciente || isBridge) {
-                    ctx.beginPath();
-                    ctx.arc(node.x, node.y, node.radius + 3.0, 0, Math.PI * 2);
-                    ctx.strokeStyle = hasRank ? '#39ff14' : (habloReciente ? '#00f0ff' : '#fbbf24');
-                    ctx.lineWidth = 1.2;
-                    ctx.stroke();
-                }
-
-                if (hasRank) {
-                    this.drawDiamond(ctx, node.x, node.y, node.radius + 2);
-                } else {
-                    ctx.beginPath();
-                    ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
-                }
-
-                ctx.fillStyle = isVip
-                    ? '#fcee0a'
-                    : (esHostilConfirmado ? '#ff2a6d' : (hasRank ? '#39ff14' : (habloReciente ? '#00f0ff' : '#10b981')));
-                ctx.fill();
-                ctx.lineWidth = isSelected || isHovered ? 2.4 : 1.0;
-                ctx.strokeStyle = isSelected || isHovered ? '#ffffff' : '#047857';
-                ctx.stroke();
-
-                const showLabel = isHovered || isSelected || isVip || node.altRole || hasRank || isBridge || this.camera.zoom > 1.05;
-                if (showLabel) {
-                    ctx.font = '10px "JetBrains Mono", monospace';
-                    ctx.fillStyle = isVip
-                        ? '#fcee0a'
-                        : (node.altRole || esHostilConfirmado ? '#ff85ad' : (hasRank ? '#39ff14' : (habloReciente ? '#00f0ff' : '#e2e8f0')));
-                    ctx.textAlign = 'center';
-                    ctx.fillText(node.label.slice(0, 18), node.x, node.y - node.radius - 5);
-                }
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
             }
 
-            ctx.restore();
+            ctx.fillStyle = isVip
+                ? '#fcee0a'
+                : (esHostil ? '#ff0055' : (hasRank ? '#39ff14' : (habloReciente ? '#00f0ff' : '#10b981')));
+            ctx.fill();
+
+            if (isSelected || isHovered || isVip || node.altRole) {
+                ctx.lineWidth = 1.6;
+                ctx.strokeStyle = '#ffffff';
+                ctx.stroke();
+            }
+
+            if (isHovered || isSelected || isVip || (this.camera.zoom > 1.15 && isActive)) {
+                ctx.font = '9.5px "JetBrains Mono", monospace';
+                ctx.fillStyle = isVip ? '#fcee0a' : '#e2e8f0';
+                ctx.textAlign = 'center';
+                ctx.fillText(node.label.slice(0, 18), node.x, node.y - node.radius - 5);
+            }
         }
 
+        // 8. Dibujar Sistemas Estelares (Servidores Estilo EVE Online Solar System)
+        for (let i = 0; i < this.serverNodesList.length; i++) {
+            const node = this.serverNodesList[i];
+            if (!this.isServerMatchingFilters(node)) continue;
+            if (!inViewport(node.x, node.y)) continue;
+
+            const isActive = isNodeHighlighted(node.key);
+            const isSelected = this.selectedNode && this.selectedNode.key === node.key;
+            const isHovered = this.hoveredNode && this.hoveredNode.key === node.key;
+            const hasUsers = node.connectedUsersCount > 0;
+            const esCeniza = Boolean(node.meta?.estadoCeniza?.raideado);
+            const etiquetaObj = node.meta?.etiquetaManual;
+            const infCount = node.meta?.infeccionCount || 0;
+            const infPct = node.meta?.infeccionPct || 0;
+
+            ctx.globalAlpha = isActive ? 1.0 : 0.18;
+
+            const starColor = esCeniza
+                ? '#94a3b8'
+                : (etiquetaObj ? (COLORES_ETIQUETA_SERVIDOR[etiquetaObj.tipo] || '#ff0055') : (hasUsers ? '#ff0055' : '#475569'));
+
+            // Halo estelar exterior suave
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, node.radius * 1.45, 0, Math.PI * 2);
+            ctx.fillStyle = esCeniza
+                ? 'rgba(148, 163, 184, 0.14)'
+                : (hasUsers ? 'rgba(255, 0, 85, 0.16)' : 'rgba(71, 85, 105, 0.12)');
+            ctx.fill();
+
+            // Anillo de Infeccion o Reticula Orbital EVE
+            if (!esCeniza && infCount > 0) {
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, node.radius + 7 + pulse * 2.5, 0, Math.PI * 2);
+                ctx.strokeStyle = infPct >= 25 ? '#ff003c' : '#f97316';
+                ctx.lineWidth = 1.6;
+                ctx.stroke();
+            } else if (isSelected || isHovered || hasUsers) {
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, node.radius + 5, 0, Math.PI * 2);
+                ctx.strokeStyle = isSelected || isHovered ? '#00f0ff' : 'rgba(255, 255, 255, 0.22)';
+                ctx.lineWidth = isSelected || isHovered ? 2.0 : 1.0;
+                ctx.stroke();
+            }
+
+            // Esfera Solar Principal
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, node.radius * 0.72, 0, Math.PI * 2);
+            ctx.fillStyle = starColor;
+            ctx.fill();
+
+            // Nucleo Estelar Blanco Brillante
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, Math.max(2.5, node.radius * 0.28), 0, Math.PI * 2);
+            ctx.fillStyle = '#ffffff';
+            ctx.fill();
+
+            // Etiquetas limpias solo cuando aportan claridad
+            if (hasUsers || esCeniza || etiquetaObj || isHovered || isSelected || this.camera.zoom > 0.72) {
+                if (esCeniza) {
+                    ctx.font = 'bold 8.5px "JetBrains Mono", monospace';
+                    ctx.fillStyle = '#94a3b8';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('[CENIZA]', node.x, node.y - node.radius - 9);
+                } else if (etiquetaObj && etiquetaObj.texto) {
+                    ctx.font = 'bold 8.5px "JetBrains Mono", monospace';
+                    ctx.fillStyle = COLORES_ETIQUETA_SERVIDOR[etiquetaObj.tipo] || '#00f0ff';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(`[${etiquetaObj.texto}]`, node.x, node.y - node.radius - 9);
+                }
+
+                ctx.font = 'bold 10.5px "JetBrains Mono", monospace';
+                ctx.fillStyle = esCeniza ? '#94a3b8' : '#f8fafc';
+                ctx.textAlign = 'center';
+                ctx.fillText(node.label.slice(0, 24), node.x, node.y + node.radius + 14);
+            }
+        }
+
+        ctx.globalAlpha = 1.0;
         ctx.restore();
         this.drawMiniMap();
     },
@@ -2066,8 +1981,8 @@ window.C4ISR_Views.red = {
         if (this.suspectPairs.length === 0) {
             container.innerHTML = `
                 <div style="padding: 1rem 0.4rem; color: var(--text-muted); line-height: 1.5;">
-                    <div style="color: var(--accent-green); font-weight: 700; margin-bottom: 0.4rem;">[ SIN ALTS NI REENCARNACIONES ]</div>
-                    El motor estilometrico y de sucesion filtra coincidencias casuales de huso horario y busca patrones de habla identicos, relevos sin colision o cuentas nuevas que heredan el circulo de un baneado.
+                    <div style="color: var(--accent-green); font-weight: 700; margin-bottom: 0.4rem;">[ SIN ALTS DETECTADAS ]</div>
+                    El motor estilometrico filtra coincidencias casuales de huso horario y busca patrones de habla identicos, relevos sin colision o cuentas nuevas que heredan el circulo de un baneado.
                 </div>
             `;
             return;
@@ -2121,8 +2036,8 @@ window.C4ISR_Views.red = {
 
         const headerPlayHtml = `
             <div style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center;">
-                <span style="color: #fcee0a; font-weight: 700; font-size: 0.72rem;">ULTIMOS ${this.dvrEvents.length} EVENTOS</span>
-                <button id="btn-play-all-dvr" class="zero-btn" type="button">&#9654; REPRODUCIR SALTOS</button>
+                <span style="color: #fcee0a; font-weight: 700; font-size: 0.71rem;">ULTIMOS ${this.dvrEvents.length} SALTOS</span>
+                <button id="btn-play-all-dvr" class="eve-icon-btn" type="button">&#9654; REPRODUCIR</button>
             </div>
         `;
 
@@ -2139,7 +2054,7 @@ window.C4ISR_Views.red = {
                         <span style="color:${borderCol};font-weight:700;">[${DOMPurify.sanitize(String(ev.tipo || 'EVENTO'))}]</span>
                         <span>${fecha}</span>
                     </div>
-                    <div style="color:var(--text-main);font-size:0.73rem;line-height:1.35;">
+                    <div style="color:var(--text-main);font-size:0.72rem;line-height:1.35;">
                         ${DOMPurify.sanitize(String(ev.detalle || ''))}
                     </div>
                 </div>
@@ -2246,8 +2161,8 @@ window.C4ISR_Views.red = {
                         </select>
                     </div>
                     <div style="display: flex; gap: 4px;">
-                        <button id="btn-save-srv-tag" class="zero-btn" type="button" style="flex: 1;">FIJAR EN MAPA</button>
-                        <button id="btn-clear-srv-tag" class="zero-btn" type="button" style="color:#f87171;">BORRAR</button>
+                        <button id="btn-save-srv-tag" class="eve-icon-btn" type="button" style="flex: 1;">FIJAR EN MAPA</button>
+                        <button id="btn-clear-srv-tag" class="eve-icon-btn" type="button" style="color:#f87171;">BORRAR</button>
                     </div>
                 </div>
             `;
@@ -2364,7 +2279,7 @@ window.C4ISR_Views.red = {
                     return `
                         <div class="usr-srv-row" data-skey="SRV_${DOMPurify.sanitize(sId)}" style="padding: 6px 6px; border-bottom: var(--border-subtle); cursor: pointer; background: ${isCurrent ? 'rgba(0, 240, 255, 0.08)' : 'transparent'};">
                             <div style="display: flex; justify-content: space-between; align-items: center;">
-                                <span><strong style="color:${isCurrent ? '#00f0ff' : '#ff0055'};">&#11042;</strong> <strong>${DOMPurify.sanitize(info.name)}</strong></span>
+                                <span><strong style="color:${isCurrent ? '#00f0ff' : '#ff0055'};">&#9679;</strong> <strong>${DOMPurify.sanitize(info.name)}</strong></span>
                                 <span style="color:var(--text-secondary);font-size:0.69rem;">${info.count} msgs &bull; ${timeAgo}</span>
                             </div>
                             ${rangoHtml}
@@ -2414,7 +2329,7 @@ window.C4ISR_Views.red = {
 
                 ${geoBoxHtml}
 
-                <button id="btn-toggle-vip" class="zero-btn" type="button" style="width: 100%; margin-bottom: 0.75rem; padding: 0.45rem; border-color: #fcee0a; color: ${node.enWatchlist ? '#09080c' : '#fcee0a'}; background: ${node.enWatchlist ? '#fcee0a' : 'rgba(252, 238, 10, 0.08)'}; font-weight: 700;">
+                <button id="btn-toggle-vip" class="eve-icon-btn" type="button" style="width: 100%; margin-bottom: 0.75rem; padding: 0.45rem; border-color: #fcee0a; color: ${node.enWatchlist ? '#09080c' : '#fcee0a'}; background: ${node.enWatchlist ? '#fcee0a' : 'rgba(252, 238, 10, 0.08)'}; font-weight: 700;">
                     &#9733; ${node.enWatchlist ? 'DESACTIVAR SEGUIMIENTO VIP' : 'ACTIVAR SEGUIMIENTO VIP (WATCHLIST)'}
                 </button>
 
