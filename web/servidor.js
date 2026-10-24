@@ -416,6 +416,7 @@ app.get('/api/red', autenticar, async (req, res) => {
         const mapaServidores = new Map();
         const indiceNombreServidor = new Map();
         const mapaUsuarios = new Map();
+        const conteoServidoresVps = new Map(); // guildId -> { name, users: Set<uid>, commands: Set<cmd> }
 
         const buscarServidorPorNombre = (nombre) => {
             const norm = normalizarNombreServidor(nombre);
@@ -435,6 +436,8 @@ app.get('/api/red', autenticar, async (req, res) => {
             mapaServidores.set(srv.id, {
                 ...srv,
                 usuariosCount: 0,
+                infeccionCount: 0,
+                infeccionPct: 0,
                 inviteUrl: srv.inviteUrl || null,
                 etiquetaManual: etiqueta,
                 redundancia: Array.isArray(srv.exploradores) ? srv.exploradores.length : 0,
@@ -447,6 +450,363 @@ app.get('/api/red', autenticar, async (req, res) => {
                 if (normOrig) indiceNombreServidor.set(normOrig, srv.id);
             }
         }
+
+        for (const inv of memoriaInvitaciones.values()) {
+            if (inv.status === 'VALID' && inv.guildId) {
+                let targetId = mapaServidores.has(inv.guildId)
+                    ? inv.guildId
+                    : buscarServidorPorNombre(inv.guildName);
+
+                if (targetId && mapaServidores.has(targetId)) {
+                    const srvExistente = mapaServidores.get(targetId);
+                    srvExistente.inviteUrl = inv.url;
+                    if (!srvExistente.memberCount && inv.memberCount) {
+                        srvExistente.memberCount = inv.memberCount;
+                    }
+                    if (!srvExistente.icon && inv.icon) {
+                        srvExistente.icon = inv.icon;
+                    }
+                } else {
+                    targetId = inv.guildId;
+                    mapaServidores.set(targetId, {
+                        id: targetId,
+                        name: inv.guildName || 'Servidor Aliado',
+                        nombreOriginal: inv.guildName || 'Servidor Aliado',
+                        icon: inv.icon || null,
+                        memberCount: inv.memberCount || 0,
+                        mensajesSesion: 1,
+                        ultimaActividad: Date.parse(inv.fecha) || Date.now(),
+                        exploradores: ['Radar de Alianzas (Invite Activa)'],
+                        redundancia: 0,
+                        usuariosCount: 0,
+                        infeccionCount: 0,
+                        infeccionPct: 0,
+                        inviteUrl: inv.url,
+                        etiquetaManual: etiquetasServidores.get(targetId) || null,
+                        estadoCeniza: null,
+                        alianzasSalientes: []
+                    });
+                    const norm = normalizarNombreServidor(inv.guildName);
+                    if (norm) indiceNombreServidor.set(norm, targetId);
+                }
+            }
+        }
+
+        for (const usr of (estadoRadarRed.usuarios || [])) {
+            const servidoresLimpiados = {};
+            for (const [sId, sData] of Object.entries(usr.servidores || {})) {
+                if (sId === 'DM_SECTOR') continue;
+                servidoresLimpiados[sId] = { ...sData };
+            }
+            mapaUsuarios.set(usr.id, {
+                ...usr,
+                horasActivas: Array.isArray(usr.horasActivas) ? [...usr.horasActivas] : [],
+                historialAliases: [usr.tag || 'Usuario'],
+                perfilOsint: usr.perfilOsint || null,
+                intelExterna: usr.intelExterna || null,
+                pasadoVps: [],
+                infracciones: 0,
+                fichado: false,
+                enWatchlist: watchlistUsuarios.has(String(usr.id)),
+                servidores: servidoresLimpiados,
+                ultimoServidorId: usr.ultimoServidorId !== 'DM_SECTOR' ? usr.ultimoServidorId : null
+            });
+        }
+
+        for (const exp of expedientes) {
+            const uid = String(exp.userId || '').trim();
+            if (!uid) continue;
+
+            const primerTs = Date.parse(exp.primerFichaje);
+            let usr = mapaUsuarios.get(uid);
+            if (!usr) {
+                const horasSet = new Set();
+                if (!Number.isNaN(primerTs)) {
+                    horasSet.add(new Date(primerTs).getUTCHours());
+                }
+                usr = {
+                    id: uid,
+                    tag: exp.ultimoAlias || 'Objetivo Fichado',
+                    avatar: null,
+                    totalMensajes: exp.totalInfracciones || 1,
+                    ultimaActividad: !Number.isNaN(primerTs) ? primerTs : Date.now(),
+                    horasActivas: Array.from(horasSet),
+                    historialAliases: Array.isArray(exp.historialAliases) ? exp.historialAliases : [exp.ultimoAlias || 'Objetivo'],
+                    perfilOsint: exp.perfilOsint || null,
+                    intelExterna: exp.intelExterna || null,
+                    pasadoVps: [],
+                    servidores: {},
+                    ultimoServidorId: null,
+                    infracciones: exp.totalInfracciones || 0,
+                    fichado: true,
+                    enWatchlist: watchlistUsuarios.has(uid)
+                };
+            } else {
+                usr.infracciones = exp.totalInfracciones || 0;
+                usr.fichado = true;
+                usr.enWatchlist = watchlistUsuarios.has(uid);
+                if (exp.perfilOsint) {
+                    usr.perfilOsint = { ...(exp.perfilOsint || {}), ...(usr.perfilOsint || {}) };
+                }
+                if (exp.intelExterna && !usr.intelExterna) {
+                    usr.intelExterna = exp.intelExterna;
+                }
+                if (Array.isArray(exp.historialAliases) && exp.historialAliases.length > 0) {
+                    usr.historialAliases = [...new Set([...usr.historialAliases, ...exp.historialAliases])];
+                }
+            }
+
+            // Registrar ecos del pasado del VPS 5604 sin crear burbujas falsas por un único usuario aislado
+            if (usr.intelExterna?.vpsRegistros && Array.isArray(usr.intelExterna.vpsRegistros)) {
+                for (const reg of usr.intelExterna.vpsRegistros) {
+                    if (reg.servidorExtraidoId && reg.servidorExtraidoNombre) {
+                        usr.pasadoVps.push({
+                            guildId: reg.servidorExtraidoId,
+                            guildName: reg.servidorExtraidoNombre,
+                            comando: reg.comandoExtraido || 'cmd',
+                            fecha: reg.fecha || ''
+                        });
+                        if (!conteoServidoresVps.has(reg.servidorExtraidoId)) {
+                            conteoServidoresVps.set(reg.servidorExtraidoId, {
+                                name: reg.servidorExtraidoNombre,
+                                users: new Set(),
+                                commands: new Set()
+                            });
+                        }
+                        const entryVps = conteoServidoresVps.get(reg.servidorExtraidoId);
+                        entryVps.users.add(uid);
+                        if (reg.comandoExtraido) entryVps.commands.add(reg.comandoExtraido);
+                    }
+                }
+            }
+
+            const horasUsuarioSet = new Set(usr.horasActivas);
+            const historial = Array.isArray(exp.historial) ? exp.historial : [];
+            let maxTsServidor = 0;
+
+            for (const h of historial) {
+                if (!h || typeof h !== 'object') continue;
+                const eventoTs = Date.parse(h.fecha);
+                if (!Number.isNaN(eventoTs)) {
+                    horasUsuarioSet.add(new Date(eventoTs).getUTCHours());
+                    if (eventoTs > (usr.ultimaActividad || 0)) {
+                        usr.ultimaActividad = eventoTs;
+                    }
+                }
+
+                const msgCrudo = String(h.mensajeOriginal || '');
+                const invitesEnMsg = extraerInvitacionesDeTexto(msgCrudo);
+                for (const inv of invitesEnMsg) {
+                    registrarInvitacionViva({
+                        code: inv.code,
+                        url: inv.url,
+                        origenServerName: h.servidor || 'Sector Desconocido',
+                        emisorId: uid,
+                        emisorTag: usr.tag,
+                        fecha: h.fecha || exp.primerFichaje
+                    });
+                }
+
+                const nombreSrv = String(h.servidor || '').trim();
+                if (
+                    !nombreSrv ||
+                    nombreSrv === 'N/A' ||
+                    nombreSrv === 'Sector Desconocido' ||
+                    nombreSrv.includes('Sector Privado')
+                ) {
+                    continue;
+                }
+
+                let srvIdEncontrado = buscarServidorPorNombre(nombreSrv);
+                if (!srvIdEncontrado) {
+                    const norm = normalizarNombreServidor(nombreSrv);
+                    if (!norm) continue;
+                    srvIdEncontrado = `HIST_${norm.toUpperCase()}`;
+                    if (!mapaServidores.has(srvIdEncontrado)) {
+                        mapaServidores.set(srvIdEncontrado, {
+                            id: srvIdEncontrado,
+                            name: nombreSrv,
+                            nombreOriginal: nombreSrv,
+                            icon: null,
+                            memberCount: 0,
+                            mensajesSesion: 1,
+                            ultimaActividad: !Number.isNaN(eventoTs) ? eventoTs : 0,
+                            exploradores: ['Archivo Histórico'],
+                            redundancia: 0,
+                            usuariosCount: 0,
+                            infeccionCount: 0,
+                            infeccionPct: 0,
+                            inviteUrl: null,
+                            etiquetaManual: etiquetasServidores.get(srvIdEncontrado) || null,
+                            estadoCeniza: null,
+                            alianzasSalientes: []
+                        });
+                        indiceNombreServidor.set(norm, srvIdEncontrado);
+                    }
+                }
+
+                if (invitesEnMsg.length > 0) {
+                    const srvNode = mapaServidores.get(srvIdEncontrado);
+                    for (const inv of invitesEnMsg) {
+                        const mem = memoriaInvitaciones.get(inv.code.toLowerCase());
+                        if (mem && mem.status === 'VALID' && mem.guildName) {
+                            if (normalizarNombreServidor(mem.guildName) === normalizarNombreServidor(srvNode.name)) {
+                                srvNode.inviteUrl = inv.url;
+                            }
+                        } else if (!srvNode.inviteUrl && msgCrudo.toLowerCase().includes(srvNode.name.toLowerCase())) {
+                            srvNode.inviteUrl = inv.url;
+                        }
+                    }
+                }
+
+                const tsVal = !Number.isNaN(eventoTs) ? eventoTs : Date.now();
+                if (!usr.servidores[srvIdEncontrado]) {
+                    usr.servidores[srvIdEncontrado] = {
+                        name: mapaServidores.get(srvIdEncontrado)?.name || nombreSrv,
+                        count: 1,
+                        lastSeen: tsVal
+                    };
+                } else {
+                    usr.servidores[srvIdEncontrado].count += 1;
+                    if (tsVal > usr.servidores[srvIdEncontrado].lastSeen) {
+                        usr.servidores[srvIdEncontrado].lastSeen = tsVal;
+                    }
+                }
+
+                if (!usr.ultimoServidorId || tsVal >= maxTsServidor) {
+                    maxTsServidor = tsVal;
+                    usr.ultimoServidorId = srvIdEncontrado;
+                }
+            }
+
+            usr.horasActivas = Array.from(horasUsuarioSet).sort((a, b) => a - b);
+            mapaUsuarios.set(uid, usr);
+        }
+
+        // Filtro de Gravedad Histórica para Servidores del VPS 5604:
+        // Si el servidor del VPS ya existe en nuestro mapa (por ID o nombre, ej. Serdán v4), se vincula y etiqueta.
+        // Si no existe, SOLO se crea si >= 2 usuarios distintos tienen registros de comandos en él.
+        for (const [vpsGuildId, infoVps] of conteoServidoresVps.entries()) {
+            let targetId = mapaServidores.has(vpsGuildId)
+                ? vpsGuildId
+                : buscarServidorPorNombre(infoVps.name);
+
+            if (targetId && mapaServidores.has(targetId)) {
+                const srv = mapaServidores.get(targetId);
+                if (!srv.etiquetaManual) {
+                    srv.etiquetaManual = { texto: 'DETECTADO VPS', tipo: 'PROVEEDOR' };
+                }
+                for (const uid of infoVps.users) {
+                    const uObj = mapaUsuarios.get(uid);
+                    if (uObj && !uObj.servidores[targetId]) {
+                        uObj.servidores[targetId] = { name: srv.name, count: 1, lastSeen: Date.now() };
+                    }
+                }
+            } else if (infoVps.users.size >= 2) {
+                mapaServidores.set(vpsGuildId, {
+                    id: vpsGuildId,
+                    name: infoVps.name,
+                    nombreOriginal: infoVps.name,
+                    icon: null,
+                    memberCount: 0,
+                    mensajesSesion: infoVps.users.size,
+                    ultimaActividad: Date.now(),
+                    exploradores: ['Nido Confirmado VPS-5604'],
+                    redundancia: 0,
+                    usuariosCount: 0,
+                    infeccionCount: 0,
+                    infeccionPct: 0,
+                    inviteUrl: null,
+                    etiquetaManual: { texto: 'NIDO VPS', tipo: 'PROVEEDOR' },
+                    estadoCeniza: null,
+                    alianzasSalientes: []
+                });
+                for (const uid of infoVps.users) {
+                    const uObj = mapaUsuarios.get(uid);
+                    if (uObj) {
+                        uObj.servidores[vpsGuildId] = { name: infoVps.name, count: 1, lastSeen: Date.now() };
+                    }
+                }
+            }
+        }
+
+        const alianzas = [];
+        for (const inv of memoriaInvitaciones.values()) {
+            let targetSrvId = null;
+            if (inv.status === 'VALID' && inv.guildId) {
+                targetSrvId = mapaServidores.has(inv.guildId)
+                    ? inv.guildId
+                    : buscarServidorPorNombre(inv.guildName);
+            }
+
+            for (const origenNombre of (inv.origenes || [])) {
+                const sourceSrvId = buscarServidorPorNombre(origenNombre);
+                if (!sourceSrvId || !mapaServidores.has(sourceSrvId)) continue;
+
+                const sourceNode = mapaServidores.get(sourceSrvId);
+                if (targetSrvId && targetSrvId === sourceSrvId) {
+                    sourceNode.inviteUrl = inv.url;
+                    continue;
+                }
+
+                const targetLabel = (targetSrvId && mapaServidores.get(targetSrvId)?.name) || inv.guildName || `discord.gg/${inv.code}`;
+                if (!sourceNode.alianzasSalientes.some(a => a.url === inv.url)) {
+                    sourceNode.alianzasSalientes.push({
+                        code: inv.code,
+                        url: inv.url,
+                        targetName: targetLabel,
+                        targetServerId: targetSrvId,
+                        status: inv.status
+                    });
+                }
+
+                if (targetSrvId && mapaServidores.has(targetSrvId) && sourceSrvId !== targetSrvId) {
+                    alianzas.push({
+                        sourceServerId: sourceSrvId,
+                        targetServerId: targetSrvId,
+                        inviteUrl: inv.url,
+                        code: inv.code,
+                        targetName: targetLabel
+                    });
+                }
+            }
+        }
+
+        // Calcular Usuarios Conectados e Índice de Infección Silenciosa por cada Servidor
+        for (const usr of mapaUsuarios.values()) {
+            const esUsuarioHostil = (usr.infracciones > 0) || Boolean(usr.intelExterna?.amenazaConfirmada);
+            for (const sId of Object.keys(usr.servidores || {})) {
+                const srvObj = mapaServidores.get(sId);
+                if (srvObj) {
+                    srvObj.usuariosCount = (srvObj.usuariosCount || 0) + 1;
+                    if (esUsuarioHostil) {
+                        srvObj.infeccionCount = (srvObj.infeccionCount || 0) + 1;
+                    }
+                }
+            }
+        }
+
+        for (const srvObj of mapaServidores.values()) {
+            if (srvObj.usuariosCount > 0) {
+                srvObj.infeccionPct = Math.round((srvObj.infeccionCount / srvObj.usuariosCount) * 100);
+            }
+        }
+
+        res.json({
+            enjambre: estadoEnjambre,
+            servidores: Array.from(mapaServidores.values()),
+            usuarios: Array.from(mapaUsuarios.values()),
+            interacciones: estadoRadarRed.interacciones || [],
+            alianzas: alianzas,
+            pulsos: estadoRadarRed.pulsos || [],
+            bitacoraDvr: estadoRadarRed.bitacoraDvr || [],
+            watchlist: Array.from(watchlistUsuarios)
+        });
+    } catch (error) {
+        console.error('[ERROR API /api/red]:', error.message);
+        res.status(500).json({ error: 'Error al compilar la matriz de red.' });
+    }
+});
 
         for (const inv of memoriaInvitaciones.values()) {
             if (inv.status === 'VALID' && inv.guildId) {
