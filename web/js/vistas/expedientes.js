@@ -1,17 +1,32 @@
 'use strict';
 
 /* ==========================================================================
-   VISTA: EXPEDIENTES OSINT (LÍNEA DE TIEMPO COMPLETA E IMPORTACIÓN MATRICIAL)
+   VISTA: EXPEDIENTES OSINT (CON ANTIGÜEDAD SNOWFLAKE, ALIAS Y WATCHLIST VIP)
    Archivo: js/vistas/expedientes.js
    ========================================================================== */
 
 window.C4ISR_Views = window.C4ISR_Views || {};
+
+const DISCORD_EPOCH_BI = 1420070400000n;
 
 function formatearFechaCorta(dateString) {
     if (!dateString) return 'Sin fecha';
     const d = new Date(dateString);
     if (Number.isNaN(d.getTime())) return String(dateString);
     return `${d.toLocaleDateString('es-ES')} ${d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}`;
+}
+
+function decodificarSnowflake(userId) {
+    try {
+        const clean = String(userId || '').replace(/\D/g, '');
+        if (clean.length < 17) return null;
+        const ms = Number((BigInt(clean) >> 22n) + DISCORD_EPOCH_BI);
+        const dias = Math.floor((Date.now() - ms) / 86400000);
+        const fecha = new Date(ms).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        return { fecha, dias, esBurner: dias <= 21 };
+    } catch (_) {
+        return null;
+    }
 }
 
 window.C4ISR_Views.expedientes = {
@@ -26,12 +41,11 @@ window.C4ISR_Views.expedientes = {
                 <span class="panel-title" style="font-size: 1.1rem; color: var(--accent-rz);">ARCHIVO DE EXPEDIENTES E INTELIGENCIA OSINT</span>
                 <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
                     <button id="btn-add-target" class="btn-action" type="button">+ INYECTAR UID MANUAL</button>
-                    <button id="btn-import-targets" class="btn-export" type="button">📄 IMPORTAR MATRIZ JSON</button>
+                    <button id="btn-import-targets" class="btn-export" type="button">IMPORTAR MATRIZ JSON</button>
                     <input type="file" id="file-import-input" accept=".json,application/json" class="hidden">
                 </div>
             </div>
 
-            <!-- Barra de inserción manual inline (sustituye al prompt() antiguo) -->
             <div id="manual-inject-bar" class="toolbar-tactical hidden" style="border-color: var(--accent-rz);">
                 <div style="display: flex; align-items: center; gap: 0.75rem; flex-grow: 1; flex-wrap: wrap;">
                     <span style="font-family: var(--font-mono); font-size: 0.78rem; color: var(--accent-rz);">[ NUEVO OBJETIVO ]</span>
@@ -41,16 +55,17 @@ window.C4ISR_Views.expedientes = {
                 </div>
             </div>
 
-            <!-- Buscador desplegable de expedientes -->
-            <div id="osint-search-wrapper" style="position: relative; margin-bottom: 1.5rem; z-index: 40;">
+            <div id="osint-search-wrapper" style="position: relative; margin-bottom: 1.15rem; z-index: 40;">
                 <div class="toolbar-tactical" style="margin-bottom: 0;">
                     <span style="color: var(--accent-rz); font-family: var(--font-mono); font-size: 0.8rem; font-weight: 700;">[ LOCALIZADOR ]</span>
-                    <input type="text" id="osint-search" class="search-input" style="flex-grow: 1; width: auto;" placeholder="Buscar sujeto por UID, Alias o seleccionar de la lista..." autocomplete="off">
+                    <input type="text" id="osint-search" class="search-input" style="flex-grow: 1; width: auto;" placeholder="Buscar sujeto por UID, Alias actual o Alias histórico..." autocomplete="off">
                 </div>
                 <div id="osint-search-results" class="hidden" style="position: absolute; top: 100%; left: 0; width: 100%; max-height: 320px; overflow-y: auto; background: var(--bg-dark); border: var(--border-thin); border-radius: 0 0 var(--radius-md) var(--radius-md); box-shadow: var(--shadow-elevated);"></div>
             </div>
 
-            <!-- Espacio de trabajo dual: Historial Forense + Bloc del Analista -->
+            <!-- Barra de Metadatos Forenses del Sujeto (Snowflake + Historial de Alias) -->
+            <div id="osint-meta-strip" class="toolbar-tactical hidden" style="margin-bottom: 1rem; padding: 0.75rem 1.1rem; font-family: var(--font-mono); font-size: 0.76rem;"></div>
+
             <div class="osint-layout hidden" id="osint-workspace">
                 <div class="osint-panel">
                     <div class="panel-header" style="margin: 0; padding: 1rem 1.25rem;">
@@ -59,7 +74,6 @@ window.C4ISR_Views.expedientes = {
                     </div>
                     <div class="osint-content" id="osint-raw-logs"></div>
                 </div>
-
                 <div class="osint-panel">
                     <div class="panel-header" style="margin: 0; padding: 1rem 1.25rem;">
                         <span class="panel-title">DOSSIER DEL ANALISTA (AUTOGUARDADO)</span>
@@ -95,9 +109,6 @@ window.C4ISR_Views.expedientes = {
         }
     },
 
-    /**
-     * Combina la información enriquecida de expedientes y blacklist para disponer siempre del historial completo.
-     */
     obtenerListaUnificada() {
         if (!this.globalData) return [];
         const baseBlacklist = Array.isArray(this.globalData.blacklist) ? this.globalData.blacklist : [];
@@ -117,15 +128,17 @@ window.C4ISR_Views.expedientes = {
             return;
         }
 
-        searchResults.innerHTML = usuarios.slice(0, 20).map(u => {
+        searchResults.innerHTML = usuarios.slice(0, 25).map(u => {
             const id = DOMPurify.sanitize(String(u.id || ''));
             const username = DOMPurify.sanitize(String(u.username || 'Identidad Desconocida'));
             const numEventos = Array.isArray(u.historial) ? u.historial.length : (u.reincidencia || 0);
+            const sf = decodificarSnowflake(id);
+            const burnerTag = sf?.esBurner ? `<span class="badge badge-red" style="margin-left:6px;">BURNER ${sf.dias}d</span>` : '';
 
             return `
                 <div class="search-item" data-id="${id}" style="padding: 0.75rem 1.15rem; border-bottom: var(--border-subtle); cursor: pointer; display: flex; justify-content: space-between; align-items: center;">
                     <div>
-                        <div style="font-weight: 600; color: var(--text-main); font-size: 0.88rem;">${username}</div>
+                        <div style="font-weight: 600; color: var(--text-main); font-size: 0.88rem;">${username}${burnerTag}</div>
                         <div style="font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted);">UID: ${id}</div>
                     </div>
                     <span class="badge ${numEventos > 0 ? 'badge-red' : 'badge-amber'}">${numEventos} REGISTRO(S)</span>
@@ -151,37 +164,35 @@ window.C4ISR_Views.expedientes = {
         const searchWrapper = document.getElementById('osint-search-wrapper');
         const searchResults = document.getElementById('osint-search-results');
         const editor = document.getElementById('osint-notes-editor');
-
         const btnAdd = document.getElementById('btn-add-target');
         const manualBar = document.getElementById('manual-inject-bar');
         const inputManualUid = document.getElementById('input-manual-uid');
         const btnConfirmUid = document.getElementById('btn-confirm-uid');
         const btnCancelUid = document.getElementById('btn-cancel-uid');
-
         const btnImport = document.getElementById('btn-import-targets');
         const fileInput = document.getElementById('file-import-input');
 
+        const filterUsers = (term) => {
+            const todos = this.obtenerListaUnificada();
+            if (!term) return todos;
+            return todos.filter(u => {
+                const matchName = String(u.username || '').toLowerCase().includes(term);
+                const matchId = String(u.id || '').includes(term);
+                const matchAliases = Array.isArray(u.historialAliases) &&
+                    u.historialAliases.some(a => String(a).toLowerCase().includes(term));
+                return matchName || matchId || matchAliases;
+            });
+        };
+
         if (searchInput) {
             searchInput.addEventListener('focus', () => {
-                const term = searchInput.value.toLowerCase().trim();
-                const todos = this.obtenerListaUnificada();
-                const filtrados = term
-                    ? todos.filter(u => String(u.username || '').toLowerCase().includes(term) || String(u.id || '').includes(term))
-                    : todos;
-                this.renderDropdownResults(filtrados);
+                this.renderDropdownResults(filterUsers(searchInput.value.toLowerCase().trim()));
             });
-
             searchInput.addEventListener('input', (e) => {
-                const term = e.target.value.toLowerCase().trim();
-                const todos = this.obtenerListaUnificada();
-                const filtrados = term
-                    ? todos.filter(u => String(u.username || '').toLowerCase().includes(term) || String(u.id || '').includes(term))
-                    : todos;
-                this.renderDropdownResults(filtrados);
+                this.renderDropdownResults(filterUsers(e.target.value.toLowerCase().trim()));
             });
         }
 
-        // Listener limpio sin fugas de memoria al cambiar de vista
         this.outsideClickListener = (e) => {
             if (searchWrapper && searchResults && !searchWrapper.contains(e.target)) {
                 searchResults.classList.add('hidden');
@@ -200,7 +211,6 @@ window.C4ISR_Views.expedientes = {
             });
         }
 
-        // Inyección de UID Manual mediante barra integrada
         if (btnAdd && manualBar) {
             btnAdd.addEventListener('click', () => {
                 manualBar.classList.toggle('hidden');
@@ -224,7 +234,6 @@ window.C4ISR_Views.expedientes = {
                     alert('[!] Formato de UID inválido. Debe contener entre 17 y 20 dígitos numéricos.');
                     return;
                 }
-
                 btnConfirmUid.disabled = true;
                 btnConfirmUid.textContent = 'INYECTANDO...';
                 try {
@@ -239,10 +248,8 @@ window.C4ISR_Views.expedientes = {
             });
         }
 
-        // Importación de Matriz JSON (Funcionalidad que antes estaba desconectada)
         if (btnImport && fileInput) {
             btnImport.addEventListener('click', () => fileInput.click());
-
             fileInput.addEventListener('change', async (e) => {
                 const archivo = e.target.files?.[0];
                 if (!archivo) return;
@@ -255,11 +262,9 @@ window.C4ISR_Views.expedientes = {
                     const texto = await archivo.text();
                     const jsonParsed = JSON.parse(texto);
                     const matriz = Array.isArray(jsonParsed) ? jsonParsed : (jsonParsed.blacklist || jsonParsed.datos || []);
-
                     if (!Array.isArray(matriz) || matriz.length === 0) {
                         throw new Error('El archivo JSON no contiene un array de expedientes válido.');
                     }
-
                     await window.C4ISR_API.importarMatriz(matriz);
                     await window.AppController.navigate('expedientes');
                 } catch (error) {
@@ -276,6 +281,7 @@ window.C4ISR_Views.expedientes = {
     loadTargetWorkspace(targetId) {
         this.currentTargetId = String(targetId);
         const workspace = document.getElementById('osint-workspace');
+        const metaStrip = document.getElementById('osint-meta-strip');
         const rawLogsContainer = document.getElementById('osint-raw-logs');
         const editor = document.getElementById('osint-notes-editor');
         const badge = document.getElementById('osint-target-badge');
@@ -287,17 +293,53 @@ window.C4ISR_Views.expedientes = {
 
         if (!user) {
             workspace.classList.add('hidden');
+            if (metaStrip) metaStrip.classList.add('hidden');
             return;
         }
 
         workspace.classList.remove('hidden');
         this.updateSaveStatus('loaded');
-
         editor.value = user.notas || '';
+
         const usernameSeguro = DOMPurify.sanitize(String(user.username || 'Identidad Desconocida'));
         const idSeguro = DOMPurify.sanitize(String(user.id));
-
         badge.textContent = `${usernameSeguro} (${idSeguro})`;
+
+        // Poblar barra de metadatos Snowflake + Historial de Alias
+        if (metaStrip) {
+            const sf = decodificarSnowflake(user.id);
+            const sfHtml = sf
+                ? `<span style="color:${sf.esBurner ? 'var(--accent-red)' : 'var(--accent-green)'};font-weight:700;">${sf.fecha} (${sf.dias} días de antigüedad) ${sf.esBurner ? '[!] ALERTA CUENTA BURNER' : ''}</span>`
+                : 'Desconocida';
+
+            const aliasesList = Array.isArray(user.historialAliases) && user.historialAliases.length > 0
+                ? user.historialAliases.map(a => DOMPurify.sanitize(String(a))).join(' &rarr; ')
+                : usernameSeguro;
+
+            metaStrip.innerHTML = `
+                <div style="display:flex;flex-wrap:wrap;gap:1.25rem;align-items:center;width:100%;justify-content:space-between;">
+                    <div>
+                        <span style="color:var(--text-muted);">CREACIÓN CUENTA (SNOWFLAKE):</span> ${sfHtml}
+                    </div>
+                    <div>
+                        <span style="color:var(--text-muted);">HISTORIAL DE ALIAS CONOCIDOS:</span> <strong style="color:var(--accent-amber);">${aliasesList}</strong>
+                    </div>
+                    <button id="btn-exp-watchlist" class="btn-action" type="button" style="border-color:#fbbf24;color:#fbbf24;">&#9733; ALTERNAR SEGUIMIENTO VIP</button>
+                </div>
+            `;
+            metaStrip.classList.remove('hidden');
+
+            const btnVip = document.getElementById('btn-exp-watchlist');
+            if (btnVip) {
+                btnVip.addEventListener('click', async () => {
+                    try {
+                        const res = await window.C4ISR_API.toggleWatchlistUsuario(String(user.id));
+                        btnVip.textContent = res.enWatchlist ? '★ EN SEGUIMIENTO VIP (ACTIVO)' : '☆ SEGUIMIENTO VIP DESACTIVADO';
+                        btnVip.style.background = res.enWatchlist ? 'rgba(251, 191, 36, 0.2)' : 'transparent';
+                    } catch (_) {}
+                });
+            }
+        }
 
         const historial = Array.isArray(user.historial) && user.historial.length > 0
             ? [...user.historial].reverse()
@@ -314,17 +356,18 @@ window.C4ISR_Views.expedientes = {
             const casoId = DOMPurify.sanitize(String(evento.casoId || 'N/A'));
             const servidor = DOMPurify.sanitize(String(evento.servidor || 'Sector Desconocido'));
             const fecha = formatearFechaCorta(evento.fecha);
+            const esHtmlOsint = String(evento.mensajeOriginal || '').trim().startsWith('<div');
             const evidencia = DOMPurify.sanitize(String(evento.mensajeOriginal || ''));
 
             return `
                 <div style="margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: var(--border-subtle);">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem; flex-wrap: wrap; gap: 0.4rem; font-family: var(--font-mono); font-size: 0.73rem;">
                         <span style="color: var(--accent-rz); font-weight: 700;">[${casoId}] ${accion}</span>
-                        <span style="color: var(--text-muted);">📍 ${servidor} • ${fecha}</span>
+                        <span style="color: var(--text-muted);">&#11042; ${servidor} &bull; ${fecha}</span>
                     </div>
                     <div class="discord-mock">
                         <div class="discord-mock-content">
-                            <div class="discord-mock-body">${evidencia}</div>
+                            <div class="discord-mock-body">${esHtmlOsint ? evidencia : DOMPurify.sanitize(evidencia)}</div>
                         </div>
                     </div>
                 </div>
