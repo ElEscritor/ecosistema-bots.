@@ -69,7 +69,7 @@ async function conectarBaseDatos() {
             asegurarIndiceSeguro(dbCollection, { actualizadoEn: -1 }, { background: true })
         ]);
 
-        console.log('[SISTEMA] Clúster MongoDB enlazado (Blacklist + Memoria Estelar + Enjambre Dinámico).');
+        console.log('[SISTEMA] Clúster MongoDB enlazado (Blacklist + OSINT Regional + Memoria Estelar).');
         return dbCollection;
     })();
 
@@ -141,6 +141,97 @@ async function ficharInfractor(
     } catch (error) {
         console.error(`[ERROR BD] Fallo al fichar infractor (${userId}):`, error.message);
         return 'Error de escritura en clúster MongoDB.';
+    }
+}
+
+/**
+ * Guarda de forma persistente los datos estructurados de País, Región, Ciudad, Edad, Nombre y Redes
+ * extraídos por el motor OSINT 3.0 dentro del expediente del usuario.
+ */
+async function guardarPerfilOsintEstructurado(userId, userTag, datosOsint) {
+    if (!dbCollection || !userId || !datosOsint) return false;
+    const cleanId = String(userId).trim();
+    const ahora = new Date().toISOString();
+
+    const camposSet = { actualizadoEn: ahora };
+    if (userTag) camposSet.ultimoAlias = String(userTag).trim();
+    if (datosOsint.pais) camposSet['perfilOsint.pais'] = datosOsint.pais;
+    if (datosOsint.region) camposSet['perfilOsint.region'] = datosOsint.region;
+    if (datosOsint.ciudadDeclarada) camposSet['perfilOsint.ciudadDeclarada'] = datosOsint.ciudadDeclarada;
+    if (datosOsint.husoEstimado) camposSet['perfilOsint.husoEstimado'] = datosOsint.husoEstimado;
+    if (datosOsint.edad) camposSet['perfilOsint.edad'] = datosOsint.edad;
+    if (datosOsint.nombreReal) camposSet['perfilOsint.nombreReal'] = datosOsint.nombreReal;
+    if (datosOsint.gentilicio) camposSet['perfilOsint.gentilicio'] = datosOsint.gentilicio;
+    camposSet['perfilOsint.actualizadoEn'] = ahora;
+
+    const updateOp = {
+        $set: camposSet,
+        $setOnInsert: {
+            primerFichaje: ahora,
+            notasAnalista: '',
+            totalInfracciones: 0,
+            historial: []
+        }
+    };
+
+    const addToSetOp = {};
+    if (userTag) addToSetOp.historialAliases = String(userTag).trim();
+    if (Array.isArray(datosOsint.modismos) && datosOsint.modismos.length > 0) {
+        addToSetOp['perfilOsint.modismos'] = { $each: datosOsint.modismos.slice(0, 15) };
+    }
+    if (Array.isArray(datosOsint.redes) && datosOsint.redes.length > 0) {
+        addToSetOp['perfilOsint.redes'] = { $each: datosOsint.redes.slice(0, 10) };
+    }
+    if (Object.keys(addToSetOp).length > 0) {
+        updateOp.$addToSet = addToSetOp;
+    }
+
+    try {
+        await dbCollection.updateOne({ userId: cleanId }, updateOp, { upsert: true });
+        return true;
+    } catch (error) {
+        console.error(`[ERROR BD] Fallo en guardarPerfilOsintEstructurado (${cleanId}):`, error.message);
+        return false;
+    }
+}
+
+/**
+ * Guarda en el expediente del usuario los antecedentes hallados en XN Protect, VPS 5604 y LC Guard.
+ */
+async function guardarIntelExternaUsuario(userId, userTag, intelData) {
+    if (!dbCollection || !userId || !intelData) return false;
+    const cleanId = String(userId).trim();
+    const ahora = new Date().toISOString();
+
+    try {
+        await dbCollection.updateOne(
+            { userId: cleanId },
+            {
+                $set: {
+                    intelExterna: {
+                        amenazaConfirmada: Boolean(intelData.amenazaConfirmada),
+                        xnBaneado: Boolean(intelData.xnProtect?.baneado),
+                        xnRazon: intelData.xnProtect?.razon || null,
+                        xnPrueba: intelData.xnProtect?.pruebaUrl || null,
+                        vpsDetectado: Boolean(intelData.vpsSquads?.detectado),
+                        vpsRegistros: Array.isArray(intelData.vpsSquads?.registros) ? intelData.vpsSquads.registros.slice(0, 10) : [],
+                        lcSancionado: Boolean(intelData.lcGuard?.sancionado),
+                        consultadoEn: ahora
+                    }
+                },
+                $setOnInsert: {
+                    ultimoAlias: String(userTag || 'Objetivo Externo').trim(),
+                    primerFichaje: ahora,
+                    notasAnalista: '',
+                    totalInfracciones: 0,
+                    historial: []
+                }
+            },
+            { upsert: true }
+        );
+        return true;
+    } catch (_) {
+        return false;
     }
 }
 
@@ -334,9 +425,6 @@ async function cargarSnapshotRed() {
     }
 }
 
-/**
- * Guarda un token explorador añadido desde la interfaz web para que persista en MongoDB.
- */
 async function guardarTokenDinamico(tokenStr, etiquetaSector = 'General') {
     if (!topologyCollection || !tokenStr) return false;
     const cleanToken = String(tokenStr).replace(/^(Bot|Bearer)\s+/i, '').trim();
@@ -389,6 +477,8 @@ module.exports = {
     conectarBaseDatos,
     verificarConexion,
     ficharInfractor,
+    guardarPerfilOsintEstructurado,
+    guardarIntelExternaUsuario,
     obtenerExpedientes,
     obtenerExpedientesPaginados,
     obtenerExpedientesCursor,
