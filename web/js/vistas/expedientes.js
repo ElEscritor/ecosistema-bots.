@@ -1,7 +1,7 @@
 'use strict';
 
 /* ==========================================================================
-   VISTA: EXPEDIENTES OSINT (CON ANTIGÜEDAD SNOWFLAKE, ALIAS Y WATCHLIST VIP)
+   VISTA: EXPEDIENTES OSINT + ESCÁNER APIS EXTERNAS + EXPORTADOR DOSSIER HTML
    Archivo: js/vistas/expedientes.js
    ========================================================================== */
 
@@ -32,17 +32,33 @@ function decodificarSnowflake(userId) {
 window.C4ISR_Views.expedientes = {
     saveTimeout: null,
     currentTargetId: null,
+    lastExternalIntel: null,
     globalData: null,
     outsideClickListener: null,
 
     async render(container) {
         container.innerHTML = `
-            <div class="panel-header" style="margin-bottom: 1.15rem;">
-                <span class="panel-title" style="font-size: 1.1rem; color: var(--accent-rz);">ARCHIVO DE EXPEDIENTES E INTELIGENCIA OSINT</span>
-                <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+            <div class="panel-header" style="margin-bottom: 1rem;">
+                <span class="panel-title" style="font-size: 1.08rem; color: var(--accent-rz);">ARCHIVO DE EXPEDIENTES // INTELIGENCIA FEDERADA (XN / VPS / LC)</span>
+                <div style="display: flex; gap: 0.55rem; align-items: center; flex-wrap: wrap;">
+                    <button id="btn-toggle-arsenal" class="btn-action" type="button">+ AÑADIR REGLA / COMANDO EN VIVO</button>
                     <button id="btn-add-target" class="btn-action" type="button">+ INYECTAR UID MANUAL</button>
                     <button id="btn-import-targets" class="btn-export" type="button">IMPORTAR MATRIZ JSON</button>
                     <input type="file" id="file-import-input" accept=".json,application/json" class="hidden">
+                </div>
+            </div>
+
+            <!-- Barra para añadir Comandos Squad o Palabras Clave en caliente sin tocar GitHub/Render -->
+            <div id="arsenal-live-bar" class="toolbar-tactical hidden" style="border-color: #00f0ff; margin-bottom: 0.9rem;">
+                <div style="display: flex; align-items: center; gap: 0.6rem; flex-grow: 1; flex-wrap: wrap;">
+                    <span style="font-family: var(--font-mono); font-size: 0.76rem; color: #00f0ff;">[ ARSENAL EN VIVO ]</span>
+                    <select id="select-arsenal-type" style="background: var(--bg-input); color: #00f0ff; border: 1px solid rgba(0,240,255,0.35); border-radius: 4px; padding: 0.45rem; font-family: var(--font-mono); font-size: 0.75rem;">
+                        <option value="COMANDO_SQUAD">NUEVO COMANDO SQUAD (Ej: .cbot)</option>
+                        <option value="PALABRA_RAID">NUEVA PALABRA CLAVE RAID</option>
+                    </select>
+                    <input type="text" id="input-arsenal-val" class="search-input" style="width: 210px;" placeholder="Ej: .cbot o nombre de squad">
+                    <input type="text" id="input-arsenal-desc" class="search-input" style="flex: 1; min-width: 180px;" placeholder="Descripción del comando o amenaza...">
+                    <button id="btn-save-arsenal" class="btn-export" type="button">ACTIVAR EN ENJAMBRE</button>
                 </div>
             </div>
 
@@ -50,12 +66,12 @@ window.C4ISR_Views.expedientes = {
                 <div style="display: flex; align-items: center; gap: 0.75rem; flex-grow: 1; flex-wrap: wrap;">
                     <span style="font-family: var(--font-mono); font-size: 0.78rem; color: var(--accent-rz);">[ NUEVO OBJETIVO ]</span>
                     <input type="text" id="input-manual-uid" class="search-input" placeholder="Pegar Discord UID (17 a 20 dígitos)..." maxlength="20">
-                    <button id="btn-confirm-uid" class="btn-action" type="button">REGISTRAR</button>
+                    <button id="btn-confirm-uid" class="btn-action" type="button">REGISTRAR Y ESCANEAR APIS</button>
                     <button id="btn-cancel-uid" class="btn-action btn-purge" type="button">CANCELAR</button>
                 </div>
             </div>
 
-            <div id="osint-search-wrapper" style="position: relative; margin-bottom: 1.15rem; z-index: 40;">
+            <div id="osint-search-wrapper" style="position: relative; margin-bottom: 1rem; z-index: 40;">
                 <div class="toolbar-tactical" style="margin-bottom: 0;">
                     <span style="color: var(--accent-rz); font-family: var(--font-mono); font-size: 0.8rem; font-weight: 700;">[ LOCALIZADOR ]</span>
                     <input type="text" id="osint-search" class="search-input" style="flex-grow: 1; width: auto;" placeholder="Buscar sujeto por UID, Alias actual o Alias histórico..." autocomplete="off">
@@ -63,8 +79,11 @@ window.C4ISR_Views.expedientes = {
                 <div id="osint-search-results" class="hidden" style="position: absolute; top: 100%; left: 0; width: 100%; max-height: 320px; overflow-y: auto; background: var(--bg-dark); border: var(--border-thin); border-radius: 0 0 var(--radius-md) var(--radius-md); box-shadow: var(--shadow-elevated);"></div>
             </div>
 
-            <!-- Barra de Metadatos Forenses del Sujeto (Snowflake + Historial de Alias) -->
-            <div id="osint-meta-strip" class="toolbar-tactical hidden" style="margin-bottom: 1rem; padding: 0.75rem 1.1rem; font-family: var(--font-mono); font-size: 0.76rem;"></div>
+            <!-- Barra de Metadatos Forenses + Botones de Consulta API Externa y Exportación de Dossier -->
+            <div id="osint-meta-strip" class="toolbar-tactical hidden" style="margin-bottom: 0.85rem; padding: 0.75rem 1.1rem; font-family: var(--font-mono); font-size: 0.75rem;"></div>
+
+            <!-- Contenedor de Resultados en Vivo de XN Protect / VPS 5604 / LC Guard -->
+            <div id="external-intel-box" class="toolbar-tactical hidden" style="margin-bottom: 0.9rem; border-color: #fcee0a; background: rgba(15, 13, 22, 0.95); font-family: var(--font-mono); font-size: 0.76rem;"></div>
 
             <div class="osint-layout hidden" id="osint-workspace">
                 <div class="osint-panel">
@@ -172,6 +191,40 @@ window.C4ISR_Views.expedientes = {
         const btnImport = document.getElementById('btn-import-targets');
         const fileInput = document.getElementById('file-import-input');
 
+        const btnArsenal = document.getElementById('btn-toggle-arsenal');
+        const arsenalBar = document.getElementById('arsenal-live-bar');
+        const btnSaveArsenal = document.getElementById('btn-save-arsenal');
+
+        if (btnArsenal && arsenalBar) {
+            btnArsenal.addEventListener('click', () => arsenalBar.classList.toggle('hidden'));
+        }
+
+        if (btnSaveArsenal) {
+            btnSaveArsenal.addEventListener('click', async () => {
+                const tipo = document.getElementById('select-arsenal-type')?.value;
+                const valor = document.getElementById('input-arsenal-val')?.value.trim();
+                const desc = document.getElementById('input-arsenal-desc')?.value.trim();
+                if (!valor) {
+                    alert('[!] Introduce el comando o palabra clave.');
+                    return;
+                }
+                btnSaveArsenal.disabled = true;
+                btnSaveArsenal.textContent = 'ACTIVANDO...';
+                try {
+                    await window.C4ISR_API.agregarReglaArsenal(tipo, valor, desc);
+                    alert(`[+] Regla "${valor}" activa en tiempo real para todos los exploradores.`);
+                    document.getElementById('input-arsenal-val').value = '';
+                    document.getElementById('input-arsenal-desc').value = '';
+                    arsenalBar.classList.add('hidden');
+                } catch (err) {
+                    alert(`[!] Error al activar regla: ${err.message}`);
+                } finally {
+                    btnSaveArsenal.disabled = false;
+                    btnSaveArsenal.textContent = 'ACTIVAR EN ENJAMBRE';
+                }
+            });
+        }
+
         const filterUsers = (term) => {
             const todos = this.obtenerListaUnificada();
             if (!term) return todos;
@@ -243,7 +296,7 @@ window.C4ISR_Views.expedientes = {
                 } catch (error) {
                     alert('[!] Error al registrar el UID en la base de datos.');
                     btnConfirmUid.disabled = false;
-                    btnConfirmUid.textContent = 'REGISTRAR';
+                    btnConfirmUid.textContent = 'REGISTRAR Y ESCANEAR APIS';
                 }
             });
         }
@@ -278,14 +331,161 @@ window.C4ISR_Views.expedientes = {
         }
     },
 
+    async ejecutarEscaneoExterno(userId) {
+        const box = document.getElementById('external-intel-box');
+        if (!box) return;
+        box.classList.remove('hidden');
+        box.innerHTML = `<div style="color:#00f0ff;">[ ESCANEANDO REDES EXTERNAS ] Consultando XN Protect, VPS 5604 (Squads & Keywords) y LC Guard para UID ${DOMPurify.sanitize(userId)}...</div>`;
+
+        try {
+            const intel = await window.C4ISR_API.consultarIntelExterna(userId);
+            this.lastExternalIntel = intel;
+
+            const xn = intel.xnProtect || {};
+            const sq = intel.vpsSquads || {};
+            const kw = intel.vpsKeywords || {};
+            const lc = intel.lcGuard || {};
+
+            let html = `<div style="width:100%;">`;
+            html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;border-bottom:var(--border-subtle);padding-bottom:0.4rem;">`;
+            html += `<span style="color:#fcee0a;font-weight:700;">[ REPORTE DE INTELIGENCIA EXTERNA EN VIVO ]</span>`;
+            html += `<button id="btn-inject-intel-notes" class="btn-action" type="button" style="font-size:0.7rem;padding:3px 8px;">VOLCAR AL DOSSIER DEL ANALISTA</button>`;
+            html += `</div>`;
+
+            // 1. XN Protect
+            if (xn.baneado) {
+                html += `<div style="color:#ff003c;margin-bottom:6px;">&#9679; <strong>XN PROTECT GLOBALBAN:</strong> POSITIVO &mdash; ${DOMPurify.sanitize(xn.razon)} ${xn.pruebaUrl ? `<a href="${DOMPurify.sanitize(xn.pruebaUrl)}" target="_blank" rel="noopener noreferrer" style="color:#00f0ff;margin-left:6px;">[ABRIR PRUEBA VISUAL]</a>` : ''}</div>`;
+            } else {
+                html += `<div style="color:#10b981;margin-bottom:4px;">&#9679; <strong>XN PROTECT GLOBALBAN:</strong> Limpio</div>`;
+            }
+
+            // 2. VPS 5604 Squad Banned Users
+            if (sq.detectado && Array.isArray(sq.registros)) {
+                html += `<div style="color:#ff003c;margin-bottom:4px;">&#9679; <strong>VPS 5604 SQUAD BANS (${sq.registros.length}):</strong></div>`;
+                for (const r of sq.registros) {
+                    html += `<div style="margin-left:14px;padding:4px 8px;border-left:2px solid #ff003c;background:rgba(255,0,60,0.08);margin-bottom:4px;font-size:0.72rem;">`;
+                    html += `Servicio: <b>${DOMPurify.sanitize(r.servicio)}</b> | Fecha: ${DOMPurify.sanitize(r.fecha)} | Acción: <code>${DOMPurify.sanitize(r.actionId)}</code><br>`;
+                    html += `Evidencia: ${DOMPurify.sanitize(r.razon)}`;
+                    if (r.servidorExtraidoNombre) {
+                        html += `<br><span style="color:#fcee0a;">&rarr; Servidor extraído e inyectado al Mapa Estelar: <b>${DOMPurify.sanitize(r.servidorExtraidoNombre)}</b> (${DOMPurify.sanitize(r.servidorExtraidoId)})</span>`;
+                    }
+                    html += `</div>`;
+                }
+            } else {
+                html += `<div style="color:#10b981;margin-bottom:4px;">&#9679; <strong>VPS 5604 SQUAD BANS:</strong> Sin registros de comandos</div>`;
+            }
+
+            // 3. VPS 5604 Keywords
+            if (kw.detectado) {
+                html += `<div style="color:#fbbf24;margin-bottom:4px;">&#9679; <strong>VPS 5604 KEYWORDS:</strong> ${kw.registros.length} alerta(s) registrada(s)</div>`;
+            }
+
+            // 4. LC Guard
+            if (lc.sancionado) {
+                html += `<div style="color:#ff003c;">&#9679; <strong>LC GUARD SANCTIONS:</strong> SANCIONADO ACTIVO (${lc.detalles.length} registro(s))</div>`;
+            } else {
+                html += `<div style="color:#10b981;">&#9679; <strong>LC GUARD SANCTIONS:</strong> Sin sanciones activas</div>`;
+            }
+
+            html += `</div>`;
+            box.innerHTML = html;
+
+            const btnVolcar = document.getElementById('btn-inject-intel-notes');
+            const editor = document.getElementById('osint-notes-editor');
+            if (btnVolcar && editor) {
+                btnVolcar.addEventListener('click', () => {
+                    const bloqueTexto = `\n--- [INTEL EXTERNA ${new Date().toLocaleDateString('es-ES')}] ---\n` +
+                        `XN Protect: ${xn.baneado ? `BANEADO (${xn.razon}) ${xn.pruebaUrl || ''}` : 'Limpio'}\n` +
+                        `VPS 5604 Squads: ${sq.detectado ? sq.registros.map(r => `[${r.servicio}] ${r.razon}`).join(' | ') : 'Limpio'}\n` +
+                        `LC Guard: ${lc.sancionado ? 'SANCIONADO' : 'Limpio'}\n`;
+                    editor.value = (editor.value + bloqueTexto).trim();
+                    this.saveNotes(this.currentTargetId, editor.value);
+                    btnVolcar.textContent = '¡GUARDADO EN DOSSIER!';
+                });
+            }
+        } catch (err) {
+            box.innerHTML = `<div style="color:var(--accent-red);">[!] Error al consultar APIs externas: ${DOMPurify.sanitize(err.message)}</div>`;
+        }
+    },
+
+    exportarDossierClasificadoHTML(user) {
+        if (!user) return;
+        const sf = decodificarSnowflake(user.id);
+        const aliases = Array.isArray(user.historialAliases) && user.historialAliases.length > 0
+            ? user.historialAliases.join(', ')
+            : user.username;
+        const historial = Array.isArray(user.historial) ? user.historial : [];
+
+        const filasEventos = historial.map(h => `
+            <div style="border-left:3px solid #ff2a6d;padding:10px 14px;margin-bottom:12px;background:#171420;border-radius:4px;">
+                <div style="color:#ff2a6d;font-weight:bold;font-size:12px;">[${escaparSimple(h.casoId || 'CASO')}] ${escaparSimple(h.accion || 'Evento')} &bull; Servidor: ${escaparSimple(h.servidor || 'N/A')} &bull; ${escaparSimple(h.fecha || '')}</div>
+                <pre style="white-space:pre-wrap;word-break:break-word;color:#e2e8f0;font-family:monospace;font-size:13px;margin-top:6px;">${escaparSimple(h.mensajeOriginal || '')}</pre>
+            </div>
+        `).join('');
+
+        function escaparSimple(str) {
+            return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        const docHTML = `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>DOSSIER CLASIFICADO C4ISR // UID ${escaparSimple(user.id)}</title>
+<style>
+    body { background:#09080c; color:#f1f5f9; font-family:'JetBrains Mono',Consolas,monospace; padding:30px; max-width:960px; margin:0 auto; }
+    .header { border:1px solid #ff2a6d; border-left:6px solid #ff2a6d; padding:20px; background:#110f17; margin-bottom:24px; }
+    .title { color:#ff2a6d; font-size:22px; font-weight:bold; letter-spacing:2px; }
+    .grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:14px; font-size:13px; }
+    .section { background:#110f17; border:1px solid rgba(255,255,255,0.08); padding:18px; margin-bottom:20px; border-radius:6px; }
+    .sec-title { color:#fcee0a; font-weight:bold; margin-bottom:10px; font-size:14px; }
+</style>
+</head>
+<body>
+    <div class="header">
+        <div class="title">LA BIBLIOTECA // DOSSIER FORENSE CLASIFICADO</div>
+        <div class="grid">
+            <div><strong>OBJETIVO ACTUAL:</strong> ${escaparSimple(user.username)}</div>
+            <div><strong>DISCORD UID:</strong> ${escaparSimple(user.id)}</div>
+            <div><strong>CREACIÓN CUENTA:</strong> ${sf ? `${sf.fecha} (${sf.dias} días)` : 'N/A'}</div>
+            <div><strong>HISTORIAL DE ALIAS:</strong> ${escaparSimple(aliases)}</div>
+            <div><strong>NIVEL REINCIDENCIA:</strong> ${user.reincidencia || 0} infracciones</div>
+            <div><strong>EMITIDO EL:</strong> ${new Date().toISOString()}</div>
+        </div>
+    </div>
+    <div class="section">
+        <div class="sec-title">[ NOTAS Y CONCLUSIONES DEL ANALISTA ]</div>
+        <pre style="white-space:pre-wrap;color:#34d399;font-family:monospace;">${escaparSimple(user.notas || 'Sin notas manuales registradas.')}</pre>
+    </div>
+    <div class="section">
+        <div class="sec-title">[ HISTORIAL INMUTABLE DE EVIDENCIAS INTERCEPTADAS (${historial.length}) ]</div>
+        ${filasEventos || 'Sin eventos registrados.'}
+    </div>
+</body>
+</html>`;
+
+        const blob = new Blob([docHTML], { type: 'text/html;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `DOSSIER_C4ISR_${user.id}.html`;
+        document.body.appendChild(a);
+        a.click();
+        URL.revokeObjectURL(url);
+        a.remove();
+    },
+
     loadTargetWorkspace(targetId) {
         this.currentTargetId = String(targetId);
+        this.lastExternalIntel = null;
         const workspace = document.getElementById('osint-workspace');
         const metaStrip = document.getElementById('osint-meta-strip');
+        const intelBox = document.getElementById('external-intel-box');
         const rawLogsContainer = document.getElementById('osint-raw-logs');
         const editor = document.getElementById('osint-notes-editor');
         const badge = document.getElementById('osint-target-badge');
 
+        if (intelBox) intelBox.classList.add('hidden');
         if (!workspace || !rawLogsContainer || !editor || !badge) return;
 
         const lista = this.obtenerListaUnificada();
@@ -305,11 +505,10 @@ window.C4ISR_Views.expedientes = {
         const idSeguro = DOMPurify.sanitize(String(user.id));
         badge.textContent = `${usernameSeguro} (${idSeguro})`;
 
-        // Poblar barra de metadatos Snowflake + Historial de Alias
         if (metaStrip) {
             const sf = decodificarSnowflake(user.id);
             const sfHtml = sf
-                ? `<span style="color:${sf.esBurner ? 'var(--accent-red)' : 'var(--accent-green)'};font-weight:700;">${sf.fecha} (${sf.dias} días de antigüedad) ${sf.esBurner ? '[!] ALERTA CUENTA BURNER' : ''}</span>`
+                ? `<span style="color:${sf.esBurner ? 'var(--accent-red)' : 'var(--accent-green)'};font-weight:700;">${sf.fecha} (${sf.dias}d) ${sf.esBurner ? '[BURNER]' : ''}</span>`
                 : 'Desconocida';
 
             const aliasesList = Array.isArray(user.historialAliases) && user.historialAliases.length > 0
@@ -317,25 +516,36 @@ window.C4ISR_Views.expedientes = {
                 : usernameSeguro;
 
             metaStrip.innerHTML = `
-                <div style="display:flex;flex-wrap:wrap;gap:1.25rem;align-items:center;width:100%;justify-content:space-between;">
+                <div style="display:flex;flex-wrap:wrap;gap:0.8rem;align-items:center;width:100%;justify-content:space-between;">
                     <div>
-                        <span style="color:var(--text-muted);">CREACIÓN CUENTA (SNOWFLAKE):</span> ${sfHtml}
+                        <span style="color:var(--text-muted);">CUENTA:</span> ${sfHtml} &nbsp;|&nbsp;
+                        <span style="color:var(--text-muted);">ALIAS:</span> <strong style="color:var(--accent-amber);">${aliasesList}</strong>
                     </div>
-                    <div>
-                        <span style="color:var(--text-muted);">HISTORIAL DE ALIAS CONOCIDOS:</span> <strong style="color:var(--accent-amber);">${aliasesList}</strong>
+                    <div style="display:flex;gap:0.45rem;flex-wrap:wrap;">
+                        <button id="btn-scan-ext-apis" class="btn-action" type="button" style="border-color:#00f0ff;color:#00f0ff;">&#128269; CONSULTAR APIS (XN / VPS / LC)</button>
+                        <button id="btn-export-dossier-html" class="btn-export" type="button">&#128190; DESCARGAR DOSSIER (.HTML)</button>
+                        <button id="btn-exp-watchlist" class="btn-action" type="button" style="border-color:#fbbf24;color:#fbbf24;">&#9733; VIP</button>
                     </div>
-                    <button id="btn-exp-watchlist" class="btn-action" type="button" style="border-color:#fbbf24;color:#fbbf24;">&#9733; ALTERNAR SEGUIMIENTO VIP</button>
                 </div>
             `;
             metaStrip.classList.remove('hidden');
+
+            const btnScan = document.getElementById('btn-scan-ext-apis');
+            if (btnScan) {
+                btnScan.addEventListener('click', () => this.ejecutarEscaneoExterno(user.id));
+            }
+
+            const btnDossierHtml = document.getElementById('btn-export-dossier-html');
+            if (btnDossierHtml) {
+                btnDossierHtml.addEventListener('click', () => this.exportarDossierClasificadoHTML(user));
+            }
 
             const btnVip = document.getElementById('btn-exp-watchlist');
             if (btnVip) {
                 btnVip.addEventListener('click', async () => {
                     try {
                         const res = await window.C4ISR_API.toggleWatchlistUsuario(String(user.id));
-                        btnVip.textContent = res.enWatchlist ? '★ EN SEGUIMIENTO VIP (ACTIVO)' : '☆ SEGUIMIENTO VIP DESACTIVADO';
-                        btnVip.style.background = res.enWatchlist ? 'rgba(251, 191, 36, 0.2)' : 'transparent';
+                        btnVip.textContent = res.enWatchlist ? '★ VIP ACTIVO' : '☆ VIP OFF';
                     } catch (_) {}
                 });
             }
@@ -356,7 +566,6 @@ window.C4ISR_Views.expedientes = {
             const casoId = DOMPurify.sanitize(String(evento.casoId || 'N/A'));
             const servidor = DOMPurify.sanitize(String(evento.servidor || 'Sector Desconocido'));
             const fecha = formatearFechaCorta(evento.fecha);
-            const esHtmlOsint = String(evento.mensajeOriginal || '').trim().startsWith('<div');
             const evidencia = DOMPurify.sanitize(String(evento.mensajeOriginal || ''));
 
             return `
@@ -367,7 +576,7 @@ window.C4ISR_Views.expedientes = {
                     </div>
                     <div class="discord-mock">
                         <div class="discord-mock-content">
-                            <div class="discord-mock-body">${esHtmlOsint ? evidencia : DOMPurify.sanitize(evidencia)}</div>
+                            <div class="discord-mock-body">${evidencia}</div>
                         </div>
                     </div>
                 </div>
