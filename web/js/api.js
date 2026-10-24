@@ -18,7 +18,22 @@ window.C4ISR_API = {
             sessionStorage.removeItem(STORAGE_SESSION_KEY);
         }
     },
+   
+async consultarIntelExterna(userId) {
+        return await this.request(`/api/intel/${encodeURIComponent(userId)}`);
+    },
 
+    async getArsenalDinamico() {
+        return await this.request('/api/arsenal');
+    },
+
+    async agregarReglaArsenal(tipo, valor, descripcion) {
+        return await this.request('/api/arsenal/regla', {
+            method: 'POST',
+            body: JSON.stringify({ tipo, valor, descripcion })
+        });
+    },
+   
    async agregarTokenExplorador(token, sector = 'General') {
         return await this.request('/api/enjambre/token', {
             method: 'POST',
