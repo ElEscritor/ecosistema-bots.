@@ -1,7 +1,7 @@
 'use strict';
 
 /* ==========================================================================
-   VISTA: ANALÍTICA C4ISR (TELEMETRÍA REAL Y ESTADO DEL ENJAMBRE)
+   VISTA: ANALÍTICA C4ISR + GESTOR DE ENJAMBRE EN CALIENTE
    Archivo: js/vistas/dashboard.js
    ========================================================================== */
 
@@ -21,9 +21,24 @@ window.C4ISR_Views.dashboard = {
 
             <div class="panel-container" style="margin-bottom: 1.5rem;">
                 <div class="panel-header">
-                    <span class="panel-title" style="color: var(--accent-rz);">UNIDADES DE RECONOCIMIENTO ACTIVAS (ENJAMBRE)</span>
-                    <span id="swarm-count-badge" class="badge badge-green">0 ONLINE</span>
+                    <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+                        <span class="panel-title" style="color: var(--accent-rz);">UNIDADES DE RECONOCIMIENTO ACTIVAS (ENJAMBRE)</span>
+                        <span id="swarm-count-badge" class="badge badge-green">0 ONLINE</span>
+                    </div>
+                    <button id="btn-show-token-bar" class="btn-action" type="button">+ DESPLEGAR NUEVO TOKEN</button>
                 </div>
+
+                <!-- Barra para añadir Tokens Exploradores en caliente sin entrar a Render -->
+                <div id="token-inject-bar" class="toolbar-tactical hidden" style="border-color: var(--accent-green); margin-bottom: 1rem;">
+                    <div style="display: flex; align-items: center; gap: 0.65rem; flex-grow: 1; flex-wrap: wrap;">
+                        <span style="font-family: var(--font-mono); font-size: 0.76rem; color: var(--accent-green);">[ NUEVO EXPLORADOR ]</span>
+                        <input type="password" id="input-new-token" class="search-input" style="flex: 2; min-width: 220px;" placeholder="Pegar User Token de Discord..." autocomplete="off">
+                        <input type="text" id="input-token-sector" class="search-input" style="flex: 1; min-width: 150px;" placeholder="Sector (ej: Proveedores / VIP)" maxlength="25">
+                        <button id="btn-confirm-token" class="btn-export" type="button">CONECTAR 24/7</button>
+                        <button id="btn-cancel-token" class="btn-action btn-purge" type="button">CANCELAR</button>
+                    </div>
+                </div>
+
                 <div class="links-grid" id="dashboard-bots"></div>
             </div>
 
@@ -43,6 +58,8 @@ window.C4ISR_Views.dashboard = {
                 </div>
             </div>
         `;
+
+        this.bindTokenEvents();
 
         try {
             const datos = await window.C4ISR_API.getDatosGlobales();
@@ -66,15 +83,58 @@ window.C4ISR_Views.dashboard = {
         }
     },
 
-    /**
-     * Extrae estadísticas reales a partir de los expedientes almacenados en MongoDB.
-     */
+    bindTokenEvents() {
+        const btnShow = document.getElementById('btn-show-token-bar');
+        const bar = document.getElementById('token-inject-bar');
+        const inputToken = document.getElementById('input-new-token');
+        const inputSector = document.getElementById('input-token-sector');
+        const btnConfirm = document.getElementById('btn-confirm-token');
+        const btnCancel = document.getElementById('btn-cancel-token');
+
+        if (btnShow && bar) {
+            btnShow.addEventListener('click', () => {
+                bar.classList.toggle('hidden');
+                if (!bar.classList.contains('hidden') && inputToken) inputToken.focus();
+            });
+        }
+
+        if (btnCancel && bar) {
+            btnCancel.addEventListener('click', () => {
+                bar.classList.add('hidden');
+                if (inputToken) inputToken.value = '';
+                if (inputSector) inputSector.value = '';
+            });
+        }
+
+        if (btnConfirm && inputToken) {
+            btnConfirm.addEventListener('click', async () => {
+                const tokenVal = inputToken.value.trim();
+                const sectorVal = inputSector?.value.trim() || 'General';
+                if (tokenVal.length < 40) {
+                    alert('[!] El token introducido es demasiado corto o inválido.');
+                    return;
+                }
+
+                btnConfirm.disabled = true;
+                btnConfirm.textContent = 'INFILTRANDO...';
+                try {
+                    const res = await window.C4ISR_API.agregarTokenExplorador(tokenVal, sectorVal);
+                    alert(`[+] Unidad conectada con éxito: ${res.tag} (${res.guilds} servidores detectados).`);
+                    await window.AppController.navigate('dashboard');
+                } catch (err) {
+                    alert(`[!] Fallo al conectar el token: ${err.message}`);
+                    btnConfirm.disabled = false;
+                    btnConfirm.textContent = 'CONECTAR 24/7';
+                }
+            });
+        }
+    },
+
     procesarTelemetriaReal(datos) {
         const expedientes = Array.isArray(datos.expedientes)
             ? datos.expedientes
             : (Array.isArray(datos.blacklist) ? datos.blacklist : []);
 
-        // 6 bloques de 4 horas para la curva de actividad diaria
         const tramosHorarios = [
             { x: '00:00', y: 0 },
             { x: '04:00', y: 0 },
@@ -90,7 +150,6 @@ window.C4ISR_Views.dashboard = {
 
         for (const exp of expedientes) {
             const historial = Array.isArray(exp.historial) ? exp.historial : [];
-
             if (historial.length === 0) {
                 const ts = Date.parse(exp.primerFichaje || exp.fecha);
                 if (!Number.isNaN(ts)) {
@@ -118,7 +177,6 @@ window.C4ISR_Views.dashboard = {
             }
         }
 
-        // Si no venía el array de expedientes completo, respaldamos con las listas pre-filtradas
         if (conteoLinks === 0 && Array.isArray(datos.links)) {
             conteoLinks = datos.links.length;
         }
@@ -173,7 +231,7 @@ window.C4ISR_Views.dashboard = {
             container.innerHTML = `
                 <div style="grid-column: 1 / -1; padding: 1.75rem; text-align: center; border: 1px dashed rgba(255, 42, 109, 0.3); border-radius: var(--radius-md); background: rgba(0,0,0,0.2);">
                     <div style="color: var(--text-muted); font-family: var(--font-mono); font-size: 0.82rem;">
-                        [!] NINGUNA UNIDAD EXPLORADORA REPORTA PULSO ACTIVO EN ESTE MOMENTO.
+                        [!] NINGUNA UNIDAD EXPLORADORA REPORTA PULSO ACTIVO. USA EL BOTÓN "+ DESPLEGAR NUEVO TOKEN".
                     </div>
                 </div>
             `;
@@ -184,15 +242,18 @@ window.C4ISR_Views.dashboard = {
             const avatar = DOMPurify.sanitize(bot.avatar || 'https://cdn.discordapp.com/embed/avatars/0.png');
             const tag = DOMPurify.sanitize(bot.tag || 'Unidad Anónima');
             const id = DOMPurify.sanitize(bot.id || '000000000000000000');
+            const sector = DOMPurify.sanitize(bot.sector || 'General');
+            const guildsCount = Number.isInteger(bot.guildsCount) ? `${bot.guildsCount} SERVERS` : 'ACTIVO';
 
             return `
                 <div class="link-card" style="display: flex; align-items: center; gap: 0.9rem; padding: 0.95rem 1.1rem; border-top-color: var(--accent-green);">
                     <img src="${avatar}" alt="Avatar" style="width: 42px; height: 42px; border-radius: 50%; border: 2px solid var(--accent-green); object-fit: cover; flex-shrink: 0;">
                     <div style="min-width: 0; flex-grow: 1;">
                         <div style="color: var(--text-main); font-weight: 600; font-size: 0.92rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${tag}</div>
-                        <div style="color: var(--text-muted); font-family: var(--font-mono); font-size: 0.72rem;">UID: ${id}</div>
+                        <div style="color: var(--text-muted); font-family: var(--font-mono); font-size: 0.71rem;">UID: ${id}</div>
+                        <div style="color: var(--accent-amber); font-family: var(--font-mono); font-size: 0.69rem; margin-top: 2px;">SECTOR: ${sector}</div>
                     </div>
-                    <span class="badge badge-green">ACTIVO</span>
+                    <span class="badge badge-green">${guildsCount}</span>
                 </div>
             `;
         }).join('');
@@ -243,7 +304,7 @@ window.C4ISR_Views.dashboard = {
         const totalReal = metricas.conteoAtaques + metricas.conteoLinks + metricas.conteoOsint;
         const seriesDona = totalReal > 0
             ? [metricas.conteoAtaques, metricas.conteoLinks, metricas.conteoOsint]
-            : [1, 1, 1]; // Fallback neutro si la base de datos está recién instalada
+            : [1, 1, 1];
 
         const optionsDistribution = {
             ...baseOptions,
