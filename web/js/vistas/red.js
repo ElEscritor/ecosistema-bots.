@@ -1,9 +1,9 @@
 'use strict';
 
 /* ==========================================================================
-   VISTA: CARTOGRAFÍA ESTELAR C4ISR v5.0 (EVE PHOTON UI + CYBERPUNK 2077)
-   Incluye: Cámara Inercial, Pantalla Completa, Rutas de Salto entre Servidores,
-            Minimapa Interactivo, Índice Rápido de Sectores, Rangos y Estilometría.
+   VISTA: CARTOGRAFÍA ESTELAR C4ISR v6.0 (ZERO-HUD // PARALAJE 3D // INFECCIÓN)
+   Incluye: Interfaz Limpia sin saturación, Fondo Espacial Multicapa con Caché,
+            Corona de Infección Silenciosa, Reencarnación de Alts y OSINT Regional.
    Archivo: js/vistas/red.js
    ========================================================================== */
 
@@ -30,6 +30,7 @@ function formatearTiempoRelativo(tsMs) {
 window.C4ISR_Views.red = {
     canvas: null,
     ctx: null,
+    nebulaCanvas: null,
     miniCanvas: null,
     miniCtx: null,
     animationFrameId: null,
@@ -44,7 +45,7 @@ window.C4ISR_Views.red = {
     serverNodesList: [],
     userNodesList: [],
     edges: [],
-    constellationBridges: [], // Puentes estilo EVE Online entre servidores que comparten usuarios
+    constellationBridges: [],
     altEdges: [],
     allianceEdges: [],
     adjacency: new Map(),
@@ -58,9 +59,7 @@ window.C4ISR_Views.red = {
     dvrTraces: [],
     seenPulses: new Set(),
     starfield: [],
-    nebulae: [],
 
-    // Cámara con interpolación inercial suave (EVE Online feel)
     camera: {
         x: 0,
         y: 0,
@@ -81,10 +80,12 @@ window.C4ISR_Views.red = {
     pinchInitialDist: null,
     pinchInitialZoom: 1,
 
-    leftDockOpen: true,
-    rightDockOpen: true,
-    showMiniMap: true,
-    rightPanelTab: 'inspector', // 'inspector' | 'alts' | 'dvr'
+    // Interfaz Zero-HUD: paneles cerrados y radar apagado por defecto para máxima limpieza visual
+    controlsExpanded: false,
+    leftDockOpen: false,
+    rightDockOpen: false,
+    showMiniMap: false,
+    rightPanelTab: 'inspector',
 
     physicsEnabled: true,
     strategicMode: false,
@@ -98,48 +99,70 @@ window.C4ISR_Views.red = {
     selectedSectorFilter: 'ALL',
     searchTerm: '',
 
+    /**
+     * Crea 3 capas de estrellas a distintas profundidades (Paralaje 3D real al mover la cámara)
+     * y pre-renderiza las nebulosas cósmicas en un canvas oculto para gastar 0% de GPU por fotograma.
+     */
     initDeepSpace() {
         this.starfield = [];
-        for (let i = 0; i < 140; i++) {
-            this.starfield.push({
-                x: (Math.random() - 0.5) * 4400,
-                y: (Math.random() - 0.5) * 4400,
-                size: Math.random() * 1.7 + 0.4,
-                alpha: Math.random() * 0.5 + 0.12,
-                color: i % 4 === 0 ? '#00f0ff' : (i % 6 === 0 ? '#ff0055' : '#e2e8f0')
-            });
+        const layers = [
+            { count: 95, depth: 0.14, sizeMin: 0.5, sizeMax: 1.2, alpha: 0.32 },
+            { count: 65, depth: 0.38, sizeMin: 1.0, sizeMax: 1.8, alpha: 0.52 },
+            { count: 35, depth: 0.72, sizeMin: 1.4, sizeMax: 2.3, alpha: 0.75 }
+        ];
+
+        for (const layer of layers) {
+            for (let i = 0; i < layer.count; i++) {
+                this.starfield.push({
+                    x: (Math.random() - 0.5) * 4800,
+                    y: (Math.random() - 0.5) * 4800,
+                    depth: layer.depth,
+                    size: layer.sizeMin + Math.random() * (layer.sizeMax - layer.sizeMin),
+                    alpha: layer.alpha * (0.6 + Math.random() * 0.4),
+                    color: i % 5 === 0 ? '#38bdf8' : (i % 8 === 0 ? '#f472b6' : (i % 11 === 0 ? '#fde047' : '#f8fafc'))
+                });
+            }
         }
 
-        // Nebulosas estáticas de fondo para dar profundidad espacial sin coste de GPU
-        this.nebulae = [
-            { x: -450, y: -320, r: 680, color: 'rgba(0, 240, 255, 0.035)' },
-            { x: 520, y: 280, r: 740, color: 'rgba(255, 0, 85, 0.035)' },
-            { x: 120, y: -580, r: 560, color: 'rgba(192, 132, 252, 0.03)' }
+        // Pre-renderizar nebulosas espaciales en un lienzo offscreen de 1024x1024
+        this.nebulaCanvas = document.createElement('canvas');
+        this.nebulaCanvas.width = 1024;
+        this.nebulaCanvas.height = 1024;
+        const nCtx = this.nebulaCanvas.getContext('2d');
+
+        const blobs = [
+            { x: 300, y: 340, r: 320, col: 'rgba(14, 116, 144, 0.14)' },
+            { x: 690, y: 620, r: 360, col: 'rgba(157, 23, 77, 0.12)' },
+            { x: 580, y: 280, r: 280, col: 'rgba(88, 28, 135, 0.13)' },
+            { x: 360, y: 700, r: 260, col: 'rgba(30, 58, 138, 0.12)' }
         ];
+
+        for (const b of blobs) {
+            const grad = nCtx.createRadialGradient(b.x, b.y, 10, b.x, b.y, b.r);
+            grad.addColorStop(0, b.col);
+            grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            nCtx.fillStyle = grad;
+            nCtx.beginPath();
+            nCtx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+            nCtx.fill();
+        }
     },
 
     async render(container) {
         this.initDeepSpace();
-
-        if (window.innerWidth <= 960) {
-            this.leftDockOpen = false;
-            this.rightDockOpen = false;
-        }
 
         container.innerHTML = `
             <style>
                 #starmap-master-shell {
                     position: relative;
                     width: 100%;
-                    height: calc(100vh - 105px);
+                    height: calc(100vh - 102px);
                     min-height: 540px;
-                    background: #04050a;
-                    border: 1px solid rgba(0, 240, 255, 0.28);
+                    background: #030408;
+                    border: 1px solid rgba(255, 255, 255, 0.08);
                     border-radius: var(--radius-md);
                     overflow: hidden;
-                    display: flex;
-                    flex-direction: column;
-                    box-shadow: 0 0 35px rgba(0, 0, 0, 0.85);
+                    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.9);
                 }
                 #starmap-master-shell:fullscreen,
                 #starmap-master-shell.pseudo-fullscreen {
@@ -151,109 +174,110 @@ window.C4ISR_Views.red = {
                     border-radius: 0 !important;
                     border: none !important;
                 }
-                .eve-topbar {
+                /* Cápsula de Mando Minimalista Superior Izquierda (Zero-HUD) */
+                .zero-hud-pill {
+                    position: absolute;
+                    top: 14px;
+                    left: 14px;
                     display: flex;
-                    justify-content: space-between;
                     align-items: center;
-                    gap: 0.5rem;
-                    padding: 0.5rem 0.85rem;
-                    background: rgba(8, 10, 18, 0.92);
-                    border-bottom: 1px solid rgba(0, 240, 255, 0.22);
-                    backdrop-filter: blur(10px);
+                    gap: 6px;
+                    padding: 6px 10px;
+                    background: rgba(8, 10, 18, 0.78);
+                    border: 1px solid rgba(255, 255, 255, 0.12);
+                    border-radius: 8px;
+                    backdrop-filter: blur(12px);
                     z-index: 25;
                     flex-wrap: wrap;
+                    max-width: calc(100vw - 28px);
                 }
-                .eve-subbar {
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    gap: 0.5rem;
-                    padding: 0.4rem 0.85rem;
-                    background: rgba(11, 13, 24, 0.84);
-                    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+                .zero-hud-drawer {
+                    position: absolute;
+                    top: 60px;
+                    left: 14px;
+                    padding: 10px 12px;
+                    background: rgba(8, 10, 18, 0.88);
+                    border: 1px solid rgba(0, 240, 255, 0.25);
+                    border-radius: 8px;
+                    backdrop-filter: blur(14px);
                     z-index: 24;
-                    flex-wrap: wrap;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 8px;
+                    width: 340px;
+                    max-width: calc(100vw - 28px);
+                    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.85);
                 }
-                .cp-select {
-                    background: rgba(6, 7, 13, 0.92);
-                    color: #00f0ff;
-                    border: 1px solid rgba(0, 240, 255, 0.35);
-                    border-radius: 4px;
-                    padding: 0.34rem 0.55rem;
+                .zero-btn {
+                    background: rgba(255, 255, 255, 0.04);
+                    border: 1px solid rgba(255, 255, 255, 0.14);
+                    color: #cbd5e1;
+                    padding: 5px 10px;
+                    border-radius: 5px;
                     font-family: var(--font-mono);
                     font-size: 0.71rem;
-                    outline: none;
-                }
-                .eve-btn {
-                    background: rgba(0, 240, 255, 0.07);
-                    border: 1px solid rgba(0, 240, 255, 0.32);
-                    color: #e2e8f0;
-                    padding: 0.32rem 0.62rem;
-                    border-radius: 3px;
-                    font-family: var(--font-mono);
-                    font-size: 0.7rem;
                     cursor: pointer;
                     transition: all 0.15s ease;
                 }
-                .eve-btn:hover, .eve-btn.active {
-                    background: rgba(0, 240, 255, 0.22);
+                .zero-btn:hover, .zero-btn.active {
+                    background: rgba(0, 240, 255, 0.16);
                     border-color: #00f0ff;
                     color: #ffffff;
-                    box-shadow: 0 0 10px rgba(0, 240, 255, 0.25);
                 }
-                .eve-btn-rz {
-                    background: rgba(255, 0, 85, 0.12);
-                    border: 1px solid rgba(255, 0, 85, 0.45);
-                    color: #fda4af;
+                .cp-select {
+                    background: rgba(5, 6, 11, 0.92);
+                    color: #e2e8f0;
+                    border: 1px solid rgba(255, 255, 255, 0.15);
+                    border-radius: 5px;
+                    padding: 5px 8px;
+                    font-family: var(--font-mono);
+                    font-size: 0.71rem;
+                    outline: none;
+                    width: 100%;
                 }
-                .eve-btn-rz:hover, .eve-btn-rz.active {
-                    background: #ff0055;
-                    border-color: #ff0055;
-                    color: #ffffff;
-                }
-                /* Paneles Flotantes EVE Photon UI */
+                /* Índice Flotante de Sistemas (Izquierda) */
                 .floating-dock-left {
                     position: absolute;
-                    top: 98px;
-                    left: 12px;
-                    bottom: 52px;
-                    width: 245px;
-                    background: rgba(8, 10, 18, 0.86);
-                    border: 1px solid rgba(0, 240, 255, 0.25);
-                    border-left: 3px solid #00f0ff;
-                    border-radius: 6px;
-                    backdrop-filter: blur(12px);
-                    z-index: 20;
+                    top: 60px;
+                    left: 14px;
+                    bottom: 14px;
+                    width: 250px;
+                    background: rgba(7, 9, 16, 0.86);
+                    border: 1px solid rgba(255, 255, 255, 0.12);
+                    border-radius: 8px;
+                    backdrop-filter: blur(14px);
+                    z-index: 23;
                     display: flex;
                     flex-direction: column;
                     transition: transform 0.22s ease, opacity 0.22s ease;
-                    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.75);
+                    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.85);
                 }
                 .floating-dock-left.collapsed {
-                    transform: translateX(-265px);
+                    transform: translateX(-280px);
                     opacity: 0;
                     pointer-events: none;
                 }
+                /* Inspector Flotante Contextual (Derecha - Oculto por defecto) */
                 .floating-dock-right {
                     position: absolute;
-                    top: 98px;
-                    right: 12px;
-                    bottom: 12px;
+                    top: 14px;
+                    right: 14px;
+                    bottom: 14px;
                     width: 365px;
-                    max-width: calc(100vw - 24px);
+                    max-width: calc(100vw - 28px);
                     background: rgba(8, 10, 18, 0.90);
-                    border: 1px solid rgba(255, 0, 85, 0.32);
-                    border-right: 3px solid #ff0055;
-                    border-radius: 6px;
-                    backdrop-filter: blur(14px);
-                    z-index: 20;
+                    border: 1px solid rgba(255, 255, 255, 0.14);
+                    border-top: 2px solid #00f0ff;
+                    border-radius: 8px;
+                    backdrop-filter: blur(16px);
+                    z-index: 26;
                     display: flex;
                     flex-direction: column;
                     transition: transform 0.22s ease, opacity 0.22s ease;
-                    box-shadow: 0 12px 34px rgba(0, 0, 0, 0.85);
+                    box-shadow: 0 14px 40px rgba(0, 0, 0, 0.9);
                 }
                 .floating-dock-right.collapsed {
-                    transform: translateX(390px);
+                    transform: translateX(400px);
                     opacity: 0;
                     pointer-events: none;
                 }
@@ -261,152 +285,97 @@ window.C4ISR_Views.red = {
                     display: flex;
                     justify-content: space-between;
                     align-items: center;
-                    padding: 6px 9px;
-                    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+                    padding: 6px 10px;
+                    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
                     font-family: var(--font-mono);
                     font-size: 0.71rem;
                     cursor: pointer;
-                    transition: background 0.12s;
                 }
                 .sector-jump-item:hover {
                     background: rgba(0, 240, 255, 0.12);
                 }
-                /* Controles de Cámara Flotantes */
-                .camera-hud-cluster {
-                    position: absolute;
-                    bottom: 52px;
-                    left: 50%;
-                    transform: translateX(-50%);
-                    display: flex;
-                    gap: 6px;
-                    padding: 5px 10px;
-                    background: rgba(8, 10, 18, 0.88);
-                    border: 1px solid rgba(0, 240, 255, 0.28);
-                    border-radius: 999px;
-                    z-index: 19;
-                    backdrop-filter: blur(8px);
-                }
-                /* Minimapa Radar */
                 #minimap-container {
                     position: absolute;
-                    bottom: 52px;
-                    left: 268px;
-                    width: 170px;
+                    bottom: 14px;
+                    left: 14px;
+                    width: 175px;
                     height: 120px;
-                    background: rgba(5, 6, 12, 0.9);
-                    border: 1px solid rgba(0, 240, 255, 0.35);
-                    border-radius: 4px;
+                    background: rgba(4, 5, 10, 0.88);
+                    border: 1px solid rgba(0, 240, 255, 0.3);
+                    border-radius: 6px;
                     z-index: 18;
                     overflow: hidden;
-                    box-shadow: 0 6px 18px rgba(0,0,0,0.8);
-                    transition: left 0.22s ease;
-                }
-                #minimap-container.dock-closed {
-                    left: 12px;
-                }
-                @media screen and (max-width: 860px) {
-                    #minimap-container { display: none !important; }
-                    .floating-dock-left { width: 220px; top: 125px; }
-                    .floating-dock-right { width: calc(100vw - 24px); top: 125px; }
+                    box-shadow: 0 6px 20px rgba(0,0,0,0.85);
                 }
             </style>
 
             <div id="starmap-master-shell">
-                <!-- BARRA SUPERIOR TÁCTICA -->
-                <div class="eve-topbar">
-                    <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
-                        <button id="btn-toggle-left-dock" class="eve-btn active" type="button" title="Mostrar/Ocultar Índice de Sistemas">&#9776; SECTORES</button>
-                        <span style="font-family: var(--font-mono); font-weight: 700; font-size: 0.92rem; color: #00f0ff; letter-spacing: 1px;">EVE // NETRUNNER STARMAP v5.0</span>
-                        <span id="red-stats-badge" class="badge badge-green">SINCRONIZANDO...</span>
-                        <span id="red-bridges-badge" class="badge badge-amber">0 RUTAS</span>
-                        <span id="red-alts-badge" class="badge badge-amber">0 ALTS</span>
-                        <span id="red-ceniza-badge" class="badge badge-red hidden">0 CENIZA</span>
-                    </div>
-                    <div style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
-                        <button id="btn-toggle-strategic" class="eve-btn" type="button" title="Muestra solo Sistemas, Puentes Estelares y VIPs">MAPA CLANES: AUTO</button>
-                        <button id="btn-toggle-routes" class="eve-btn active" type="button" title="Autopistas entre servidores que comparten usuarios">RUTAS SALTO: ON</button>
-                        <button id="btn-toggle-alliances" class="eve-btn active" type="button">ALIANZAS: ON</button>
-                        <button id="btn-toggle-empty-srv" class="eve-btn" type="button">SIN VACÍOS: OFF</button>
-                        <button id="btn-toggle-bridges" class="eve-btn" type="button">SOLO PUENTES: OFF</button>
-                        <button id="btn-fullscreen-map" class="eve-btn eve-btn-rz" type="button" title="Pantalla Completa (Tecla F)">&#9974; PANTALLA COMPLETA</button>
-                        <button id="btn-toggle-right-dock" class="eve-btn active" type="button" title="Mostrar/Ocultar Inspector Derecho">INSPECTOR &#9776;</button>
-                    </div>
-                </div>
-
-                <!-- SUB-BARRA DE FILTROS Y BÚSQUEDA -->
-                <div class="eve-subbar">
-                    <div style="display: flex; align-items: center; gap: 0.45rem; flex: 1; flex-wrap: wrap;">
-                        <input type="text" id="red-search" class="search-input" style="width: 240px; padding: 0.34rem 0.65rem; font-size: 0.73rem;" placeholder="Localizar sistema, usuario o etiqueta (Enter)..." autocomplete="off">
-                        <select id="filter-explorer-select" class="cp-select">
-                            <option value="ALL">EXPLORADOR: TODOS (ENJAMBRE)</option>
-                        </select>
-                        <select id="filter-sector-select" class="cp-select">
-                            <option value="ALL">FILTRO SECTOR: TODOS</option>
-                            <option value="ACTIVE">SOLO CON TRÁFICO ACTIVO</option>
-                            <option value="HOSTIL">ETIQUETA: HOSTIL (ROJO)</option>
-                            <option value="PROVEEDOR">ETIQUETA: PROVEEDOR (NARANJA)</option>
-                            <option value="SOCIAL">ETIQUETA: SOCIAL (CIAN)</option>
-                            <option value="ALIADO">ETIQUETA: ALIADO (PÚRPURA)</option>
-                            <option value="OBJETIVO">ETIQUETA: OBJETIVO (AMARILLO)</option>
-                            <option value="CENIZA">ESTADO: CENIZA (RAIDEADOS)</option>
-                        </select>
-                    </div>
-                    <div style="display: flex; gap: 0.75rem; align-items: center; font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-secondary); flex-wrap: wrap;">
-                        <span><strong style="color: #ff0055;">&#11042; ESTACIÓN:</strong> SERVER</span>
-                        <span><strong style="color: #00f0ff;">&#9552; RUTA SALTO:</strong> USUARIOS COMUNES</span>
-                        <span><strong style="color: #39ff14;">&#9670; CORONA:</strong> ADMIN/RANGO</span>
-                        <span><strong style="color: #fcee0a;">&#9733; ORO:</strong> VIP / ALT</span>
-                    </div>
-                </div>
-
-                <!-- LIENZO ESTELAR 100% VIEWPORT -->
-                <div id="canvas-wrapper" style="position: relative; flex: 1; width: 100%; height: 100%; overflow: hidden; touch-action: none;">
+                <!-- LIENZO ESPACIAL 100% LIBRE -->
+                <div id="canvas-wrapper" style="position: relative; width: 100%; height: 100%; overflow: hidden; touch-action: none;">
                     <canvas id="net-canvas" style="width: 100%; height: 100%; display: block; cursor: grab;"></canvas>
 
-                    <!-- PANEL IZQUIERDO FLOTANTE: NAVEGADOR RÁPIDO DE SISTEMAS ESTELARES -->
-                    <aside id="left-sector-dock" class="floating-dock-left ${this.leftDockOpen ? '' : 'collapsed'}">
-                        <div style="padding: 8px 10px; border-bottom: 1px solid rgba(0, 240, 255, 0.2); display: flex; justify-content: space-between; align-items: center;">
-                            <span style="font-family: var(--font-mono); font-size: 0.72rem; font-weight: 700; color: #00f0ff;">ÍNDICE DE SISTEMAS</span>
+                    <!-- CÁPSULA FLOTANTE MINIMALISTA (ZERO-HUD) -->
+                    <div class="zero-hud-pill">
+                        <input type="text" id="red-search" class="search-input" style="width: 195px; padding: 4px 9px; font-size: 0.72rem; background: rgba(0,0,0,0.45);" placeholder="Buscar sistema o sujeto..." autocomplete="off">
+                        <button id="btn-toggle-left-dock" class="zero-btn" type="button" title="Índice de Servidores">&#9776; SISTEMAS</button>
+                        <button id="btn-toggle-filters" class="zero-btn" type="button" title="Filtros y Capas Visuales">&#9881; CAPAS</button>
+                        <button id="btn-open-alerts-panel" class="zero-btn" type="button" title="Abrir Radar de Alts y Cámara DVR">&#9678; ALTS / DVR</button>
+                        <button id="btn-center-graph" class="zero-btn" type="button" title="Centrar Galaxia">&#8962;</button>
+                        <button id="btn-fullscreen-map" class="zero-btn" type="button" title="Pantalla Completa (Tecla F)">&#9974;</button>
+                    </div>
+
+                    <!-- CAJÓN DESPLEGABLE DE CAPAS Y FILTROS (Oculto por defecto) -->
+                    <div id="zero-filters-drawer" class="zero-hud-drawer hidden">
+                        <div style="font-family: var(--font-mono); font-size: 0.69rem; color: #00f0ff; font-weight: 700;">FILTROS DE CONSTELACIÓN</div>
+                        <select id="filter-explorer-select" class="cp-select">
+                            <option value="ALL">Explorador: Todos (Enjambre)</option>
+                        </select>
+                        <select id="filter-sector-select" class="cp-select">
+                            <option value="ALL">Sector: Todos los Sistemas</option>
+                            <option value="ACTIVE">Solo con Tráfico Activo</option>
+                            <option value="INFECTED">Con Infiltración / Infección (&gt;0%)</option>
+                            <option value="HOSTIL">Etiqueta: Hostil (Rojo)</option>
+                            <option value="PROVEEDOR">Etiqueta: Proveedor (Naranja)</option>
+                            <option value="SOCIAL">Etiqueta: Social (Cian)</option>
+                            <option value="ALIADO">Etiqueta: Aliado (Púrpura)</option>
+                            <option value="CENIZA">Estado: Ceniza (Raideados)</option>
+                        </select>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: 2px;">
+                            <button id="btn-toggle-strategic" class="zero-btn" type="button">MODO CLANES: AUTO</button>
+                            <button id="btn-toggle-routes" class="zero-btn active" type="button">RUTAS SALTO: ON</button>
+                            <button id="btn-toggle-alliances" class="zero-btn active" type="button">ALIANZAS: ON</button>
+                            <button id="btn-toggle-empty-srv" class="zero-btn" type="button">SIN VACÍOS: OFF</button>
+                            <button id="btn-toggle-bridges" class="zero-btn" type="button">SOLO PUENTES: OFF</button>
+                            <button id="btn-toggle-minimap" class="zero-btn" type="button">RADAR: OFF</button>
+                        </div>
+                    </div>
+
+                    <!-- PANEL IZQUIERDO PLEGABLE: LISTA RÁPIDA DE SISTEMAS -->
+                    <aside id="left-sector-dock" class="floating-dock-left collapsed">
+                        <div style="padding: 8px 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-family: var(--font-mono); font-size: 0.72rem; font-weight: 700; color: #00f0ff;">SISTEMAS ESTELARES</span>
                             <span id="sector-list-count" style="font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted);">0</span>
                         </div>
                         <div id="sector-quick-list" style="flex: 1; overflow-y: auto;"></div>
                     </aside>
 
-                    <!-- MINIMAPA TÁCTICO INTERACTIVO -->
-                    <div id="minimap-container" class="${this.leftDockOpen ? '' : 'dock-closed'}">
-                        <canvas id="minimap-canvas" width="170" height="120" style="width: 100%; height: 100%; display: block; cursor: crosshair;"></canvas>
-                        <div style="position: absolute; top: 3px; left: 6px; font-family: var(--font-mono); font-size: 0.58rem; color: #00f0ff; pointer-events: none;">RADAR GALÁCTICO</div>
+                    <!-- MINIMAPA RADAR OPCIONAL (Oculto por defecto) -->
+                    <div id="minimap-container" class="hidden">
+                        <canvas id="minimap-canvas" width="175" height="120" style="width: 100%; height: 100%; display: block; cursor: crosshair;"></canvas>
                     </div>
 
-                    <!-- CONTROLES TÁCTICOS DE CÁMARA EN PANTALLA -->
-                    <div class="camera-hud-cluster">
-                        <button id="btn-zoom-in" class="eve-btn" type="button" title="Acercar Zoom">+</button>
-                        <button id="btn-zoom-out" class="eve-btn" type="button" title="Alejar Zoom">&minus;</button>
-                        <button id="btn-center-graph" class="eve-btn" type="button" title="Centrar Galaxia">&#8962; CENTRAR</button>
-                        <button id="btn-toggle-physics" class="eve-btn active" type="button">ÓRBITAS: ON</button>
-                    </div>
+                    <!-- TOOLTIP INSTANTÁNEO -->
+                    <div id="canvas-hover-tooltip" class="hidden" style="position: absolute; pointer-events: none; z-index: 30; background: rgba(6, 7, 14, 0.94); border: 1px solid rgba(0, 240, 255, 0.45); border-left: 3px solid #00f0ff; padding: 7px 11px; border-radius: 6px; font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-main); box-shadow: 0 8px 24px rgba(0,0,0,0.92); max-width: 320px;"></div>
 
-                    <!-- TOOLTIP INSTANTÁNEO DE HOVER -->
-                    <div id="canvas-hover-tooltip" class="hidden" style="position: absolute; pointer-events: none; z-index: 30; background: rgba(6, 7, 14, 0.96); border: 1px solid #00f0ff; border-left: 4px solid #fcee0a; padding: 7px 11px; border-radius: 4px; font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-main); box-shadow: 0 8px 24px rgba(0,0,0,0.95); max-width: 320px;"></div>
-
-                    <!-- TICKER INFERIOR DE TRANSMISIONES EN VIVO -->
-                    <div id="live-feed-ticker" style="position: absolute; bottom: 10px; left: 12px; font-family: var(--font-mono); font-size: 0.71rem; color: #00f0ff; background: rgba(6, 7, 13, 0.92); padding: 5px 12px; border: 1px solid rgba(0, 240, 255, 0.35); border-left: 3px solid #00f0ff; border-radius: 4px; pointer-events: none;">
-                        [TELEMETRÍA ESTELAR] Escaneando saltos y transmisiones...
-                    </div>
-
-                    <!-- PANEL DERECHO FLOTANTE: INSPECTOR / ALTS / DVR -->
-                    <aside id="right-inspector-dock" class="floating-dock-right ${this.rightDockOpen ? '' : 'collapsed'}">
-                        <div class="panel-header" style="margin: 0; padding: 0.55rem 0.7rem; display: flex; gap: 0.35rem; border-bottom: 1px solid rgba(255,255,255,0.08);">
-                            <button id="tab-btn-inspector" class="eve-btn eve-btn-rz active" type="button" style="flex: 1;">INSPECTOR</button>
-                            <button id="tab-btn-alts" class="eve-btn" type="button" style="flex: 1;">ALTS (0)</button>
-                            <button id="tab-btn-dvr" class="eve-btn" type="button" style="flex: 1;">CÁMARA DVR</button>
+                    <!-- PANEL DERECHO CONTEXTUAL (Se abre automáticamente al clicar un nodo y se cierra al clicar el espacio) -->
+                    <aside id="right-inspector-dock" class="floating-dock-right collapsed">
+                        <div style="padding: 8px 10px; display: flex; gap: 5px; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.08);">
+                            <button id="tab-btn-inspector" class="zero-btn active" type="button" style="flex: 1;">INSPECTOR</button>
+                            <button id="tab-btn-alts" class="zero-btn" type="button" style="flex: 1;">ALTS (0)</button>
+                            <button id="tab-btn-dvr" class="zero-btn" type="button" style="flex: 1;">DVR</button>
+                            <button id="btn-close-right-dock" class="zero-btn" type="button" style="padding: 4px 8px; color: #f87171;">&#10005;</button>
                         </div>
-                        <div id="node-inspector-content" class="osint-content" style="font-family: var(--font-mono); font-size: 0.76rem;">
-                            <div style="color: var(--text-muted); padding-top: 0.6rem; line-height: 1.55;">
-                                &#11042; Selecciona cualquier <strong style="color: #ff0055;">Sistema Estelar</strong> en el mapa o en la lista izquierda para ver sus autopistas de salto, etiquetarlo o auditar sus miembros.<br><br>
-                                &#9670; Los usuarios con <strong style="color: #39ff14;">Rango / Staff</strong> lucen un marcador romboidal neón y muestran sus permisos por servidor.
-                            </div>
-                        </div>
+                        <div id="node-inspector-content" class="osint-content" style="font-family: var(--font-mono); font-size: 0.76rem;"></div>
                         <div id="alts-radar-content" class="osint-content hidden" style="font-family: var(--font-mono); font-size: 0.76rem;"></div>
                         <div id="dvr-camera-content" class="osint-content hidden" style="font-family: var(--font-mono); font-size: 0.76rem;"></div>
                     </aside>
@@ -455,20 +424,20 @@ window.C4ISR_Views.red = {
 
     toggleLeftDock(forceState) {
         this.leftDockOpen = typeof forceState === 'boolean' ? forceState : !this.leftDockOpen;
+        if (this.leftDockOpen) {
+            const drawer = document.getElementById('zero-filters-drawer');
+            if (drawer) drawer.classList.add('hidden');
+        }
         const dock = document.getElementById('left-sector-dock');
         const btn = document.getElementById('btn-toggle-left-dock');
-        const mini = document.getElementById('minimap-container');
         if (dock) dock.classList.toggle('collapsed', !this.leftDockOpen);
         if (btn) btn.classList.toggle('active', this.leftDockOpen);
-        if (mini) mini.classList.toggle('dock-closed', !this.leftDockOpen);
     },
 
     toggleRightDock(forceState) {
         this.rightDockOpen = typeof forceState === 'boolean' ? forceState : !this.rightDockOpen;
         const dock = document.getElementById('right-inspector-dock');
-        const btn = document.getElementById('btn-toggle-right-dock');
         if (dock) dock.classList.toggle('collapsed', !this.rightDockOpen);
-        if (btn) btn.classList.toggle('active', this.rightDockOpen);
     },
 
     toggleFullScreen() {
@@ -510,19 +479,19 @@ window.C4ISR_Views.red = {
         altsEl.classList.add('hidden');
         dvrEl.classList.add('hidden');
 
-        [btnInsp, btnAlts, btnDvr].forEach(b => b.classList.remove('active', 'eve-btn-rz'));
+        [btnInsp, btnAlts, btnDvr].forEach(b => b.classList.remove('active'));
 
         if (tabName === 'alts') {
             altsEl.classList.remove('hidden');
-            btnAlts.classList.add('active', 'eve-btn-rz');
+            btnAlts.classList.add('active');
             this.renderAltsRadarList();
         } else if (tabName === 'dvr') {
             dvrEl.classList.remove('hidden');
-            btnDvr.classList.add('active', 'eve-btn-rz');
+            btnDvr.classList.add('active');
             this.renderDvrCameraList();
         } else {
             inspectorEl.classList.remove('hidden');
-            btnInsp.classList.add('active', 'eve-btn-rz');
+            btnInsp.classList.add('active');
         }
     },
 
@@ -545,17 +514,18 @@ window.C4ISR_Views.red = {
         window.addEventListener('keydown', this.boundKeyDown);
 
         const btnLeftDock = document.getElementById('btn-toggle-left-dock');
-        const btnRightDock = document.getElementById('btn-toggle-right-dock');
+        const btnFilters = document.getElementById('btn-toggle-filters');
+        const filtersDrawer = document.getElementById('zero-filters-drawer');
+        const btnOpenAlerts = document.getElementById('btn-open-alerts-panel');
+        const btnCloseRight = document.getElementById('btn-close-right-dock');
         const btnFullscreen = document.getElementById('btn-fullscreen-map');
         const btnStrategic = document.getElementById('btn-toggle-strategic');
         const btnRoutes = document.getElementById('btn-toggle-routes');
         const btnEmptySrv = document.getElementById('btn-toggle-empty-srv');
         const btnAlliances = document.getElementById('btn-toggle-alliances');
-        const btnPhysics = document.getElementById('btn-toggle-physics');
         const btnBridges = document.getElementById('btn-toggle-bridges');
+        const btnMinimap = document.getElementById('btn-toggle-minimap');
         const btnCenter = document.getElementById('btn-center-graph');
-        const btnZoomIn = document.getElementById('btn-zoom-in');
-        const btnZoomOut = document.getElementById('btn-zoom-out');
         const searchInput = document.getElementById('red-search');
         const selectExplorer = document.getElementById('filter-explorer-select');
         const selectSector = document.getElementById('filter-sector-select');
@@ -564,8 +534,22 @@ window.C4ISR_Views.red = {
         const tabDvr = document.getElementById('tab-btn-dvr');
 
         if (btnLeftDock) btnLeftDock.addEventListener('click', () => this.toggleLeftDock());
-        if (btnRightDock) btnRightDock.addEventListener('click', () => this.toggleRightDock());
+        if (btnCloseRight) btnCloseRight.addEventListener('click', () => this.toggleRightDock(false));
         if (btnFullscreen) btnFullscreen.addEventListener('click', () => this.toggleFullScreen());
+
+        if (btnFilters && filtersDrawer) {
+            btnFilters.addEventListener('click', () => {
+                this.toggleLeftDock(false);
+                filtersDrawer.classList.toggle('hidden');
+                btnFilters.classList.toggle('active', !filtersDrawer.classList.contains('hidden'));
+            });
+        }
+
+        if (btnOpenAlerts) {
+            btnOpenAlerts.addEventListener('click', () => {
+                this.switchRightTab('alts');
+            });
+        }
 
         if (tabInspector) tabInspector.addEventListener('click', () => this.switchRightTab('inspector'));
         if (tabAlts) tabAlts.addEventListener('click', () => this.switchRightTab('alts'));
@@ -574,7 +558,7 @@ window.C4ISR_Views.red = {
         if (btnStrategic) {
             btnStrategic.addEventListener('click', () => {
                 this.strategicMode = !this.strategicMode;
-                btnStrategic.textContent = `MAPA CLANES: ${this.strategicMode ? 'FORZADO' : 'AUTO'}`;
+                btnStrategic.textContent = `MODO CLANES: ${this.strategicMode ? 'FORZADO' : 'AUTO'}`;
                 btnStrategic.classList.toggle('active', this.strategicMode);
             });
         }
@@ -604,14 +588,6 @@ window.C4ISR_Views.red = {
             });
         }
 
-        if (btnPhysics) {
-            btnPhysics.addEventListener('click', () => {
-                this.physicsEnabled = !this.physicsEnabled;
-                btnPhysics.textContent = `ÓRBITAS: ${this.physicsEnabled ? 'ON' : 'OFF'}`;
-                btnPhysics.classList.toggle('active', this.physicsEnabled);
-            });
-        }
-
         if (btnBridges) {
             btnBridges.addEventListener('click', () => {
                 this.onlyBridges = !this.onlyBridges;
@@ -620,23 +596,21 @@ window.C4ISR_Views.red = {
             });
         }
 
+        if (btnMinimap) {
+            btnMinimap.addEventListener('click', () => {
+                this.showMiniMap = !this.showMiniMap;
+                btnMinimap.textContent = `RADAR: ${this.showMiniMap ? 'ON' : 'OFF'}`;
+                btnMinimap.classList.toggle('active', this.showMiniMap);
+                const miniEl = document.getElementById('minimap-container');
+                if (miniEl) miniEl.classList.toggle('hidden', !this.showMiniMap);
+            });
+        }
+
         if (btnCenter) {
             btnCenter.addEventListener('click', () => {
                 this.selectedNode = null;
                 this.highlightedPair = null;
                 this.centerCamera(false);
-            });
-        }
-
-        if (btnZoomIn) {
-            btnZoomIn.addEventListener('click', () => {
-                this.zoomAroundScreenPoint(this.canvas.width / 2, this.canvas.height / 2, 1.28);
-            });
-        }
-
-        if (btnZoomOut) {
-            btnZoomOut.addEventListener('click', () => {
-                this.zoomAroundScreenPoint(this.canvas.width / 2, this.canvas.height / 2, 0.78);
             });
         }
 
@@ -671,7 +645,6 @@ window.C4ISR_Views.red = {
             });
         }
 
-        // Interacción en Minimapa para teletransportar la cámara
         if (this.miniCanvas) {
             this.miniCanvas.addEventListener('mousedown', (e) => {
                 const rect = this.miniCanvas.getBoundingClientRect();
@@ -685,8 +658,11 @@ window.C4ISR_Views.red = {
             });
         }
 
-        // Eventos de Ratón sobre el Lienzo Principal
         this.canvas.addEventListener('mousedown', (e) => {
+            if (filtersDrawer && !filtersDrawer.classList.contains('hidden')) {
+                filtersDrawer.classList.add('hidden');
+                if (btnFilters) btnFilters.classList.remove('active');
+            }
             const pos = this.screenToWorld(e.offsetX, e.offsetY);
             const hit = this.findNodeAt(pos.x, pos.y);
             if (hit) {
@@ -698,6 +674,7 @@ window.C4ISR_Views.red = {
             } else {
                 this.selectedNode = null;
                 this.highlightedPair = null;
+                this.toggleRightDock(false);
                 this.isDraggingCanvas = true;
                 this.lastMousePos = { x: e.clientX, y: e.clientY };
             }
@@ -706,9 +683,7 @@ window.C4ISR_Views.red = {
         this.canvas.addEventListener('dblclick', (e) => {
             const pos = this.screenToWorld(e.offsetX, e.offsetY);
             const hit = this.findNodeAt(pos.x, pos.y);
-            if (hit) {
-                this.focusSingleNode(hit);
-            }
+            if (hit) this.focusSingleNode(hit);
         });
 
         this.canvas.addEventListener('mousemove', (e) => {
@@ -745,7 +720,6 @@ window.C4ISR_Views.red = {
             this.zoomAroundScreenPoint(e.offsetX, e.offsetY, factor);
         }, { passive: false });
 
-        // Eventos Táctiles para Móviles y Tablets
         this.canvas.addEventListener('touchstart', (e) => {
             if (e.touches.length === 1) {
                 const rect = this.canvas.getBoundingClientRect();
@@ -759,6 +733,8 @@ window.C4ISR_Views.red = {
                     this.switchRightTab('inspector');
                     this.renderInspector(hit);
                 } else {
+                    this.selectedNode = null;
+                    this.toggleRightDock(false);
                     this.isDraggingCanvas = true;
                     this.lastMousePos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
                 }
@@ -833,10 +809,10 @@ window.C4ISR_Views.red = {
             }
         }
 
-        const options = ['<option value="ALL">EXPLORADOR: TODOS (ENJAMBRE)</option>'];
+        const options = ['<option value="ALL">Explorador: Todos (Enjambre)</option>'];
         for (const tag of tagsSet) {
             const safe = DOMPurify.sanitize(tag);
-            options.push(`<option value="${safe}" ${currentVal === tag ? 'selected' : ''}>UNIDAD: ${safe}</option>`);
+            options.push(`<option value="${safe}" ${currentVal === tag ? 'selected' : ''}>Unidad: ${safe}</option>`);
         }
         select.innerHTML = options.join('');
     },
@@ -859,17 +835,18 @@ window.C4ISR_Views.red = {
 
         listEl.innerHTML = visibleServers.map(s => {
             const esCeniza = Boolean(s.meta?.estadoCeniza?.raideado);
+            const infPct = s.meta?.infeccionPct || 0;
             const tagObj = s.meta?.etiquetaManual;
             const dotCol = esCeniza
                 ? '#94a3b8'
                 : (tagObj ? (COLORES_ETIQUETA_SERVIDOR[tagObj.tipo] || '#ff0055') : (s.connectedUsersCount > 0 ? '#ff0055' : '#4c0519'));
             const subTag = esCeniza
                 ? '<span style="color:#ff003c;font-size:0.62rem;">[CENIZA]</span>'
-                : (tagObj?.texto ? `<span style="color:${dotCol};font-size:0.62rem;">[${DOMPurify.sanitize(tagObj.texto)}]</span>` : `<span style="color:var(--text-muted);font-size:0.65rem;">${s.connectedUsersCount} usr</span>`);
+                : (infPct > 0 ? `<span style="color:#f97316;font-size:0.62rem;">[${infPct}% INF]</span>` : `<span style="color:var(--text-muted);font-size:0.65rem;">${s.connectedUsersCount}</span>`);
 
             return `
                 <div class="sector-jump-item" data-skey="${DOMPurify.sanitize(s.key)}">
-                    <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:155px;color:var(--text-main);">
+                    <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:165px;color:var(--text-main);">
                         <span style="color:${dotCol};">&#11042;</span> ${DOMPurify.sanitize(s.label)}
                     </div>
                     ${subTag}
@@ -897,35 +874,37 @@ window.C4ISR_Views.red = {
         if (node.type === 'SERVER') {
             const membersCount = (this.serverMembers.get(node.key) || []).length;
             const esCeniza = Boolean(node.meta?.estadoCeniza?.raideado);
+            const infCount = node.meta?.infeccionCount || 0;
+            const infPct = node.meta?.infeccionPct || 0;
             const tagObj = node.meta?.etiquetaManual;
             const tagHtml = tagObj?.texto
                 ? `<span style="background:rgba(255,255,255,0.12);padding:1px 5px;border-radius:3px;color:${COLORES_ETIQUETA_SERVIDOR[tagObj.tipo] || '#00f0ff'};margin-left:5px;">[${DOMPurify.sanitize(tagObj.texto)}]</span>`
                 : '';
-            const cenizaHtml = esCeniza
-                ? `<div style="color:#ff003c;font-weight:700;margin-top:2px;">[!] CENIZA: ${DOMPurify.sanitize(node.meta.estadoCeniza.motivo || 'Raideado')}</div>`
+            const infHtml = infCount > 0
+                ? `<div style="color:#f97316;font-weight:700;margin-top:2px;">&#9888; Infiltración Hostil: ${infCount} sujeto(s) (${infPct}%)</div>`
                 : '';
 
-            tooltip.style.borderColor = esCeniza ? '#94a3b8' : '#ff0055';
+            tooltip.style.borderLeftColor = esCeniza ? '#94a3b8' : (infPct >= 25 ? '#f97316' : '#ff0055');
             tooltip.innerHTML = `
                 <div style="color:${esCeniza ? '#cbd5e1' : '#ff0055'};font-weight:700;">&#11042; ${DOMPurify.sanitize(node.label)}${tagHtml}</div>
-                <div style="color:var(--text-secondary);">Sujetos en órbita: <b>${membersCount}</b> | Msgs: <b>${node.meta?.mensajesSesion || 0}</b> | Bots: <b>${node.meta?.redundancia || 0}</b></div>
-                ${cenizaHtml}
+                <div style="color:var(--text-secondary);">Sujetos: <b>${membersCount}</b> | Msgs: <b>${node.meta?.mensajesSesion || 0}</b></div>
+                ${infHtml}
             `;
         } else {
-            const statusColor = node.enWatchlist
-                ? '#fcee0a'
-                : (node.altRole ? '#ff003c' : (node.primaryRank ? '#39ff14' : '#00f0ff'));
-            const activeSrvName = node.activeServerName ? DOMPurify.sanitize(node.activeServerName) : 'N/A';
-            const lastTimeStr = formatearTiempoRelativo(node.lastMessageTs);
-            const rankLine = node.primaryRank
-                ? `<div style="color:#39ff14;font-size:0.69rem;">&#9670; Rango: <b>${DOMPurify.sanitize(node.primaryRank)}</b></div>`
+            const osint = node.meta?.perfilOsint;
+            const geoLine = osint && (osint.pais || osint.region)
+                ? `<div style="color:#38bdf8;font-size:0.69rem;">&#127758; ${DOMPurify.sanitize([osint.pais, osint.region, osint.ciudadDeclarada].filter(Boolean).join(' / '))}</div>`
                 : '';
-            tooltip.style.borderColor = statusColor;
+            const rankLine = node.primaryRank
+                ? `<div style="color:#39ff14;font-size:0.69rem;">&#9670; ${DOMPurify.sanitize(node.primaryRank)}</div>`
+                : '';
+            const lastTimeStr = formatearTiempoRelativo(node.lastMessageTs);
+            tooltip.style.borderLeftColor = node.enWatchlist ? '#fcee0a' : '#00f0ff';
             tooltip.innerHTML = `
-                <div style="color:${statusColor};font-weight:700;">${node.enWatchlist ? '&#9733; [VIP] ' : '&#9679; '}${DOMPurify.sanitize(node.label)} <span style="color:#39ff14;font-size:0.68rem;">[${lastTimeStr}]</span></div>
+                <div style="color:#ffffff;font-weight:700;">${node.enWatchlist ? '&#9733; ' : ''}${DOMPurify.sanitize(node.label)} <span style="color:#00f0ff;font-size:0.67rem;">[${lastTimeStr}]</span></div>
+                ${geoLine}
                 ${rankLine}
-                <div style="color:#00f0ff;font-size:0.7rem;margin:2px 0;">Sistema Actual: <b>${activeSrvName}</b></div>
-                <div style="color:var(--text-secondary);">Servers: <b>${node.serverCount}</b> | Msgs: <b>${node.meta?.totalMensajes || 0}</b> | Infracciones: <b>${node.infracciones}</b></div>
+                <div style="color:var(--text-secondary);margin-top:2px;">Servers: <b>${node.serverCount}</b> | Msgs: <b>${node.meta?.totalMensajes || 0}</b></div>
             `;
         }
 
@@ -971,6 +950,8 @@ window.C4ISR_Views.red = {
                 if (!srvNode.meta?.estadoCeniza?.raideado) return false;
             } else if (this.selectedSectorFilter === 'ACTIVE') {
                 if ((srvNode.connectedUsersCount || 0) === 0) return false;
+            } else if (this.selectedSectorFilter === 'INFECTED') {
+                if ((srvNode.meta?.infeccionCount || 0) === 0) return false;
             } else {
                 const tagTipo = srvNode.meta?.etiquetaManual?.tipo || '';
                 if (tagTipo !== this.selectedSectorFilter) return false;
@@ -1017,10 +998,14 @@ window.C4ISR_Views.red = {
             const tagText = String(node.meta?.etiquetaManual?.texto || '').toLowerCase();
             const prevName = String(node.meta?.nombreOriginal || '').toLowerCase();
             const rankText = String(node.primaryRank || '').toLowerCase();
+            const osintPais = String(node.meta?.perfilOsint?.pais || '').toLowerCase();
+            const osintRegion = String(node.meta?.perfilOsint?.region || '').toLowerCase();
             const matchSelf = node.label.toLowerCase().includes(this.searchTerm) ||
                 prevName.includes(this.searchTerm) ||
                 tagText.includes(this.searchTerm) ||
                 rankText.includes(this.searchTerm) ||
+                osintPais.includes(this.searchTerm) ||
+                osintRegion.includes(this.searchTerm) ||
                 String(node.rawId).includes(this.searchTerm);
             if (matchSelf) return true;
 
@@ -1097,11 +1082,8 @@ window.C4ISR_Views.red = {
             if (combinados[i].u !== combinados[i + 1].u) {
                 cambiosTurno++;
                 const gapMs = combinados[i + 1].ts - combinados[i].ts;
-                if (gapMs <= 15000) {
-                    colisiones++;
-                } else if (gapMs >= 45000 && gapMs <= 1500000) {
-                    relevos++;
-                }
+                if (gapMs <= 15000) colisiones++;
+                else if (gapMs >= 45000 && gapMs <= 1500000) relevos++;
             }
         }
 
@@ -1112,6 +1094,12 @@ window.C4ISR_Views.red = {
         };
     },
 
+    /**
+     * Detector Dual de Alts v6.0:
+     * 1. Ping-Pong Estilométrico en Vivo (0 colisiones simultáneas + mismo patrón de habla).
+     * 2. Reencarnación / Hermandad VPS (Cuenta nueva/limpia que hereda los mismos servidores y amigos de un baneado en XN/VPS,
+     *    o dos cuentas que comparten pasado en el mismo servidor del VPS 5604).
+     */
     analyzeMirrorAccounts(usuarios, interacciones) {
         const chatNeighbors = new Map();
         const directWeights = new Map();
@@ -1133,7 +1121,7 @@ window.C4ISR_Views.red = {
         const candidatos = usuarios.filter(u => {
             const nChat = chatNeighbors.get(u.id)?.size || 0;
             const nSrv = Object.keys(u.servidores || {}).length;
-            return (u.totalMensajes || 0) >= 3 && (nChat + nSrv) >= 2;
+            return ((u.totalMensajes || 0) >= 2 && (nChat + nSrv) >= 2) || (Array.isArray(u.pasadoVps) && u.pasadoVps.length > 0);
         });
 
         const paresDetectados = [];
@@ -1143,6 +1131,7 @@ window.C4ISR_Views.red = {
             const u = candidatos[i];
             const uChatSet = chatNeighbors.get(u.id) || new Set();
             const uSrvKeys = Object.keys(u.servidores || {});
+            const uVpsIds = new Set((u.pasadoVps || []).map(p => p.guildId));
 
             for (let j = i + 1; j < candidatos.length; j++) {
                 const v = candidatos[j];
@@ -1153,9 +1142,14 @@ window.C4ISR_Views.red = {
 
                 const vChatSet = chatNeighbors.get(v.id) || new Set();
                 const vSrvKeys = Object.keys(v.servidores || {});
+                const vVpsIds = new Set((v.pasadoVps || []).map(p => p.guildId));
+
+                // Verificar si comparten pasado criminal en el mismo servidor del VPS 5604
+                let vpsComunes = 0;
+                uVpsIds.forEach(id => { if (vVpsIds.has(id)) vpsComunes++; });
 
                 const sharedServers = uSrvKeys.filter(s => vSrvKeys.includes(s));
-                if (sharedServers.length === 0) continue;
+                if (sharedServers.length === 0 && vpsComunes === 0) continue;
 
                 const sharedChatPartners = [...uChatSet].filter(id => id !== v.id && vChatSet.has(id));
                 const altTemporal = this.evaluarAlternanciaExclusiva(u.ultimosTimestamps, v.ultimosTimestamps);
@@ -1170,28 +1164,38 @@ window.C4ISR_Views.red = {
                 const unionCount = featuresU.size + featuresV.size - interCount;
                 const jaccard = unionCount > 0 ? (interCount / unionCount) : 0;
 
+                // Detectar Reencarnación: uno está sancionado en XN/VPS o fichado grave, y el otro es una cuenta nueva/burner en los mismos servers
+                const unoBaneadoYOtroBurner = (
+                    ((u.intelExterna?.amenazaConfirmada || u.infracciones >= 2) && v.esBurner) ||
+                    ((v.intelExterna?.amenazaConfirmada || v.infracciones >= 2) && u.esBurner)
+                ) && sharedServers.length >= 2;
+
                 const scoreHabla = simHabla !== null ? simHabla : 0;
                 const pasaFiltro = (scoreHabla >= 0.72 && altTemporal.excluyentes && (sharedChatPartners.length >= 1 || sharedServers.length >= 2)) ||
-                    (jaccard >= 0.75 && altTemporal.relevos >= 1 && sharedChatPartners.length >= 2);
+                    (jaccard >= 0.75 && altTemporal.relevos >= 1 && sharedChatPartners.length >= 2) ||
+                    (unoBaneadoYOtroBurner && jaccard >= 0.60) ||
+                    (vpsComunes >= 1 && sharedServers.length >= 1 && jaccard >= 0.55);
 
                 if (!pasaFiltro) continue;
 
                 const indiceCombinado = simHabla !== null ? ((jaccard * 0.45) + (scoreHabla * 0.55)) : jaccard;
-                const esCritico = (scoreHabla >= 0.78 && altTemporal.relevos >= 1) || (indiceCombinado >= 0.80 && altTemporal.relevos >= 2);
-                const nivelAlerta = esCritico ? 'CRÍTICO' : 'ADVERTENCIA';
+                const esCritico = unoBaneadoYOtroBurner || (scoreHabla >= 0.78 && altTemporal.relevos >= 1);
+                const tipoRelacion = unoBaneadoYOtroBurner
+                    ? 'REENCARNACIÓN'
+                    : (vpsComunes >= 1 ? 'PASADO VPS' : (esCritico ? 'CRÍTICO' : 'ADVERTENCIA'));
 
                 const record = {
                     uId: u.id,
                     uTag: u.tag || 'Usuario',
                     vId: v.id,
                     vTag: v.tag || 'Usuario',
-                    jaccard: indiceCombinado,
+                    jaccard: Math.max(indiceCombinado, unoBaneadoYOtroBurner ? 0.85 : 0),
                     speechSim: scoreHabla,
                     sharedChatCount: sharedChatPartners.length,
                     sharedServerCount: sharedServers.length,
                     sharedSleepHours: Math.round((scoreHabla || jaccard) * 100),
                     fastHandoffs: altTemporal.relevos,
-                    nivelAlerta
+                    nivelAlerta: tipoRelacion
                 };
 
                 paresDetectados.push(record);
@@ -1202,20 +1206,17 @@ window.C4ISR_Views.red = {
             }
         }
 
-        paresDetectados.sort((a, b) => (b.nivelAlerta === 'CRÍTICO') - (a.nivelAlerta === 'CRÍTICO') || (b.jaccard - a.jaccard));
+        paresDetectados.sort((a, b) => b.jaccard - a.jaccard);
         this.suspectPairs = paresDetectados;
         this.altMapByUser = mapaAltsUsuario;
 
-        const badgeAlts = document.getElementById('red-alts-badge');
-        if (badgeAlts) {
-            badgeAlts.textContent = `${paresDetectados.length} ALTS`;
-            badgeAlts.className = paresDetectados.some(p => p.nivelAlerta === 'CRÍTICO')
-                ? 'badge badge-red'
-                : (paresDetectados.length > 0 ? 'badge badge-amber' : 'badge badge-green');
-        }
-
         const tabBtnAlts = document.getElementById('tab-btn-alts');
         if (tabBtnAlts) tabBtnAlts.textContent = `ALTS (${paresDetectados.length})`;
+        const btnOpenAlerts = document.getElementById('btn-open-alerts-panel');
+        if (btnOpenAlerts) {
+            btnOpenAlerts.textContent = paresDetectados.length > 0 ? `◎ ALTS (${paresDetectados.length}) / DVR` : '◎ ALTS / DVR';
+            btnOpenAlerts.style.borderColor = paresDetectados.length > 0 ? '#fcee0a' : 'rgba(255,255,255,0.14)';
+        }
         if (this.rightPanelTab === 'alts') this.renderAltsRadarList();
     },
 
@@ -1230,22 +1231,6 @@ window.C4ISR_Views.red = {
             this.explorersList = Array.isArray(data.enjambre) ? data.enjambre : [];
             this.dvrEvents = Array.isArray(data.bitacoraDvr) ? data.bitacoraDvr.slice().reverse() : [];
             this.watchlistSet = new Set(Array.isArray(data.watchlist) ? data.watchlist.map(String) : []);
-
-            const badge = document.getElementById('red-stats-badge');
-            if (badge) {
-                badge.textContent = `${servidores.length} SISTEMAS // ${usuarios.length} SUJETOS`;
-            }
-
-            const totalCeniza = servidores.filter(s => s.estadoCeniza?.raideado).length;
-            const cenizaBadge = document.getElementById('red-ceniza-badge');
-            if (cenizaBadge) {
-                if (totalCeniza > 0) {
-                    cenizaBadge.textContent = `${totalCeniza} CENIZA`;
-                    cenizaBadge.classList.remove('hidden');
-                } else {
-                    cenizaBadge.classList.add('hidden');
-                }
-            }
 
             this.analyzeMirrorAccounts(usuarios, interacciones);
 
@@ -1269,15 +1254,14 @@ window.C4ISR_Views.red = {
                 s => (s.usuariosCount || 0) === 0 && (!s.alianzasSalientes || s.alianzasSalientes.length === 0) && !s.estadoCeniza?.raideado
             );
 
-            // 1. Distribuir Sistemas Activos en Constelaciones Espaciadas (Cero solapamientos)
             activeServers.forEach((srv, idx) => {
                 const key = `SRV_${srv.id}`;
                 this.serverMembers.set(key, []);
                 let node = this.nodes.get(key);
                 const radius = Math.max(24, Math.min(50, 19 + Math.sqrt(srv.usuariosCount || 1) * 2.5));
 
-                const armAngle = idx * 2.3999632; // Ángulo áureo galáctico
-                const galDist = idx === 0 ? 0 : (340 + Math.sqrt(idx) * 260);
+                const armAngle = idx * 2.3999632;
+                const galDist = idx === 0 ? 0 : (360 + Math.sqrt(idx) * 275);
                 const targetX = Math.cos(armAngle) * galDist;
                 const targetY = Math.sin(armAngle) * galDist;
 
@@ -1314,7 +1298,7 @@ window.C4ISR_Views.red = {
                 this.serverMembers.set(key, []);
                 let node = this.nodes.get(key);
                 const angle = (idx / Math.max(1, emptyServers.length)) * Math.PI * 2;
-                const ringRadius = 1280 + (idx % 3) * 140;
+                const ringRadius = 1320 + (idx % 3) * 140;
                 const targetX = Math.cos(angle) * ringRadius;
                 const targetY = Math.sin(angle) * ringRadius;
 
@@ -1345,10 +1329,9 @@ window.C4ISR_Views.red = {
                 this.serverNodesList.push(node);
             });
 
-            // 2. Posicionar Usuarios y Calcular Puentes Estelares entre Servidores (Constellation Jump Lanes)
             const nuevasAristas = [];
             const serverOrbitCounter = new Map();
-            const sharedServerPairCounts = new Map(); // "sId1:sId2" -> count
+            const sharedServerPairCounts = new Map();
 
             usuarios.forEach((usr) => {
                 const key = `USR_${usr.id}`;
@@ -1356,7 +1339,6 @@ window.C4ISR_Views.red = {
                 const srvIds = srvEntries.map(e => e[0]).filter(sId => this.nodes.has(`SRV_${sId}`));
                 const serverCount = srvIds.length;
 
-                // Acumular puentes entre pares de servidores que comparten este mismo usuario
                 if (serverCount >= 2) {
                     for (let i = 0; i < srvIds.length; i++) {
                         for (let j = i + 1; j < srvIds.length; j++) {
@@ -1369,9 +1351,7 @@ window.C4ISR_Views.red = {
                 }
 
                 const altsDeUsuario = this.altMapByUser.get(usr.id) || [];
-                const altRole = altsDeUsuario.some(a => a.nivelAlerta === 'CRÍTICO')
-                    ? 'CRITICO'
-                    : (altsDeUsuario.length > 0 ? 'ADVERTENCIA' : null);
+                const altRole = altsDeUsuario.length > 0 ? altsDeUsuario[0].nivelAlerta : null;
                 const enWatchlist = Boolean(usr.enWatchlist || this.watchlistSet.has(String(usr.id)));
 
                 let activeSrvId = usr.ultimoServidorId;
@@ -1466,7 +1446,6 @@ window.C4ISR_Views.red = {
                 }
             });
 
-            // 3. Compilar Autopistas Estelares (Constellation Jump Lanes) entre Servidores
             this.constellationBridges = [];
             for (const [pairKey, sharedCount] of sharedServerPairCounts.entries()) {
                 const [s1, s2] = pairKey.split(':');
@@ -1480,11 +1459,6 @@ window.C4ISR_Views.red = {
                     });
                     addNeighbor(k1, k2);
                 }
-            }
-
-            const bridgesBadge = document.getElementById('red-bridges-badge');
-            if (bridgesBadge) {
-                bridgesBadge.textContent = `${this.constellationBridges.length} RUTAS SALTO`;
             }
 
             for (const rel of interacciones) {
@@ -1510,7 +1484,7 @@ window.C4ISR_Views.red = {
                         source: k1,
                         target: k2,
                         jaccard: pair.jaccard,
-                        critical: pair.nivelAlerta === 'CRÍTICO'
+                        critical: pair.nivelAlerta === 'CRÍTICO' || pair.nivelAlerta === 'REENCARNACIÓN'
                     });
                     addNeighbor(k1, k2);
                 }
@@ -1546,11 +1520,6 @@ window.C4ISR_Views.red = {
                     if (p.fromGuildId && p.fromGuildId !== p.guildId) {
                         this.spawnDvrTrace(`SRV_${p.fromGuildId}`, `SRV_${p.guildId}`, p.userTag, '#00f0ff');
                     }
-                    const ticker = document.getElementById('live-feed-ticker');
-                    if (ticker) {
-                        const vipPrefix = isVip ? '<span style="color:#fcee0a;font-weight:700;">[★ VIP]</span> ' : '[SALTO DE SEÑAL] ';
-                        ticker.innerHTML = `${vipPrefix}<strong>${DOMPurify.sanitize(String(p.userTag))}</strong> &rarr; ${DOMPurify.sanitize(String(p.guildName))}`;
-                    }
                 }
             }
 
@@ -1558,7 +1527,7 @@ window.C4ISR_Views.red = {
 
             if (this.selectedNode && this.nodes.has(this.selectedNode.key)) {
                 this.selectedNode = this.nodes.get(this.selectedNode.key);
-                if (this.rightPanelTab === 'inspector') {
+                if (this.rightPanelTab === 'inspector' && this.rightDockOpen) {
                     const activeEl = document.activeElement;
                     if (!activeEl || activeEl.id !== 'input-srv-tag') {
                         this.renderInspector(this.selectedNode);
@@ -1636,14 +1605,12 @@ window.C4ISR_Views.red = {
     },
 
     stepPhysicsAndCamera() {
-        // 1. Interpolación cinemática de la cámara (EVE Online Inertial Glide)
         if (!this.isDraggingCanvas) {
             this.camera.x += (this.camera.targetX - this.camera.x) * 0.14;
             this.camera.y += (this.camera.targetY - this.camera.y) * 0.14;
         }
         this.camera.zoom += (this.camera.targetZoom - this.camera.zoom) * 0.16;
 
-        // 2. Interpolación de órbitas O(N)
         if (!this.physicsEnabled) return;
 
         for (let i = 0; i < this.serverNodesList.length; i++) {
@@ -1682,32 +1649,34 @@ window.C4ISR_Views.red = {
         ctx.closePath();
     },
 
-    drawCyberpunkBackdrop(ctx, w, h) {
-        ctx.fillStyle = '#04050a';
+    drawDeepSpaceBackground(ctx, w, h) {
+        ctx.fillStyle = '#030408';
         ctx.fillRect(0, 0, w, h);
 
-        const gridStep = 105 * this.camera.zoom;
-        if (gridStep >= 18) {
-            ctx.strokeStyle = 'rgba(0, 240, 255, 0.04)';
-            ctx.lineWidth = 1;
-            const offsetX = this.camera.x % gridStep;
-            const offsetY = this.camera.y % gridStep;
-
-            ctx.beginPath();
-            for (let x = offsetX; x < w; x += gridStep) {
-                ctx.moveTo(x, 0);
-                ctx.lineTo(x, h);
-            }
-            for (let y = offsetY; y < h; y += gridStep) {
-                ctx.moveTo(0, y);
-                ctx.lineTo(w, y);
-            }
-            ctx.stroke();
+        // 1. Nebulosas pre-cacheadas con ligero desplazamiento de paralaje (0% impacto en FPS)
+        if (this.nebulaCanvas) {
+            const nebX = (w * 0.5 - 512) + (this.camera.x - w * 0.5) * 0.08;
+            const nebY = (h * 0.5 - 512) + (this.camera.y - h * 0.5) * 0.08;
+            ctx.drawImage(this.nebulaCanvas, nebX - 350, nebY - 350, 1724, 1724);
         }
+
+        // 2. Paralaje Estelar Multicapa 3D
+        const camOffsetX = this.camera.x - w * 0.5;
+        const camOffsetY = this.camera.y - h * 0.5;
+
+        for (let i = 0; i < this.starfield.length; i++) {
+            const st = this.starfield[i];
+            const sx = ((st.x * st.depth + camOffsetX * st.depth) % w + w) % w;
+            const sy = ((st.y * st.depth + camOffsetY * st.depth) % h + h) % h;
+            ctx.fillStyle = st.color;
+            ctx.globalAlpha = st.alpha;
+            ctx.fillRect(sx, sy, st.size, st.size);
+        }
+        ctx.globalAlpha = 1.0;
     },
 
     drawMiniMap() {
-        if (!this.miniCtx || !this.miniCanvas || !this.canvas) return;
+        if (!this.showMiniMap || !this.miniCtx || !this.miniCanvas || !this.canvas) return;
         const mCtx = this.miniCtx;
         const mw = this.miniCanvas.width;
         const mh = this.miniCanvas.height;
@@ -1719,7 +1688,6 @@ window.C4ISR_Views.red = {
         mCtx.fillStyle = 'rgba(4, 5, 10, 0.92)';
         mCtx.fillRect(0, 0, mw, mh);
 
-        // Dibujar sistemas estelares en el minimapa
         for (let i = 0; i < this.serverNodesList.length; i++) {
             const s = this.serverNodesList[i];
             if (!this.isNodeVisible(s)) continue;
@@ -1730,7 +1698,6 @@ window.C4ISR_Views.red = {
             mCtx.fillRect(mx - 2, my - 2, 4, 4);
         }
 
-        // Dibujar rectángulo del visor actual
         const viewLeftWorld = -this.camera.x / this.camera.zoom;
         const viewTopWorld = -this.camera.y / this.camera.zoom;
         const viewWWorld = this.canvas.width / this.camera.zoom;
@@ -1755,7 +1722,7 @@ window.C4ISR_Views.red = {
         const t = now * 0.0045;
         const pulse = (Math.sin(t) + 1) * 0.5;
 
-        this.drawCyberpunkBackdrop(ctx, w, h);
+        this.drawDeepSpaceBackground(ctx, w, h);
 
         const minWorldX = (-this.camera.x / this.camera.zoom) - 160;
         const maxWorldX = ((w - this.camera.x) / this.camera.zoom) + 160;
@@ -1777,24 +1744,7 @@ window.C4ISR_Views.red = {
         ctx.translate(this.camera.x, this.camera.y);
         ctx.scale(this.camera.zoom, this.camera.zoom);
 
-        // 0. Nebulosas Espaciales y Campo Estelar EVE Online
-        for (const neb of this.nebulae) {
-            ctx.beginPath();
-            ctx.arc(neb.x, neb.y, neb.r, 0, Math.PI * 2);
-            ctx.fillStyle = neb.color;
-            ctx.fill();
-        }
-
-        for (let i = 0; i < this.starfield.length; i++) {
-            const st = this.starfield[i];
-            if (!inViewport(st.x, st.y)) continue;
-            ctx.fillStyle = st.color;
-            ctx.globalAlpha = st.alpha;
-            ctx.fillRect(st.x, st.y, st.size, st.size);
-        }
-        ctx.globalAlpha = 1.0;
-
-        // 1. Autopistas de Salto entre Servidores (EVE Constellation Jump Lanes: Usuarios Comunes)
+        // 1. Autopistas de Salto entre Servidores (EVE Constellation Jump Lanes)
         if (this.showConstellationRoutes) {
             for (let i = 0; i < this.constellationBridges.length; i++) {
                 const br = this.constellationBridges[i];
@@ -1810,17 +1760,17 @@ window.C4ISR_Views.red = {
                 ctx.beginPath();
                 ctx.moveTo(s1.x, s1.y);
                 ctx.lineTo(s2.x, s2.y);
-                ctx.strokeStyle = br.sharedUsers >= 5 ? '#fcee0a' : '#00f0ff';
-                ctx.globalAlpha = isHighlighted ? (focusNode ? 0.72 : 0.32) : 0.05;
-                ctx.lineWidth = Math.min(5.0, 1.2 + Math.log2(br.sharedUsers + 1) * 0.9);
+                ctx.strokeStyle = br.sharedUsers >= 5 ? '#fcee0a' : '#38bdf8';
+                ctx.globalAlpha = isHighlighted ? (focusNode ? 0.72 : 0.26) : 0.04;
+                ctx.lineWidth = Math.min(4.5, 1.0 + Math.log2(br.sharedUsers + 1) * 0.8);
                 ctx.stroke();
 
-                if ((focusNode && isHighlighted) || (this.isStrategicViewActive() && br.sharedUsers >= 3)) {
+                if (focusNode && isHighlighted) {
                     const mx = (s1.x + s2.x) * 0.5;
                     const my = (s1.y + s2.y) * 0.5;
                     ctx.globalAlpha = 0.92;
                     ctx.font = 'bold 9.5px "JetBrains Mono", monospace';
-                    ctx.fillStyle = br.sharedUsers >= 5 ? '#fcee0a' : '#00f0ff';
+                    ctx.fillStyle = br.sharedUsers >= 5 ? '#fcee0a' : '#38bdf8';
                     ctx.textAlign = 'center';
                     ctx.fillText(`[${br.sharedUsers} COMUNES]`, mx, my - 5);
                 }
@@ -1828,7 +1778,7 @@ window.C4ISR_Views.red = {
             }
         }
 
-        // 2. Hilos Conectores de Chat (Usuario -> Servidor Actual y Servidores Previos)
+        // 2. Hilos Conectores de Chat (Usuario -> Servidor Actual)
         for (let i = 0; i < this.edges.length; i++) {
             const edge = this.edges[i];
             if (edge.kind === 'CHAT' && !this.showUserLinks) continue;
@@ -1859,16 +1809,16 @@ window.C4ISR_Views.red = {
 
                     if (isRecentChat || (focusNode && edgeActive)) {
                         ctx.strokeStyle = s.enWatchlist ? '#fcee0a' : '#00f0ff';
-                        ctx.globalAlpha = edgeActive ? 0.88 : 0.14;
-                        ctx.lineWidth = 1.9;
+                        ctx.globalAlpha = edgeActive ? 0.85 : 0.12;
+                        ctx.lineWidth = 1.8;
                     } else {
                         ctx.strokeStyle = isBridge ? '#fbbf24' : '#10b981';
-                        ctx.globalAlpha = edgeActive ? (isBridge ? 0.45 : 0.24) : 0.035;
-                        ctx.lineWidth = 1.15;
+                        ctx.globalAlpha = edgeActive ? (isBridge ? 0.42 : 0.22) : 0.03;
+                        ctx.lineWidth = 1.1;
                     }
                     ctx.stroke();
 
-                    if ((focusNode && edgeActive) || (isRecentChat && this.camera.zoom > 0.72)) {
+                    if ((focusNode && edgeActive) || (isRecentChat && this.camera.zoom > 0.78)) {
                         const timeLabel = formatearTiempoRelativo(edge.lastSeen);
                         if (timeLabel) {
                             ctx.font = 'bold 8.5px "JetBrains Mono", monospace';
@@ -1878,14 +1828,13 @@ window.C4ISR_Views.red = {
                         }
                     }
                 } else if ((focusNode && edgeActive) || this.onlyBridges) {
-                    // Mostrar hilos hacia los demás servidores cuando inspeccionas al usuario o activas Solo Puentes
                     ctx.beginPath();
                     ctx.setLineDash([5, 5]);
                     ctx.moveTo(s.x, s.y);
                     ctx.lineTo(tNode.x, tNode.y);
                     ctx.strokeStyle = '#fbbf24';
-                    ctx.globalAlpha = focusNode && edgeActive ? 0.82 : 0.32;
-                    ctx.lineWidth = 1.3;
+                    ctx.globalAlpha = focusNode && edgeActive ? 0.82 : 0.28;
+                    ctx.lineWidth = 1.25;
                     ctx.stroke();
                 }
                 ctx.restore();
@@ -1893,13 +1842,13 @@ window.C4ISR_Views.red = {
                 ctx.beginPath();
                 ctx.moveTo(s.x, s.y);
                 ctx.lineTo(tNode.x, tNode.y);
-                ctx.strokeStyle = `rgba(0, 240, 255, ${edgeActive ? 0.35 : 0.03})`;
+                ctx.strokeStyle = `rgba(0, 240, 255, ${edgeActive ? 0.32 : 0.025})`;
                 ctx.lineWidth = 1.0;
                 ctx.stroke();
             }
         }
 
-        // 3. Rutas Hiperespaciales de Alianzas (Arcos Púrpura)
+        // 3. Rutas Hiperespaciales de Alianzas
         if (this.showAllianceLinks) {
             for (let i = 0; i < this.allianceEdges.length; i++) {
                 const ally = this.allianceEdges[i];
@@ -1917,12 +1866,12 @@ window.C4ISR_Views.red = {
                 const ctrlY = (s.y + tNode.y) * 0.5 + (dx / dist) * Math.min(110, dist * 0.18);
 
                 ctx.save();
-                ctx.globalAlpha = isHighlighted ? 0.86 : 0.08;
+                ctx.globalAlpha = isHighlighted ? 0.84 : 0.07;
                 ctx.beginPath();
                 ctx.moveTo(s.x, s.y);
                 ctx.quadraticCurveTo(ctrlX, ctrlY, tNode.x, tNode.y);
                 ctx.strokeStyle = '#c084fc';
-                ctx.lineWidth = isHighlighted && focusNode ? 2.6 : 1.7;
+                ctx.lineWidth = isHighlighted && focusNode ? 2.5 : 1.6;
                 ctx.stroke();
 
                 const u = ((now * 0.0004 + i * 0.27) % 1.0);
@@ -1930,14 +1879,14 @@ window.C4ISR_Views.red = {
                 const px = invU * invU * s.x + 2 * invU * u * ctrlX + u * u * tNode.x;
                 const py = invU * invU * s.y + 2 * invU * u * ctrlY + u * u * tNode.y;
                 ctx.beginPath();
-                ctx.arc(px, py, 3.2, 0, Math.PI * 2);
+                ctx.arc(px, py, 3.0, 0, Math.PI * 2);
                 ctx.fillStyle = '#f3e8ff';
                 ctx.fill();
                 ctx.restore();
             }
         }
 
-        // 4. Enlaces Punteados de Cuentas Espejo (Alts)
+        // 4. Enlaces Punteados de Cuentas Espejo / Reencarnación
         if (this.showAltLinks) {
             for (const altEdge of this.altEdges) {
                 const s = this.nodes.get(altEdge.source);
@@ -1955,7 +1904,7 @@ window.C4ISR_Views.red = {
                 ctx.moveTo(s.x, s.y);
                 ctx.lineTo(tNode.x, tNode.y);
                 ctx.strokeStyle = altEdge.critical ? '#ff003c' : '#fcee0a';
-                ctx.globalAlpha = (!focusNode || isHighlighted) ? 0.92 : 0.12;
+                ctx.globalAlpha = (!focusNode || isHighlighted) ? 0.92 : 0.10;
                 ctx.lineWidth = isHighlighted ? 2.6 : 1.5;
                 ctx.stroke();
                 ctx.restore();
@@ -2023,7 +1972,7 @@ window.C4ISR_Views.red = {
             ctx.fill();
         }
 
-        // 7. Dibujar Sistemas Estelares (Servidores) y Satélites Tácticos (Usuarios)
+        // 7. Dibujar Sistemas Estelares (Servidores) y Satélites (Usuarios)
         for (const node of this.nodes.values()) {
             if (!this.isNodeVisible(node)) continue;
             if (!inViewport(node.x, node.y)) continue;
@@ -2040,15 +1989,24 @@ window.C4ISR_Views.red = {
                 const hasUsers = node.connectedUsersCount > 0;
                 const esCeniza = Boolean(node.meta?.estadoCeniza?.raideado);
                 const etiquetaObj = node.meta?.etiquetaManual;
+                const infCount = node.meta?.infeccionCount || 0;
+                const infPct = node.meta?.infeccionPct || 0;
 
-                // Anillo de Soberanía EVE Online
-                if (hasUsers || esCeniza || isSelected || isHovered) {
+                // Corona Parasitaria de Infección Silenciosa (Si hay usuarios con GlobalBan/VPS/Infracciones infiltrados)
+                if (!esCeniza && infCount > 0) {
+                    ctx.save();
                     ctx.beginPath();
-                    ctx.arc(node.x, node.y, node.radius + 10 + pulse * 5, 0, Math.PI * 2);
-                    ctx.strokeStyle = esCeniza
-                        ? 'rgba(148, 163, 184, 0.45)'
-                        : 'rgba(255, 0, 85, 0.48)';
-                    ctx.lineWidth = 1.5;
+                    ctx.setLineDash([7, 5]);
+                    ctx.arc(node.x, node.y, node.radius + 12 + pulse * 4, 0, Math.PI * 2);
+                    ctx.strokeStyle = infPct >= 25 ? '#ff003c' : '#f97316';
+                    ctx.lineWidth = 2.2;
+                    ctx.stroke();
+                    ctx.restore();
+                } else if (hasUsers || esCeniza || isSelected || isHovered) {
+                    ctx.beginPath();
+                    ctx.arc(node.x, node.y, node.radius + 9 + pulse * 4, 0, Math.PI * 2);
+                    ctx.strokeStyle = esCeniza ? 'rgba(148, 163, 184, 0.45)' : 'rgba(255, 0, 85, 0.42)';
+                    ctx.lineWidth = 1.4;
                     ctx.stroke();
                 }
 
@@ -2062,7 +2020,7 @@ window.C4ISR_Views.red = {
                 ctx.stroke();
 
                 this.drawHexagon(ctx, node.x, node.y, node.radius * 0.48);
-                ctx.strokeStyle = 'rgba(0, 240, 255, 0.38)';
+                ctx.strokeStyle = 'rgba(0, 240, 255, 0.35)';
                 ctx.lineWidth = 1;
                 ctx.stroke();
 
@@ -2070,13 +2028,13 @@ window.C4ISR_Views.red = {
                     ctx.font = 'bold 9.5px "JetBrains Mono", monospace';
                     ctx.fillStyle = '#cbd5e1';
                     ctx.textAlign = 'center';
-                    ctx.fillText('[CENIZA // RAIDEADO]', node.x, node.y - node.radius - 11);
+                    ctx.fillText('[CENIZA // RAIDEADO]', node.x, node.y - node.radius - 12);
                 } else if (etiquetaObj && etiquetaObj.texto) {
                     const tagColor = COLORES_ETIQUETA_SERVIDOR[etiquetaObj.tipo] || '#00f0ff';
                     ctx.font = 'bold 9.5px "JetBrains Mono", monospace';
                     ctx.fillStyle = tagColor;
                     ctx.textAlign = 'center';
-                    ctx.fillText(`[${etiquetaObj.texto}]`, node.x, node.y - node.radius - 11);
+                    ctx.fillText(`[${etiquetaObj.texto}]`, node.x, node.y - node.radius - 12);
                 }
 
                 ctx.font = 'bold 11px "JetBrains Mono", monospace';
@@ -2087,23 +2045,23 @@ window.C4ISR_Views.red = {
                 const isBridge = node.serverCount >= 2;
                 const isVip = Boolean(node.enWatchlist);
                 const hasRank = Boolean(node.primaryRank);
+                const esHostilConfirmado = Boolean(node.meta?.intelExterna?.amenazaConfirmada) || node.infracciones > 0;
                 const habloReciente = (now - (node.lastMessageTs || 0)) < 600000;
 
-                if (isVip || node.altRole) {
+                if (isVip || node.altRole || esHostilConfirmado) {
                     ctx.beginPath();
-                    ctx.arc(node.x, node.y, node.radius + 5 + pulse * 4, 0, Math.PI * 2);
+                    ctx.arc(node.x, node.y, node.radius + 4.5 + pulse * 3.5, 0, Math.PI * 2);
                     ctx.strokeStyle = isVip ? '#fcee0a' : '#ff003c';
-                    ctx.lineWidth = 1.8;
+                    ctx.lineWidth = 1.6;
                     ctx.stroke();
-                } else if (hasRank || habloReciente || isBridge || node.fichado) {
+                } else if (hasRank || habloReciente || isBridge) {
                     ctx.beginPath();
-                    ctx.arc(node.x, node.y, node.radius + 3.2, 0, Math.PI * 2);
-                    ctx.strokeStyle = hasRank ? '#39ff14' : (habloReciente ? '#00f0ff' : (node.fichado ? '#ff2a6d' : '#fbbf24'));
-                    ctx.lineWidth = 1.3;
+                    ctx.arc(node.x, node.y, node.radius + 3.0, 0, Math.PI * 2);
+                    ctx.strokeStyle = hasRank ? '#39ff14' : (habloReciente ? '#00f0ff' : '#fbbf24');
+                    ctx.lineWidth = 1.2;
                     ctx.stroke();
                 }
 
-                // Si tiene Rango Especial (Admin/Staff/Raider), dibujar como Rombo Táctico en lugar de círculo
                 if (hasRank) {
                     this.drawDiamond(ctx, node.x, node.y, node.radius + 2);
                 } else {
@@ -2111,7 +2069,9 @@ window.C4ISR_Views.red = {
                     ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
                 }
 
-                ctx.fillStyle = isVip ? '#fcee0a' : (hasRank ? '#39ff14' : (habloReciente ? '#00f0ff' : '#10b981'));
+                ctx.fillStyle = isVip
+                    ? '#fcee0a'
+                    : (esHostilConfirmado ? '#ff2a6d' : (hasRank ? '#39ff14' : (habloReciente ? '#00f0ff' : '#10b981')));
                 ctx.fill();
                 ctx.lineWidth = isSelected || isHovered ? 2.4 : 1.0;
                 ctx.strokeStyle = isSelected || isHovered ? '#ffffff' : '#047857';
@@ -2122,7 +2082,7 @@ window.C4ISR_Views.red = {
                     ctx.font = '10px "JetBrains Mono", monospace';
                     ctx.fillStyle = isVip
                         ? '#fcee0a'
-                        : (node.altRole ? '#ff003c' : (hasRank ? '#39ff14' : (habloReciente ? '#00f0ff' : (isBridge ? '#fbbf24' : '#e2e8f0'))));
+                        : (node.altRole || esHostilConfirmado ? '#ff85ad' : (hasRank ? '#39ff14' : (habloReciente ? '#00f0ff' : '#e2e8f0')));
                     ctx.textAlign = 'center';
                     ctx.fillText(node.label.slice(0, 18), node.x, node.y - node.radius - 5);
                 }
@@ -2142,15 +2102,15 @@ window.C4ISR_Views.red = {
         if (this.suspectPairs.length === 0) {
             container.innerHTML = `
                 <div style="padding: 1rem 0.4rem; color: var(--text-muted); line-height: 1.5;">
-                    <div style="color: var(--accent-green); font-weight: 700; margin-bottom: 0.4rem;">[ SIN CUENTAS ESPEJO DETECTADAS ]</div>
-                    El motor estilométrico y de exclusión mutua filtra automáticamente usuarios que simplemente comparten país/zona horaria, marcando solo pares que jamás colisionan al mismo segundo y comparten patrón de escritura.
+                    <div style="color: var(--accent-green); font-weight: 700; margin-bottom: 0.4rem;">[ SIN ALTS NI REENCARNACIONES ]</div>
+                    El motor estilométrico y de sucesión filtra coincidencias casuales de huso horario y busca patrones de habla idénticos, relevos sin colisión o cuentas nuevas que heredan el círculo de un baneado.
                 </div>
             `;
             return;
         }
 
         container.innerHTML = this.suspectPairs.map((pair, idx) => {
-            const isCrit = pair.nivelAlerta === 'CRÍTICO';
+            const isCrit = pair.nivelAlerta === 'CRÍTICO' || pair.nivelAlerta === 'REENCARNACIÓN';
             const badgeColor = isCrit ? '#ff003c' : '#fcee0a';
             const uSafe = DOMPurify.sanitize(pair.uTag);
             const vSafe = DOMPurify.sanitize(pair.vTag);
@@ -2159,14 +2119,14 @@ window.C4ISR_Views.red = {
                 <div class="alt-pair-card" data-u="${DOMPurify.sanitize(String(pair.uId))}" data-v="${DOMPurify.sanitize(String(pair.vId))}" style="border: 1px solid ${badgeColor}; border-left: 4px solid ${badgeColor}; background: rgba(255, 255, 255, 0.02); padding: 0.65rem 0.75rem; margin-bottom: 0.65rem; border-radius: 4px; cursor: pointer;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
                         <span style="color: ${badgeColor}; font-weight: 700; font-size: 0.72rem;">#${idx + 1} [${pair.nivelAlerta}]</span>
-                        <span style="color: var(--text-main); font-weight: 700; font-size: 0.74rem;"> ÍNDICE: ${(pair.jaccard * 100).toFixed(1)}%</span>
+                        <span style="color: var(--text-main); font-weight: 700; font-size: 0.74rem;">ÍNDICE: ${(pair.jaccard * 100).toFixed(1)}%</span>
                     </div>
                     <div style="color: #ffffff; font-weight: 600; margin-bottom: 4px;">
                         ${uSafe} &harr; ${vSafe}
                     </div>
                     <div style="color: var(--text-secondary); font-size: 0.71rem; line-height: 1.4;">
-                        &#9679; Similitud de Habla: <strong>${pair.sharedSleepHours}%</strong> | Relevos Turno: <strong>${pair.fastHandoffs}</strong><br>
-                        &#9679; Vecinos Chat Comunes: <strong>${pair.sharedChatCount}</strong> | Servers: <strong>${pair.sharedServerCount}</strong>
+                        &#9679; Habla/Huella: <strong>${pair.sharedSleepHours}%</strong> | Relevos: <strong>${pair.fastHandoffs}</strong><br>
+                        &#9679; Vecinos Comunes: <strong>${pair.sharedChatCount}</strong> | Servers: <strong>${pair.sharedServerCount}</strong>
                     </div>
                 </div>
             `;
@@ -2189,7 +2149,7 @@ window.C4ISR_Views.red = {
             container.innerHTML = `
                 <div style="padding: 1rem 0.4rem; color: var(--text-muted); line-height: 1.55;">
                     <div style="color: #00f0ff; font-weight: 700; margin-bottom: 0.4rem;">[ CÁMARA DVR EN GRABACIÓN ]</div>
-                    Aquí quedan grabados automáticamente los desplazamientos cuando un usuario habla en un servidor A y salta a un servidor B, además de los ataques Ceniza.
+                    Registra automáticamente cada salto de un usuario entre servidores distintos y los ataques Ceniza.
                 </div>
             `;
             return;
@@ -2198,7 +2158,7 @@ window.C4ISR_Views.red = {
         const headerPlayHtml = `
             <div style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center;">
                 <span style="color: #fcee0a; font-weight: 700; font-size: 0.72rem;">ÚLTIMOS ${this.dvrEvents.length} EVENTOS</span>
-                <button id="btn-play-all-dvr" class="eve-btn" type="button">&#9654; REPRODUCIR SALTOS</button>
+                <button id="btn-play-all-dvr" class="zero-btn" type="button">&#9654; REPRODUCIR SALTOS</button>
             </div>
         `;
 
@@ -2273,8 +2233,14 @@ window.C4ISR_Views.red = {
                 : 'Archivo Histórico';
             const numExploradores = srv.redundancia || (Array.isArray(srv.exploradores) ? srv.exploradores.length : 0);
             const redundanciaBadge = numExploradores >= 2
-                ? `<span style="color:#34d399;font-weight:700;">ÓPTIMA (${numExploradores} unidades)</span>`
-                : `<span style="color:#fbbf24;font-weight:700;">1 UNIDAD (SIN RESPALDO)</span>`;
+                ? `<span style="color:#34d399;font-weight:700;">ÓPTIMA (${numExploradores})</span>`
+                : `<span style="color:#fbbf24;font-weight:700;">1 UNIDAD</span>`;
+
+            const infCount = srv.infeccionCount || 0;
+            const infPct = srv.infeccionPct || 0;
+            const infeccionHtml = infCount > 0
+                ? `<div style="margin-bottom:0.65rem;padding:0.5rem 0.65rem;background:rgba(249,115,22,0.1);border:1px solid rgba(249,115,22,0.45);border-radius:4px;color:#fbbf24;font-size:0.72rem;">&#9888; <strong>Infiltración Detectada:</strong> ${infCount} sujeto(s) con antecedentes (${infPct}% de la órbita).</div>`
+                : '';
 
             let cenizaDossierHtml = '';
             if (srv.estadoCeniza && srv.estadoCeniza.raideado) {
@@ -2304,7 +2270,7 @@ window.C4ISR_Views.red = {
 
             const tagEditorHtml = `
                 <div style="margin-bottom: 0.85rem; padding: 0.6rem 0.7rem; background: rgba(0,240,255,0.03); border: 1px solid rgba(0,240,255,0.2); border-radius: 4px;">
-                    <div style="color: #00f0ff; font-weight: 700; font-size: 0.7rem; margin-bottom: 5px;">ETIQUETA DE SISTEMA EN MAPA (1-2 PALABRAS):</div>
+                    <div style="color: #00f0ff; font-weight: 700; font-size: 0.7rem; margin-bottom: 5px;">ETIQUETA EN MAPA (1-2 PALABRAS):</div>
                     <div style="display: flex; gap: 4px; margin-bottom: 5px;">
                         <input type="text" id="input-srv-tag" class="search-input" value="${DOMPurify.sanitize(currentTagText)}" placeholder="Ej: PROVEEDOR / RAIDERS / SOCIAL" maxlength="20" style="width: 100%; padding: 4px 7px; font-size: 0.73rem;">
                         <select id="select-srv-tag-type" style="background: var(--bg-input); color: var(--text-main); border: 1px solid rgba(255,255,255,0.14); border-radius: 4px; font-family: var(--font-mono); font-size: 0.7rem; padding: 2px 4px;">
@@ -2316,8 +2282,8 @@ window.C4ISR_Views.red = {
                         </select>
                     </div>
                     <div style="display: flex; gap: 4px;">
-                        <button id="btn-save-srv-tag" class="eve-btn" type="button" style="flex: 1;">FIJAR EN MAPA</button>
-                        <button id="btn-clear-srv-tag" class="eve-btn eve-btn-rz" type="button">BORRAR</button>
+                        <button id="btn-save-srv-tag" class="zero-btn" type="button" style="flex: 1;">FIJAR EN MAPA</button>
+                        <button id="btn-clear-srv-tag" class="zero-btn" type="button" style="color:#f87171;">BORRAR</button>
                     </div>
                 </div>
             `;
@@ -2333,32 +2299,6 @@ window.C4ISR_Views.red = {
                 `;
             }
 
-            // Servidores conectados por Autopistas de Salto (Usuarios en común)
-            const connectedBridges = this.constellationBridges
-                .filter(b => b.source === node.key || b.target === node.key)
-                .sort((a, b) => b.sharedUsers - a.sharedUsers);
-
-            let bridgesHtml = '';
-            if (connectedBridges.length > 0) {
-                const bRows = connectedBridges.slice(0, 10).map(b => {
-                    const otherKey = b.source === node.key ? b.target : b.source;
-                    const otherSrv = this.nodes.get(otherKey);
-                    if (!otherSrv) return '';
-                    return `
-                        <div class="srv-bridge-row" data-skey="${DOMPurify.sanitize(otherKey)}" style="display:flex;justify-content:space-between;padding:4px 6px;border-bottom:var(--border-subtle);cursor:pointer;font-size:0.71rem;">
-                            <span style="color:#00f0ff;">&harr; ${DOMPurify.sanitize(otherSrv.label)}</span>
-                            <strong style="color:#fcee0a;">${b.sharedUsers} comunes</strong>
-                        </div>
-                    `;
-                }).join('');
-                bridgesHtml = `
-                    <div style="color: #fcee0a; font-weight: 700; margin-bottom: 0.3rem;">AUTOPISTAS DE SALTO (USUARIOS COMUNES):</div>
-                    <div style="max-height: 110px; overflow-y: auto; border: var(--border-subtle); border-radius: 4px; background: rgba(0,0,0,0.25); margin-bottom: 0.75rem;">
-                        ${bRows}
-                    </div>
-                `;
-            }
-
             const members = (this.serverMembers.get(node.key) || [])
                 .slice()
                 .sort((a, b) => (b.lastMessageTs || 0) - (a.lastMessageTs || 0));
@@ -2367,31 +2307,30 @@ window.C4ISR_Views.red = {
                 const srvData = m.meta?.servidores?.[node.rawId] || {};
                 const timeStr = formatearTiempoRelativo(srvData.lastSeen || m.lastMessageTs);
                 const rankBadge = srvData.rango ? `<span style="color:#39ff14;font-size:0.64rem;">[${DOMPurify.sanitize(srvData.rango)}]</span> ` : '';
-                const badgeCol = m.enWatchlist ? '#fcee0a' : (m.altRole ? '#ff003c' : '#00f0ff');
+                const esHostil = Boolean(m.meta?.intelExterna?.amenazaConfirmada) || m.infracciones > 0;
+                const badgeCol = m.enWatchlist ? '#fcee0a' : (esHostil ? '#ff003c' : '#00f0ff');
                 return `
                     <div class="srv-member-row" data-ukey="${DOMPurify.sanitize(m.key)}" style="display:flex;justify-content:space-between;align-items:center;padding:5px 6px;border-bottom:var(--border-subtle);cursor:pointer;">
                         <span style="color:var(--text-main);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:190px;">${m.enWatchlist ? '&#9733; ' : (srvData.rango ? '&#9670; ' : '&#9679; ')}${DOMPurify.sanitize(m.label)} ${rankBadge}</span>
-                        <span style="color:${badgeCol};font-size:0.68rem;font-weight:700;">${timeStr || `${m.meta?.totalMensajes || 1} MSGS`}</span>
+                        <span style="color:${badgeCol};font-size:0.68rem;font-weight:700;">${esHostil ? 'HOSTIL' : (timeStr || `${m.meta?.totalMensajes || 1}m`)}</span>
                     </div>
                 `;
             }).join('');
 
             panel.innerHTML = `
-                <div style="border-left: 3px solid #ff0055; padding-left: 0.75rem; margin-bottom: 0.8rem;">
+                <div style="border-left: 3px solid #ff0055; padding-left: 0.75rem; margin-bottom: 0.75rem;">
                     <div style="color: #ff0055; font-weight: 700;">[ SISTEMA ESTELAR // SERVIDOR ]</div>
                     <div style="font-size: 0.98rem; color: var(--text-main); font-weight: 700; margin-top: 3px;">${DOMPurify.sanitize(node.label)}</div>
                     <div class="selectable" style="color: var(--text-muted); font-size: 0.71rem;">ID: ${DOMPurify.sanitize(String(node.rawId))}</div>
                 </div>
+                ${infeccionHtml}
                 ${cenizaDossierHtml}
                 ${tagEditorHtml}
                 ${inviteBlockHtml}
-                <div style="margin-bottom: 0.35rem;"><strong>Sujetos en Sistema:</strong> <span style="color: #00f0ff;">${members.length}</span></div>
-                <div style="margin-bottom: 0.35rem;"><strong>Miembros Totales Discord:</strong> ${srv.memberCount || 'N/A'}</div>
-                <div style="margin-bottom: 0.35rem;"><strong>Redundancia Enjambre:</strong> ${redundanciaBadge}</div>
-                <div style="margin-bottom: 0.75rem; font-size: 0.72rem; color: var(--text-secondary);"><strong>Exploradores:</strong> ${DOMPurify.sanitize(exploradores)}</div>
-                ${bridgesHtml}
-                <div style="color: #00f0ff; font-weight: 700; margin-bottom: 0.35rem;">SUJETOS EN ÓRBITA (${members.length}):</div>
-                <div style="max-height: 200px; overflow-y: auto; border: var(--border-subtle); border-radius: 4px; background: rgba(0,0,0,0.25);">
+                <div style="margin-bottom: 0.35rem;"><strong>Sujetos en Órbita:</strong> <span style="color: #00f0ff;">${members.length}</span> &nbsp;|&nbsp; <strong>Redundancia:</strong> ${redundanciaBadge}</div>
+                <div style="margin-bottom: 0.7rem; font-size: 0.71rem; color: var(--text-secondary);"><strong>Exploradores:</strong> ${DOMPurify.sanitize(exploradores)}</div>
+                <div style="color: #00f0ff; font-weight: 700; margin-bottom: 0.35rem;">SUJETOS EN ESTE SISTEMA (${members.length}):</div>
+                <div style="max-height: 220px; overflow-y: auto; border: var(--border-subtle); border-radius: 4px; background: rgba(0,0,0,0.25);">
                     ${membersHtml || '<div style="padding:0.75rem;color:var(--text-muted);">Sin usuarios registrados aún.</div>'}
                 </div>
             `;
@@ -2429,14 +2368,6 @@ window.C4ISR_Views.red = {
                 });
             }
 
-            panel.querySelectorAll('.srv-bridge-row').forEach(row => {
-                row.addEventListener('click', () => {
-                    const sKey = row.getAttribute('data-skey');
-                    const targetSrv = this.nodes.get(sKey);
-                    if (targetSrv) this.focusSingleNode(targetSrv);
-                });
-            });
-
             panel.querySelectorAll('.srv-member-row').forEach(row => {
                 row.addEventListener('click', () => {
                     const uKey = row.getAttribute('data-ukey');
@@ -2446,6 +2377,20 @@ window.C4ISR_Views.red = {
             });
         } else {
             const usr = node.meta || {};
+            const osint = usr.perfilOsint || {};
+            const geoBoxHtml = (osint.pais || osint.region || osint.ciudadDeclarada || osint.edad || osint.nombreReal)
+                ? `
+                    <div style="margin-bottom:0.75rem;padding:0.55rem 0.7rem;background:rgba(56,189,248,0.08);border:1px solid rgba(56,189,248,0.35);border-radius:4px;font-size:0.72rem;line-height:1.45;">
+                        <div style="color:#38bdf8;font-weight:700;margin-bottom:2px;">[ GEOLOCALIZACIÓN E IDENTIDAD OSINT ]</div>
+                        ${osint.pais ? `<div><strong>País Deducido:</strong> <span style="color:#fff;">${DOMPurify.sanitize(osint.pais)}</span></div>` : ''}
+                        ${osint.region ? `<div><strong>Región / Huso:</strong> <span style="color:#00f0ff;">${DOMPurify.sanitize(osint.region)}</span></div>` : ''}
+                        ${osint.ciudadDeclarada ? `<div><strong>Localidad Declarada:</strong> <span style="color:#fcee0a;">${DOMPurify.sanitize(osint.ciudadDeclarada)}</span></div>` : ''}
+                        ${osint.nombreReal ? `<div><strong>Nombre Extraído:</strong> ${DOMPurify.sanitize(osint.nombreReal)}</div>` : ''}
+                        ${osint.edad ? `<div><strong>Edad Extraída:</strong> ${DOMPurify.sanitize(osint.edad)}</div>` : ''}
+                    </div>
+                `
+                : '';
+
             const servidoresList = Object.entries(usr.servidores || {})
                 .sort((a, b) => (b[1].lastSeen || 0) - (a[1].lastSeen || 0))
                 .map(([sId, info]) => {
@@ -2455,7 +2400,7 @@ window.C4ISR_Views.red = {
                     return `
                         <div class="usr-srv-row" data-skey="SRV_${DOMPurify.sanitize(sId)}" style="padding: 6px 6px; border-bottom: var(--border-subtle); cursor: pointer; background: ${isCurrent ? 'rgba(0, 240, 255, 0.08)' : 'transparent'};">
                             <div style="display: flex; justify-content: space-between; align-items: center;">
-                                <span><strong style="color:${isCurrent ? '#00f0ff' : '#ff0055'};">&#11042;</strong> <strong>${DOMPurify.sanitize(info.name)}</strong> ${isCurrent ? '<span style="color:#00f0ff;font-size:0.65rem;">[ACTUAL]</span>' : ''}</span>
+                                <span><strong style="color:${isCurrent ? '#00f0ff' : '#ff0055'};">&#11042;</strong> <strong>${DOMPurify.sanitize(info.name)}</strong></span>
                                 <span style="color:var(--text-secondary);font-size:0.69rem;">${info.count} msgs &bull; ${timeAgo}</span>
                             </div>
                             ${rangoHtml}
@@ -2480,11 +2425,11 @@ window.C4ISR_Views.red = {
                 : 'Registrado en archivo';
 
             const altsDeUsuario = this.altMapByUser.get(String(node.rawId)) || [];
-            let altsHtml = `<div style="color: var(--text-muted); font-size: 0.72rem; margin-bottom: 0.75rem;">Sin coincidencias espejo por encima del umbral estilométrico.</div>`;
+            let altsHtml = `<div style="color: var(--text-muted); font-size: 0.72rem; margin-bottom: 0.75rem;">Sin coincidencias espejo ni reencarnaciones detectadas.</div>`;
 
             if (altsDeUsuario.length > 0) {
                 altsHtml = altsDeUsuario.map(alt => {
-                    const col = alt.nivelAlerta === 'CRÍTICO' ? '#ff003c' : '#fcee0a';
+                    const col = (alt.nivelAlerta === 'CRÍTICO' || alt.nivelAlerta === 'REENCARNACIÓN') ? '#ff003c' : '#fcee0a';
                     return `
                         <div class="btn-focus-alt" data-mirror="${DOMPurify.sanitize(String(alt.mirrorId))}" style="border-left: 3px solid ${col}; background: rgba(255,255,255,0.03); padding: 6px 8px; margin-bottom: 6px; cursor: pointer;">
                             <div style="color: ${col}; font-weight: 700; font-size: 0.72rem;">[${alt.nivelAlerta}] ${DOMPurify.sanitize(alt.mirrorTag)}</div>
@@ -2503,23 +2448,24 @@ window.C4ISR_Views.red = {
                     <div class="selectable" style="color: var(--text-muted); font-size: 0.71rem;">UID: ${DOMPurify.sanitize(String(node.rawId))}</div>
                 </div>
 
-                <button id="btn-toggle-vip" class="eve-btn" type="button" style="width: 100%; margin-bottom: 0.75rem; padding: 0.45rem; border-color: #fcee0a; color: ${node.enWatchlist ? '#09080c' : '#fcee0a'}; background: ${node.enWatchlist ? '#fcee0a' : 'rgba(252, 238, 10, 0.08)'}; font-weight: 700;">
+                ${geoBoxHtml}
+
+                <button id="btn-toggle-vip" class="zero-btn" type="button" style="width: 100%; margin-bottom: 0.75rem; padding: 0.45rem; border-color: #fcee0a; color: ${node.enWatchlist ? '#09080c' : '#fcee0a'}; background: ${node.enWatchlist ? '#fcee0a' : 'rgba(252, 238, 10, 0.08)'}; font-weight: 700;">
                     &#9733; ${node.enWatchlist ? 'DESACTIVAR SEGUIMIENTO VIP' : 'ACTIVAR SEGUIMIENTO VIP (WATCHLIST)'}
                 </button>
 
                 <div style="margin-bottom: 0.35rem;"><strong>Última Transmisión:</strong> <span style="color: #00f0ff;">${formatearTiempoRelativo(node.lastMessageTs) || 'N/A'}</span></div>
                 <div style="margin-bottom: 0.35rem;"><strong>Creación Cuenta:</strong> <span style="color: var(--text-secondary);">${snowflakeInfo}</span></div>
                 <div style="margin-bottom: 0.35rem;"><strong>Historial Alias:</strong> <span style="color: var(--text-secondary);">${aliasesPrevios}</span></div>
-                <div style="margin-bottom: 0.35rem;"><strong>Actividad Total:</strong> <span style="color: var(--accent-green);">${usr.totalMensajes || 0} mensajes</span></div>
-                <div style="margin-bottom: 0.7rem;"><strong>Infracciones Graves:</strong> <span style="color: ${node.infracciones > 0 ? '#ff003c' : 'var(--text-muted)'};">${node.infracciones}</span></div>
+                <div style="margin-bottom: 0.7rem;"><strong>Infracciones Locales:</strong> <span style="color: ${node.infracciones > 0 ? '#ff003c' : 'var(--text-muted)'};">${node.infracciones}</span></div>
 
                 <div style="color: #00f0ff; font-weight: 700; font-size: 0.71rem; margin-bottom: 0.3rem;">HUELLA HORARIA 24H (UTC):</div>
                 <div style="display:grid;grid-template-columns:repeat(24,1fr);gap:2px;margin-bottom:0.8rem;">${clockCells}</div>
 
-                <div style="color: #fcee0a; font-weight: 700; margin-bottom: 0.3rem;">CUENTAS ESPEJO (ESTILOMETRÍA + RELEVOS):</div>
+                <div style="color: #fcee0a; font-weight: 700; margin-bottom: 0.3rem;">ALTS Y REENCARNACIONES:</div>
                 <div style="margin-bottom: 0.8rem;">${altsHtml}</div>
 
-                <div style="color: var(--accent-rz); font-weight: 700; margin-bottom: 0.3rem;">RANGOS Y SERVIDORES DETECTADOS (${node.serverCount}):</div>
+                <div style="color: var(--accent-rz); font-weight: 700; margin-bottom: 0.3rem;">RANGOS Y SISTEMAS DETECTADOS (${node.serverCount}):</div>
                 <div style="margin-bottom: 0.9rem;">${servidoresList || 'Sin servidores'}</div>
                 <button id="btn-open-dossier" class="btn-cyber" type="button" style="padding: 0.55rem; font-size: 0.76rem;">ABRIR EXPEDIENTE Y ESCANEAR APIS</button>
             `;
