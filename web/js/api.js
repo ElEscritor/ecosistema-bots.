@@ -1,7 +1,7 @@
 'use strict';
 
 /* ==========================================================================
-   MOTOR DE COMUNICACIÓN (API REST CLIENT)
+   MOTOR DE COMUNICACION (API REST CLIENT)
    Archivo: js/api.js
    ========================================================================== */
 
@@ -17,28 +17,6 @@ window.C4ISR_API = {
         } else {
             sessionStorage.removeItem(STORAGE_SESSION_KEY);
         }
-    },
-   
-async consultarIntelExterna(userId) {
-        return await this.request(`/api/intel/${encodeURIComponent(userId)}`);
-    },
-
-    async getArsenalDinamico() {
-        return await this.request('/api/arsenal');
-    },
-
-    async agregarReglaArsenal(tipo, valor, descripcion) {
-        return await this.request('/api/arsenal/regla', {
-            method: 'POST',
-            body: JSON.stringify({ tipo, valor, descripcion })
-        });
-    },
-   
-   async agregarTokenExplorador(token, sector = 'General') {
-        return await this.request('/api/enjambre/token', {
-            method: 'POST',
-            body: JSON.stringify({ token, sector })
-        });
     },
 
     getHeaders() {
@@ -83,7 +61,7 @@ async consultarIntelExterna(userId) {
             if (response.status === 403) {
                 this.setSession(null);
                 if (window.AppController && typeof window.AppController.showLoginWall === 'function') {
-                    window.AppController.showLoginWall('[!] SESIÓN EXPIRADA. AUTENTÍQUESE NUEVAMENTE.');
+                    window.AppController.showLoginWall('[!] SESION EXPIRADA. AUTENTIQUESE NUEVAMENTE.');
                 }
                 throw new Error('HTTP_ERROR_403_UNAUTHORIZED');
             }
@@ -98,7 +76,7 @@ async consultarIntelExterna(userId) {
 
             return await response.json();
         } catch (error) {
-            console.error(`[C4ISR_API] Fallo en petición a ${endpoint}:`, error.message);
+            console.error(`[C4ISR_API] Fallo en peticion a ${endpoint}:`, error.message);
             throw error;
         } finally {
             clearTimeout(timeoutId);
@@ -113,6 +91,28 @@ async consultarIntelExterna(userId) {
         return await this.request('/api/red');
     },
 
+    async consultarIntelExterna(userId) {
+        return await this.request(`/api/intel/${encodeURIComponent(userId)}`);
+    },
+
+    async getArsenalDinamico() {
+        return await this.request('/api/arsenal');
+    },
+
+    async agregarReglaArsenal(tipo, valor, descripcion) {
+        return await this.request('/api/arsenal/regla', {
+            method: 'POST',
+            body: JSON.stringify({ tipo, valor, descripcion })
+        });
+    },
+
+    async agregarTokenExplorador(token, sector = 'General') {
+        return await this.request('/api/enjambre/token', {
+            method: 'POST',
+            body: JSON.stringify({ token, sector })
+        });
+    },
+
     async guardarEtiquetaServidor(serverId, texto, tipo = 'CUSTOM') {
         return await this.request('/api/red/etiqueta', {
             method: 'POST',
@@ -124,6 +124,13 @@ async consultarIntelExterna(userId) {
         return await this.request('/api/red/watchlist', {
             method: 'POST',
             body: JSON.stringify({ userId })
+        });
+    },
+
+    async ocultarInvitacion(code) {
+        return await this.request('/api/links/ocultar', {
+            method: 'POST',
+            body: JSON.stringify({ code })
         });
     },
 
