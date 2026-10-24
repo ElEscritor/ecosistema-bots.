@@ -19,6 +19,7 @@ const MAX_INTENTOS_LOGIN = 8;
 const BLOQUEO_LOGIN_MS = 5 * 60 * 1000;
 
 let servidorIniciado = false;
+let callbackDesplegarToken = null;
 let estadoEnjambre = [];
 let estadoRadarRed = {
     servidores: [],
@@ -29,8 +30,8 @@ let estadoRadarRed = {
 };
 
 const memoriaInvitaciones = new Map();
-const etiquetasServidores = new Map(); // Map<serverId, { texto, tipo }> (1-2 palabras definidas por el analista)
-const watchlistUsuarios = new Set();   // Set<userId> para seguimiento prioritario VIP
+const etiquetasServidores = new Map();
+const watchlistUsuarios = new Set();
 const colaResolucionInvites = [];
 let resolviendoInvites = false;
 
@@ -40,6 +41,12 @@ const RUTAS_DISCORD_RESERVADAS = new Set([
     'register', 'download', 'nitro', 'safety', 'terms', 'privacy',
     'guidelines', 'billing', 'store', 'template', 'gifts'
 ]);
+
+function registrarCallbackNuevoToken(fn) {
+    if (typeof fn === 'function') {
+        callbackDesplegarToken = fn;
+    }
+}
 
 function extraerInvitacionesDeTexto(texto) {
     if (typeof texto !== 'string' || texto.length === 0) return [];
@@ -490,7 +497,8 @@ app.get('/api/red', autenticar, async (req, res) => {
                 infracciones: 0,
                 fichado: false,
                 enWatchlist: watchlistUsuarios.has(String(usr.id)),
-                servidores: servidoresLimpiados
+                servidores: servidoresLimpiados,
+                ultimoServidorId: usr.ultimoServidorId !== 'DM_SECTOR' ? usr.ultimoServidorId : null
             });
         }
 
@@ -514,6 +522,7 @@ app.get('/api/red', autenticar, async (req, res) => {
                     horasActivas: Array.from(horasSet),
                     historialAliases: Array.isArray(exp.historialAliases) ? exp.historialAliases : [exp.ultimoAlias || 'Objetivo'],
                     servidores: {},
+                    ultimoServidorId: null,
                     infracciones: exp.totalInfracciones || 0,
                     fichado: true,
                     enWatchlist: watchlistUsuarios.has(uid)
@@ -529,6 +538,7 @@ app.get('/api/red', autenticar, async (req, res) => {
 
             const horasUsuarioSet = new Set(usr.horasActivas);
             const historial = Array.isArray(exp.historial) ? exp.historial : [];
+            let maxTsServidor = 0;
 
             for (const h of historial) {
                 if (!h || typeof h !== 'object') continue;
@@ -603,17 +613,23 @@ app.get('/api/red', autenticar, async (req, res) => {
                     }
                 }
 
+                const tsVal = !Number.isNaN(eventoTs) ? eventoTs : Date.now();
                 if (!usr.servidores[srvIdEncontrado]) {
                     usr.servidores[srvIdEncontrado] = {
                         name: mapaServidores.get(srvIdEncontrado)?.name || nombreSrv,
                         count: 1,
-                        lastSeen: !Number.isNaN(eventoTs) ? eventoTs : Date.now()
+                        lastSeen: tsVal
                     };
                 } else {
                     usr.servidores[srvIdEncontrado].count += 1;
-                    if (!Number.isNaN(eventoTs) && eventoTs > usr.servidores[srvIdEncontrado].lastSeen) {
-                        usr.servidores[srvIdEncontrado].lastSeen = eventoTs;
+                    if (tsVal > usr.servidores[srvIdEncontrado].lastSeen) {
+                        usr.servidores[srvIdEncontrado].lastSeen = tsVal;
                     }
+                }
+
+                if (!usr.ultimoServidorId || tsVal >= maxTsServidor) {
+                    maxTsServidor = tsVal;
+                    usr.ultimoServidorId = srvIdEncontrado;
                 }
             }
 
@@ -625,11 +641,9 @@ app.get('/api/red', autenticar, async (req, res) => {
         for (const inv of memoriaInvitaciones.values()) {
             let targetSrvId = null;
             if (inv.status === 'VALID' && inv.guildId) {
-                targetIdSearch: {
-                    targetSrvId = mapaServidores.has(inv.guildId)
-                        ? inv.guildId
-                        : buscarServidorPorNombre(inv.guildName);
-                }
+                targetSrvId = mapaServidores.has(inv.guildId)
+                    ? inv.guildId
+                    : buscarServidorPorNombre(inv.guildName);
             }
 
             for (const origenNombre of (inv.origenes || [])) {
@@ -691,8 +705,36 @@ app.get('/api/red', autenticar, async (req, res) => {
 });
 
 /**
- * Guarda o elimina la etiqueta táctica de 1-2 palabras de un servidor en el mapa.
+ * Despliega un nuevo Token Explorador en caliente desde el Panel Web y lo guarda en MongoDB.
  */
+app.post('/api/enjambre/token', autenticar, async (req, res) => {
+    const { token, sector } = req.body || {};
+    if (!token || typeof token !== 'string' || token.trim().length < 40) {
+        return res.status(400).json({ error: 'Formato de token inválido.' });
+    }
+
+    const cleanToken = token.replace(/^(Bot|Bearer)\s+/i, '').trim();
+    const sectorLimpio = String(sector || 'General').trim().slice(0, 30);
+
+    try {
+        if (typeof callbackDesplegarToken === 'function') {
+            const resultado = await callbackDesplegarToken(cleanToken, sectorLimpio);
+            if (!resultado.exito) {
+                return res.status(400).json({ error: resultado.motivo || 'No se pudo iniciar sesión con ese token.' });
+            }
+            await database.guardarTokenDinamico(cleanToken, sectorLimpio);
+            return res.json({
+                success: true,
+                tag: resultado.tag,
+                guilds: resultado.guilds
+            });
+        }
+        return res.status(503).json({ error: 'El motor de enjambre aún no está listo.' });
+    } catch (error) {
+        return res.status(500).json({ error: 'Error interno al desplegar token.' });
+    }
+});
+
 app.post('/api/red/etiqueta', autenticar, (req, res) => {
     const { serverId, texto, tipo } = req.body || {};
     if (!serverId) return res.status(400).json({ error: 'serverId requerido.' });
@@ -712,9 +754,6 @@ app.post('/api/red/etiqueta', autenticar, (req, res) => {
     return res.json({ success: true, etiqueta: etiquetasServidores.get(idLimpio) || null });
 });
 
-/**
- * Activa o desactiva el seguimiento prioritario (Watchlist VIP) sobre un usuario.
- */
 app.post('/api/red/watchlist', autenticar, (req, res) => {
     const { userId } = req.body || {};
     if (!userId) return res.status(400).json({ error: 'userId requerido.' });
@@ -820,6 +859,7 @@ module.exports = {
     iniciar,
     actualizarEnjambre,
     actualizarRadarRed,
+    registrarCallbackNuevoToken,
     registrarInvitacionViva,
     restaurarCacheInvitaciones,
     exportarCacheInvitaciones,
