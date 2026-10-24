@@ -1,20 +1,29 @@
 'use strict';
 
 /* ==========================================================================
-   VISTA: MAPA ESTELAR C4ISR v3.0 (HEXÁGONOS // LOD // CENIZA // DVR // VIP)
+   VISTA: MAPA ESTELAR C4ISR v4.0 (EVE ONLINE + CYBERPUNK 2077 // 60FPS // MÓVIL)
    Archivo: js/vistas/red.js
    ========================================================================== */
 
 window.C4ISR_Views = window.C4ISR_Views || {};
 
 const COLORES_ETIQUETA_SERVIDOR = {
-    HOSTIL: '#ef4444',
+    HOSTIL: '#ff003c',
     PROVEEDOR: '#f97316',
-    SOCIAL: '#38bdf8',
+    SOCIAL: '#00f0ff',
     ALIADO: '#c084fc',
     OBJETIVO: '#fcee0a',
     CUSTOM: '#10b981'
 };
+
+function formatearTiempoRelativo(tsMs) {
+    if (!tsMs) return '';
+    const diffSec = Math.max(0, Math.floor((Date.now() - tsMs) / 1000));
+    if (diffSec < 45) return 'EN VIVO';
+    if (diffSec < 3600) return `HACE ${Math.floor(diffSec / 60)}M`;
+    if (diffSec < 86400) return `HACE ${Math.floor(diffSec / 3600)}H`;
+    return `HACE ${Math.floor(diffSec / 86400)}D`;
+}
 
 window.C4ISR_Views.red = {
     canvas: null,
@@ -27,6 +36,8 @@ window.C4ISR_Views.red = {
     boundMouseUp: null,
 
     nodes: new Map(),
+    serverNodesList: [],
+    userNodesList: [],
     edges: [],
     altEdges: [],
     allianceEdges: [],
@@ -35,20 +46,24 @@ window.C4ISR_Views.red = {
     suspectPairs: [],
     altMapByUser: new Map(),
     dvrEvents: [],
+    explorersList: [],
     watchlistSet: new Set(),
     particles: [],
     dvrTraces: [],
     seenPulses: new Set(),
+    starfield: [],
 
-    camera: { x: 0, y: 0, zoom: 0.72 },
+    camera: { x: 0, y: 0, zoom: 0.62 },
     isDraggingCanvas: false,
     draggedNode: null,
     hoveredNode: null,
     selectedNode: null,
     highlightedPair: null,
     lastMousePos: { x: 0, y: 0 },
+    pinchInitialDist: null,
+    pinchInitialZoom: 1,
 
-    rightPanelTab: 'inspector', // 'inspector' | 'alts' | 'dvr'
+    rightPanelTab: 'inspector',
     physicsEnabled: true,
     strategicMode: false,
     showUserLinks: true,
@@ -56,57 +71,112 @@ window.C4ISR_Views.red = {
     showAllianceLinks: true,
     onlyBridges: false,
     hideEmptyServers: false,
+    selectedExplorerFilter: 'ALL',
+    selectedSectorFilter: 'ALL',
     searchTerm: '',
 
+    initStarfield() {
+        this.starfield = [];
+        for (let i = 0; i < 110; i++) {
+            this.starfield.push({
+                x: (Math.random() - 0.5) * 3600,
+                y: (Math.random() - 0.5) * 3600,
+                size: Math.random() * 1.6 + 0.4,
+                alpha: Math.random() * 0.45 + 0.1,
+                color: i % 5 === 0 ? '#00f0ff' : (i % 7 === 0 ? '#ff2a6d' : '#cbd5e1')
+            });
+        }
+    },
+
     async render(container) {
+        this.initStarfield();
+
         container.innerHTML = `
-            <div class="panel-header" style="margin-bottom: 0.6rem; padding-bottom: 0.5rem;">
+            <style>
+                .red-main-grid {
+                    display: grid;
+                    grid-template-columns: 1fr 370px;
+                    gap: 0.85rem;
+                    height: calc(100vh - 215px);
+                    min-height: 460px;
+                }
+                .cp-select {
+                    background: #0c0a10;
+                    color: #00f0ff;
+                    border: 1px solid rgba(0, 240, 255, 0.35);
+                    border-radius: 4px;
+                    padding: 0.42rem 0.6rem;
+                    font-family: var(--font-mono);
+                    font-size: 0.73rem;
+                    outline: none;
+                }
+                @media screen and (max-width: 960px) {
+                    .red-main-grid {
+                        grid-template-columns: 1fr;
+                        grid-template-rows: 58vh auto;
+                        height: auto;
+                    }
+                }
+            </style>
+
+            <div class="panel-header" style="margin-bottom: 0.55rem; padding-bottom: 0.5rem;">
                 <div style="display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap;">
-                    <span class="panel-title" style="font-size: 1.02rem; color: var(--accent-rz);">CARTOGRAFÍA ESTELAR C4ISR // SERVIDORES, CENIZA Y CÁMARA DVR</span>
+                    <span class="panel-title" style="font-size: 1rem; color: #00f0ff; text-shadow: 0 0 10px rgba(0,240,255,0.3);">NETRUNNER STARMAP v4.0 // EVE-CYBERPUNK TELEMETRY</span>
                     <span id="red-stats-badge" class="badge badge-green">SINCRONIZANDO...</span>
                     <span id="red-alts-badge" class="badge badge-amber">0 ALTS</span>
-                    <span id="red-ceniza-badge" class="badge badge-red hidden">0 EN CENIZA</span>
+                    <span id="red-ceniza-badge" class="badge badge-red hidden">0 CENIZA</span>
                 </div>
                 <div style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
-                    <button id="btn-toggle-strategic" class="btn-action" type="button" title="Oculta usuarios normales y muestra solo estaciones, puentes y rutas">VISTA ESTRATÉGICA: AUTO</button>
+                    <button id="btn-toggle-strategic" class="btn-action" type="button">MODO ESTELAR: AUTO</button>
                     <button id="btn-toggle-empty-srv" class="btn-action" type="button">SIN VACÍOS: OFF</button>
                     <button id="btn-toggle-bridges" class="btn-action" type="button">SOLO PUENTES/VIP: OFF</button>
                     <button id="btn-toggle-alliances" class="btn-action" type="button">ALIANZAS: ON</button>
-                    <button id="btn-toggle-chatlinks" class="btn-action" type="button">DIÁLOGO: ON</button>
-                    <button id="btn-toggle-physics" class="btn-action" type="button">FÍSICAS: ON</button>
+                    <button id="btn-toggle-physics" class="btn-action" type="button">ÓRBITAS: ON</button>
                     <button id="btn-center-graph" class="btn-action" type="button">CENTRAR</button>
                 </div>
             </div>
 
             <div class="toolbar-tactical" style="margin-bottom: 0.6rem; padding: 0.5rem 0.85rem;">
-                <div style="display: flex; align-items: center; gap: 0.5rem; flex: 1; min-width: 240px;">
-                    <input type="text" id="red-search" class="search-input" style="width: 100%; max-width: 400px;" placeholder="Buscar servidor, etiqueta, usuario o UID (Enter para enfocar)..." autocomplete="off">
+                <div style="display: flex; align-items: center; gap: 0.5rem; flex: 1; flex-wrap: wrap;">
+                    <input type="text" id="red-search" class="search-input" style="flex: 1; min-width: 190px; max-width: 310px;" placeholder="Buscar server, usuario o etiqueta..." autocomplete="off">
+                    <select id="filter-explorer-select" class="cp-select" title="Filtrar constelación por Unidad Exploradora">
+                        <option value="ALL">EXPLORADOR: TODOS (ENJAMBRE)</option>
+                    </select>
+                    <select id="filter-sector-select" class="cp-select" title="Filtrar por clasificación de servidor">
+                        <option value="ALL">SECTOR: TODOS LOS SISTEMAS</option>
+                        <option value="ACTIVE">SOLO CON TRÁFICO ACTIVO</option>
+                        <option value="HOSTIL">ETIQUETA: HOSTIL (ROJO)</option>
+                        <option value="PROVEEDOR">ETIQUETA: PROVEEDOR (NARANJA)</option>
+                        <option value="SOCIAL">ETIQUETA: SOCIAL (CIAN)</option>
+                        <option value="ALIADO">ETIQUETA: ALIADO (PÚRPURA)</option>
+                        <option value="OBJETIVO">ETIQUETA: OBJETIVO (AMARILLO)</option>
+                        <option value="CENIZA">ESTADO: CENIZA (RAIDEADOS)</option>
+                    </select>
                 </div>
-                <div style="display: flex; gap: 0.85rem; align-items: center; font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-secondary); flex-wrap: wrap;">
-                    <span><strong style="color: #ef4444;">&#11042; HEX ROJO:</strong> SERVER ACTIVO</span>
-                    <span><strong style="color: #94a3b8;">&#11042; HEX GRIS:</strong> SERVER CENIZA (RAIDEADO)</span>
-                    <span><strong style="color: #10b981;">&#9679; VERDE:</strong> USUARIO</span>
-                    <span><strong style="color: #fbbf24;">&#9733; ORO:</strong> PUENTE / VIP</span>
-                    <span><strong style="color: #c084fc;">&#10548; PÚRPURA:</strong> ALIANZA</span>
+                <div style="display: flex; gap: 0.75rem; align-items: center; font-family: var(--font-mono); font-size: 0.69rem; color: var(--text-secondary); flex-wrap: wrap;">
+                    <span><strong style="color: #ff0055;">&#11042; SISTEMA:</strong> SERVER</span>
+                    <span><strong style="color: #00f0ff;">&#9473; LÁSER CIAN:</strong> CHAT ACTIVO</span>
+                    <span><strong style="color: #fcee0a;">&#9733; NEÓN:</strong> PUENTE / VIP</span>
+                    <span><strong style="color: #c084fc;">&#10548; ARCO:</strong> ALIANZA</span>
                 </div>
             </div>
 
-            <div style="display: grid; grid-template-columns: 1fr 375px; gap: 0.85rem; height: calc(100vh - 210px); min-height: 440px;">
-                <div id="canvas-wrapper" style="position: relative; background: radial-gradient(circle at 50% 50%, #130f1e 0%, #060509 100%); border: var(--border-thin); border-radius: var(--radius-md); overflow: hidden;">
+            <div class="red-main-grid">
+                <div id="canvas-wrapper" style="position: relative; background: radial-gradient(circle at 50% 50%, #101324 0%, #06070d 75%, #030306 100%); border: 1px solid rgba(0, 240, 255, 0.28); border-radius: var(--radius-md); overflow: hidden; touch-action: none;">
                     <canvas id="net-canvas" style="width: 100%; height: 100%; display: block; cursor: grab;"></canvas>
 
-                    <div id="hud-coords" style="position: absolute; top: 10px; left: 12px; font-family: var(--font-mono); font-size: 0.68rem; color: rgba(255, 42, 109, 0.82); background: rgba(9, 8, 12, 0.8); padding: 4px 9px; border-left: 2px solid var(--accent-rz); pointer-events: none;">
-                        C4ISR // SECTOR-SCAN // ZOOM: 72%
+                    <div id="hud-coords" style="position: absolute; top: 10px; left: 12px; font-family: var(--font-mono); font-size: 0.68rem; color: #00f0ff; background: rgba(6, 7, 13, 0.85); padding: 4px 10px; border: 1px solid rgba(0, 240, 255, 0.3); border-left: 3px solid #fcee0a; pointer-events: none;">
+                        NETRUNNER // STARMAP // ZOOM: 62%
                     </div>
 
-                    <div id="canvas-hover-tooltip" class="hidden" style="position: absolute; pointer-events: none; z-index: 30; background: rgba(11, 9, 16, 0.96); border: 1px solid var(--accent-rz); border-left: 3px solid var(--accent-rz); padding: 7px 11px; border-radius: 4px; font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-main); box-shadow: 0 8px 22px rgba(0,0,0,0.9); max-width: 310px;"></div>
+                    <div id="canvas-hover-tooltip" class="hidden" style="position: absolute; pointer-events: none; z-index: 30; background: rgba(7, 8, 14, 0.96); border: 1px solid #00f0ff; border-left: 4px solid #fcee0a; padding: 7px 11px; border-radius: 4px; font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-main); box-shadow: 0 8px 22px rgba(0,0,0,0.92); max-width: 310px;"></div>
 
-                    <div id="live-feed-ticker" style="position: absolute; bottom: 12px; left: 12px; right: 12px; max-width: fit-content; font-family: var(--font-mono); font-size: 0.72rem; color: var(--accent-green); background: rgba(9, 8, 12, 0.92); padding: 5px 12px; border: 1px solid rgba(16, 185, 129, 0.4); border-left: 3px solid var(--accent-green); border-radius: 4px; pointer-events: none; box-shadow: 0 4px 12px rgba(0,0,0,0.6);">
-                        [RADAR ACTIVO] Escaneando tráfico e incursiones...
+                    <div id="live-feed-ticker" style="position: absolute; bottom: 10px; left: 12px; right: 12px; max-width: fit-content; font-family: var(--font-mono); font-size: 0.71rem; color: #00f0ff; background: rgba(6, 7, 13, 0.92); padding: 5px 12px; border: 1px solid rgba(0, 240, 255, 0.35); border-left: 3px solid #00f0ff; border-radius: 4px; pointer-events: none;">
+                        [TELEMETRÍA ESTELAR] Escaneando transmisiones en vivo...
                     </div>
                 </div>
 
-                <div class="osint-panel" style="height: 100%;">
+                <div class="osint-panel" style="height: 100%; border-color: rgba(0, 240, 255, 0.22);">
                     <div class="panel-header" style="margin: 0; padding: 0.55rem 0.7rem; display: flex; gap: 0.35rem;">
                         <button id="tab-btn-inspector" class="btn-action" type="button" style="flex: 1; padding: 0.4rem 0.3rem; font-size: 0.7rem; background: var(--accent-rz); color: #fff;">INSPECTOR</button>
                         <button id="tab-btn-alts" class="btn-action" type="button" style="flex: 1; padding: 0.4rem 0.3rem; font-size: 0.7rem;">ALTS (0)</button>
@@ -114,8 +184,8 @@ window.C4ISR_Views.red = {
                     </div>
                     <div id="node-inspector-content" class="osint-content" style="font-family: var(--font-mono); font-size: 0.77rem;">
                         <div style="color: var(--text-muted); padding-top: 0.75rem; line-height: 1.55;">
-                            &#11042; Haz clic sobre cualquier <strong style="color: #ef4444;">Estación Hexagonal (Servidor)</strong> para asignarle una etiqueta de 1-2 palabras, auditar su redundancia de exploradores o inspeccionar sus cenizas si fue raideado.<br><br>
-                            &#9679; Haz clic sobre un <strong style="color: #10b981;">Usuario (Verde)</strong> para ver la edad real de su cuenta (Snowflake), activar el seguimiento <strong>VIP</strong> o cazar sus cuentas espejo.
+                            &#11042; Toca o haz clic en cualquier <strong style="color: #ff0055;">Sistema Estelar (Servidor)</strong> para etiquetarlo, ver su invitación o auditar sus exploradores.<br><br>
+                            &#9679; Cuando un <strong style="color: #00f0ff;">Usuario</strong> envía un mensaje, su burbuja viaja hacia ese servidor y enciende su hilo conector de chat indicando hace cuánto habló.
                         </div>
                     </div>
                     <div id="alts-radar-content" class="osint-content hidden" style="font-family: var(--font-mono); font-size: 0.77rem;"></div>
@@ -125,7 +195,7 @@ window.C4ISR_Views.red = {
         `;
 
         this.canvas = document.getElementById('net-canvas');
-        this.ctx = this.canvas.getContext('2d');
+        this.ctx = this.canvas.getContext('2d', { alpha: false });
 
         this.resizeCanvas();
         this.bindEvents();
@@ -142,35 +212,27 @@ window.C4ISR_Views.red = {
         const wrapper = document.getElementById('canvas-wrapper');
         if (!wrapper || !this.canvas) return;
         this.canvas.width = wrapper.clientWidth || 800;
-        this.canvas.height = wrapper.clientHeight || 600;
+        this.canvas.height = wrapper.clientHeight || 550;
     },
 
     centerCamera() {
         if (!this.canvas) return;
         this.camera.x = this.canvas.width / 2;
         this.camera.y = this.canvas.height / 2;
-        this.camera.zoom = 0.72;
+        this.camera.zoom = 0.62;
         this.updateHudCoords();
     },
 
     isStrategicViewActive() {
-        return this.strategicMode || this.camera.zoom < 0.52;
+        return this.strategicMode || this.camera.zoom < 0.48;
     },
 
     updateHudCoords() {
         const hud = document.getElementById('hud-coords');
         if (hud) {
-            const lodTag = this.isStrategicViewActive() ? 'MODO ESTELAR (CLANES/PUENTES)' : 'MODO TÁCTICO DETALLADO';
-            hud.textContent = `C4ISR // ${lodTag} // ZOOM: ${Math.round(this.camera.zoom * 100)}% // NODOS: ${this.countVisibleNodes()}`;
+            const lodTag = this.isStrategicViewActive() ? 'VISTA GALÁCTICA EVE' : 'VISTA ORBITAL CYBERPUNK';
+            hud.textContent = `NETRUNNER // ${lodTag} // ZOOM: ${Math.round(this.camera.zoom * 100)}% // SISTEMAS: ${this.serverNodesList.filter(n => this.isNodeVisible(n)).length}`;
         }
-    },
-
-    countVisibleNodes() {
-        let count = 0;
-        for (const n of this.nodes.values()) {
-            if (this.isNodeVisible(n)) count++;
-        }
-        return count;
     },
 
     switchRightTab(tabName) {
@@ -215,6 +277,7 @@ window.C4ISR_Views.red = {
         this.boundMouseUp = () => {
             this.draggedNode = null;
             this.isDraggingCanvas = false;
+            this.pinchInitialDist = null;
         };
 
         window.addEventListener('resize', this.boundResize);
@@ -224,10 +287,11 @@ window.C4ISR_Views.red = {
         const btnEmptySrv = document.getElementById('btn-toggle-empty-srv');
         const btnAlliances = document.getElementById('btn-toggle-alliances');
         const btnPhysics = document.getElementById('btn-toggle-physics');
-        const btnChatLinks = document.getElementById('btn-toggle-chatlinks');
         const btnBridges = document.getElementById('btn-toggle-bridges');
         const btnCenter = document.getElementById('btn-center-graph');
         const searchInput = document.getElementById('red-search');
+        const selectExplorer = document.getElementById('filter-explorer-select');
+        const selectSector = document.getElementById('filter-sector-select');
         const tabInspector = document.getElementById('tab-btn-inspector');
         const tabAlts = document.getElementById('tab-btn-alts');
         const tabDvr = document.getElementById('tab-btn-dvr');
@@ -239,7 +303,7 @@ window.C4ISR_Views.red = {
         if (btnStrategic) {
             btnStrategic.addEventListener('click', () => {
                 this.strategicMode = !this.strategicMode;
-                btnStrategic.textContent = `VISTA ESTRATÉGICA: ${this.strategicMode ? 'FORZADA' : 'AUTO'}`;
+                btnStrategic.textContent = `MODO ESTELAR: ${this.strategicMode ? 'FORZADO' : 'AUTO'}`;
                 this.updateHudCoords();
             });
         }
@@ -262,14 +326,7 @@ window.C4ISR_Views.red = {
         if (btnPhysics) {
             btnPhysics.addEventListener('click', () => {
                 this.physicsEnabled = !this.physicsEnabled;
-                btnPhysics.textContent = `FÍSICAS: ${this.physicsEnabled ? 'ON' : 'OFF'}`;
-            });
-        }
-
-        if (btnChatLinks) {
-            btnChatLinks.addEventListener('click', () => {
-                this.showUserLinks = !this.showUserLinks;
-                btnChatLinks.textContent = `DIÁLOGO: ${this.showUserLinks ? 'ON' : 'OFF'}`;
+                btnPhysics.textContent = `ÓRBITAS: ${this.physicsEnabled ? 'ON' : 'OFF'}`;
             });
         }
 
@@ -286,6 +343,20 @@ window.C4ISR_Views.red = {
                 this.selectedNode = null;
                 this.highlightedPair = null;
                 this.centerCamera();
+            });
+        }
+
+        if (selectExplorer) {
+            selectExplorer.addEventListener('change', (e) => {
+                this.selectedExplorerFilter = e.target.value;
+                this.updateHudCoords();
+            });
+        }
+
+        if (selectSector) {
+            selectSector.addEventListener('change', (e) => {
+                this.selectedSectorFilter = e.target.value;
+                this.updateHudCoords();
             });
         }
 
@@ -306,6 +377,7 @@ window.C4ISR_Views.red = {
             });
         }
 
+        // Eventos de Ratón (Escritorio)
         this.canvas.addEventListener('mousedown', (e) => {
             const pos = this.screenToWorld(e.offsetX, e.offsetY);
             const hit = this.findNodeAt(pos.x, pos.y);
@@ -328,8 +400,8 @@ window.C4ISR_Views.red = {
             if (this.draggedNode) {
                 this.draggedNode.x = pos.x;
                 this.draggedNode.y = pos.y;
-                this.draggedNode.vx = 0;
-                this.draggedNode.vy = 0;
+                this.draggedNode.targetX = pos.x;
+                this.draggedNode.targetY = pos.y;
             } else if (this.isDraggingCanvas) {
                 const dx = e.clientX - this.lastMousePos.x;
                 const dy = e.clientY - this.lastMousePos.y;
@@ -352,7 +424,7 @@ window.C4ISR_Views.red = {
         this.canvas.addEventListener('wheel', (e) => {
             e.preventDefault();
             const factor = e.deltaY < 0 ? 1.12 : 0.89;
-            const newZoom = Math.max(0.15, Math.min(3.8, this.camera.zoom * factor));
+            const newZoom = Math.max(0.12, Math.min(3.5, this.camera.zoom * factor));
 
             const wx = (e.offsetX - this.camera.x) / this.camera.zoom;
             const wy = (e.offsetY - this.camera.y) / this.camera.zoom;
@@ -361,6 +433,91 @@ window.C4ISR_Views.red = {
             this.camera.y = e.offsetY - wy * newZoom;
             this.updateHudCoords();
         }, { passive: false });
+
+        // Eventos Táctiles Completos (Soporte Móvil iOS / Android: Pan, Tap y Pinch-to-Zoom)
+        this.canvas.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 1) {
+                const rect = this.canvas.getBoundingClientRect();
+                const tx = e.touches[0].clientX - rect.left;
+                const ty = e.touches[0].clientY - rect.top;
+                const pos = this.screenToWorld(tx, ty);
+                const hit = this.findNodeAt(pos.x, pos.y);
+                if (hit) {
+                    this.selectedNode = hit;
+                    this.draggedNode = hit;
+                    this.switchRightTab('inspector');
+                    this.renderInspector(hit);
+                } else {
+                    this.isDraggingCanvas = true;
+                    this.lastMousePos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+                }
+            } else if (e.touches.length === 2) {
+                this.isDraggingCanvas = false;
+                this.draggedNode = null;
+                const dx = e.touches[0].clientX - e.touches[1].clientX;
+                const dy = e.touches[0].clientY - e.touches[1].clientY;
+                this.pinchInitialDist = Math.sqrt(dx * dx + dy * dy);
+                this.pinchInitialZoom = this.camera.zoom;
+            }
+        }, { passive: true });
+
+        this.canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            if (e.touches.length === 1) {
+                if (this.draggedNode) {
+                    const rect = this.canvas.getBoundingClientRect();
+                    const pos = this.screenToWorld(e.touches[0].clientX - rect.left, e.touches[0].clientY - rect.top);
+                    this.draggedNode.x = pos.x;
+                    this.draggedNode.y = pos.y;
+                    this.draggedNode.targetX = pos.x;
+                    this.draggedNode.targetY = pos.y;
+                } else if (this.isDraggingCanvas) {
+                    const dx = e.touches[0].clientX - this.lastMousePos.x;
+                    const dy = e.touches[0].clientY - this.lastMousePos.y;
+                    this.camera.x += dx;
+                    this.camera.y += dy;
+                    this.lastMousePos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+                }
+            } else if (e.touches.length === 2 && this.pinchInitialDist) {
+                const dx = e.touches[0].clientX - e.touches[1].clientX;
+                const dy = e.touches[0].clientY - e.touches[1].clientY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                const ratio = dist / this.pinchInitialDist;
+                this.camera.zoom = Math.max(0.14, Math.min(3.2, this.pinchInitialZoom * ratio));
+                this.updateHudCoords();
+            }
+        }, { passive: false });
+
+        this.canvas.addEventListener('touchend', () => {
+            this.draggedNode = null;
+            this.isDraggingCanvas = false;
+            this.pinchInitialDist = null;
+        });
+    },
+
+    updateExplorerDropdown() {
+        const select = document.getElementById('filter-explorer-select');
+        if (!select) return;
+        const currentVal = this.selectedExplorerFilter;
+        const tagsSet = new Set();
+
+        for (const exp of this.explorersList) {
+            if (exp && exp.tag) tagsSet.add(exp.tag);
+        }
+        for (const srvNode of this.serverNodesList) {
+            for (const t of (srvNode.meta?.exploradores || [])) {
+                if (t && t !== 'Archivo Histórico' && !t.includes('Radar de Alianzas')) {
+                    tagsSet.add(t);
+                }
+            }
+        }
+
+        const options = ['<option value="ALL">EXPLORADOR: TODOS (ENJAMBRE)</option>'];
+        for (const tag of tagsSet) {
+            const safe = DOMPurify.sanitize(tag);
+            options.push(`<option value="${safe}" ${currentVal === tag ? 'selected' : ''}>UNIDAD: ${safe}</option>`);
+        }
+        select.innerHTML = options.join('');
     },
 
     updateFloatingTooltip(node, mx, my) {
@@ -376,34 +533,29 @@ window.C4ISR_Views.red = {
             const esCeniza = Boolean(node.meta?.estadoCeniza?.raideado);
             const tagObj = node.meta?.etiquetaManual;
             const tagHtml = tagObj?.texto
-                ? `<span style="background:rgba(255,255,255,0.1);padding:1px 5px;border-radius:3px;color:${COLORES_ETIQUETA_SERVIDOR[tagObj.tipo] || '#10b981'};margin-left:5px;">[${DOMPurify.sanitize(tagObj.texto)}]</span>`
+                ? `<span style="background:rgba(255,255,255,0.12);padding:1px 5px;border-radius:3px;color:${COLORES_ETIQUETA_SERVIDOR[tagObj.tipo] || '#00f0ff'};margin-left:5px;">[${DOMPurify.sanitize(tagObj.texto)}]</span>`
                 : '';
             const cenizaHtml = esCeniza
-                ? `<div style="color:#f87171;font-weight:700;margin-top:2px;">[!] ESTADO CENIZA: ${DOMPurify.sanitize(node.meta.estadoCeniza.motivo || 'Raideado')}</div>`
-                : '';
-            const inviteTag = node.meta?.inviteUrl
-                ? `<div style="color:#34d399;margin-top:2px;">&#128279; ${DOMPurify.sanitize(node.meta.inviteUrl)}</div>`
+                ? `<div style="color:#f87171;font-weight:700;margin-top:2px;">[!] CENIZA: ${DOMPurify.sanitize(node.meta.estadoCeniza.motivo || 'Raideado')}</div>`
                 : '';
 
-            tooltip.style.borderColor = esCeniza ? '#94a3b8' : '#ef4444';
+            tooltip.style.borderColor = esCeniza ? '#94a3b8' : '#ff0055';
             tooltip.innerHTML = `
-                <div style="color:${esCeniza ? '#cbd5e1' : '#ef4444'};font-weight:700;">&#11042; ${DOMPurify.sanitize(node.label)}${tagHtml}</div>
+                <div style="color:${esCeniza ? '#cbd5e1' : '#ff0055'};font-weight:700;">&#11042; ${DOMPurify.sanitize(node.label)}${tagHtml}</div>
                 <div style="color:var(--text-secondary);">Sujetos: <b>${membersCount}</b> | Msgs: <b>${node.meta?.mensajesSesion || 0}</b> | Bots: <b>${node.meta?.redundancia || 0}</b></div>
                 ${cenizaHtml}
-                ${inviteTag}
             `;
         } else {
             const statusColor = node.enWatchlist
-                ? '#fbbf24'
-                : (node.altRole ? '#fcee0a' : (node.fichado ? '#ff2a6d' : '#10b981'));
-            const burnerBadge = node.meta?.esBurner
-                ? `<span style="color:#ef4444;font-weight:700;"> [BURNER ${node.meta.diasAntiguedad}d]</span>`
-                : '';
+                ? '#fcee0a'
+                : (node.altRole ? '#ff003c' : '#00f0ff');
+            const activeSrvName = node.activeServerName ? DOMPurify.sanitize(node.activeServerName) : 'N/A';
+            const lastTimeStr = formatearTiempoRelativo(node.meta?.ultimaActividad);
             tooltip.style.borderColor = statusColor;
             tooltip.innerHTML = `
-                <div style="color:${statusColor};font-weight:700;">${node.enWatchlist ? '&#9733; [VIP] ' : '[USUARIO] '}${DOMPurify.sanitize(node.label)}${burnerBadge}</div>
-                <div style="color:var(--text-secondary);">UID: ${DOMPurify.sanitize(String(node.rawId))}</div>
-                <div style="color:var(--text-main);">Servers: <b>${node.serverCount}</b> | Msgs: <b>${node.meta?.totalMensajes || 0}</b> | Infracciones: <b>${node.infracciones}</b></div>
+                <div style="color:${statusColor};font-weight:700;">${node.enWatchlist ? '&#9733; [VIP] ' : '&#9679; '}${DOMPurify.sanitize(node.label)} <span style="color:#39ff14;font-size:0.68rem;">[${lastTimeStr}]</span></div>
+                <div style="color:#00f0ff;font-size:0.7rem;margin:2px 0;">Chat Activo: <b>${activeSrvName}</b></div>
+                <div style="color:var(--text-secondary);">Servers: <b>${node.serverCount}</b> | Msgs: <b>${node.meta?.totalMensajes || 0}</b> | Infracciones: <b>${node.infracciones}</b></div>
             `;
         }
 
@@ -422,38 +574,68 @@ window.C4ISR_Views.red = {
     },
 
     findNodeAt(wx, wy) {
-        for (const node of this.nodes.values()) {
-            if (node.type !== 'USER' || !this.isNodeVisible(node)) continue;
+        for (let i = 0; i < this.userNodesList.length; i++) {
+            const node = this.userNodesList[i];
+            if (!this.isNodeVisible(node)) continue;
             const dx = wx - node.x;
             const dy = wy - node.y;
-            if (Math.sqrt(dx * dx + dy * dy) <= node.radius + 4) return node;
+            if (dx * dx + dy * dy <= (node.radius + 5) * (node.radius + 5)) return node;
         }
-        for (const node of this.nodes.values()) {
-            if (node.type !== 'SERVER' || !this.isNodeVisible(node)) continue;
+        for (let i = 0; i < this.serverNodesList.length; i++) {
+            const node = this.serverNodesList[i];
+            if (!this.isNodeVisible(node)) continue;
             const dx = wx - node.x;
             const dy = wy - node.y;
-            if (Math.sqrt(dx * dx + dy * dy) <= node.radius + 6) return node;
+            if (dx * dx + dy * dy <= (node.radius + 7) * (node.radius + 7)) return node;
         }
         return null;
     },
 
-    isNodeVisible(node) {
-        if (node.type === 'SERVER' && this.hideEmptyServers) {
-            const connected = (this.serverMembers.get(node.key) || []).length;
-            const esCeniza = Boolean(node.meta?.estadoCeniza?.raideado);
-            const tieneEtiqueta = Boolean(node.meta?.etiquetaManual?.texto);
-            if (connected === 0 && !esCeniza && !tieneEtiqueta && (!node.meta?.alianzasSalientes || node.meta.alianzasSalientes.length === 0)) {
+    isServerMatchingFilters(srvNode) {
+        if (this.selectedExplorerFilter !== 'ALL') {
+            const exps = srvNode.meta?.exploradores || [];
+            if (!exps.includes(this.selectedExplorerFilter)) return false;
+        }
+        if (this.selectedSectorFilter !== 'ALL') {
+            if (this.selectedSectorFilter === 'CENIZA') {
+                if (!srvNode.meta?.estadoCeniza?.raideado) return false;
+            } else if (this.selectedSectorFilter === 'ACTIVE') {
+                if ((srvNode.connectedUsersCount || 0) === 0) return false;
+            } else {
+                const tagTipo = srvNode.meta?.etiquetaManual?.tipo || '';
+                if (tagTipo !== this.selectedSectorFilter) return false;
+            }
+        }
+        if (this.hideEmptyServers) {
+            const connected = (this.serverMembers.get(srvNode.key) || []).length;
+            const esCeniza = Boolean(srvNode.meta?.estadoCeniza?.raideado);
+            const tieneEtiqueta = Boolean(srvNode.meta?.etiquetaManual?.texto);
+            if (connected === 0 && !esCeniza && !tieneEtiqueta && (!srvNode.meta?.alianzasSalientes || srvNode.meta.alianzasSalientes.length === 0)) {
                 return false;
             }
         }
+        return true;
+    },
 
-        if (node.type === 'USER') {
-            // Si estamos en Vista Estratégica (Zoom lejano o botón activo), ocultar usuarios comunes de 1 solo servidor
-            // para eliminar el efecto "Agar.io" y dejar solo Puentes Multi-Server, Alts, VIPs o el nodo seleccionado
+    isNodeVisible(node) {
+        if (node.type === 'SERVER') {
+            if (!this.isServerMatchingFilters(node)) return false;
+        } else {
+            // Un usuario solo es visible si al menos uno de sus servidores pasa el filtro actual de Explorador/Sector
+            if (this.selectedExplorerFilter !== 'ALL' || this.selectedSectorFilter !== 'ALL') {
+                const srvKeys = Object.keys(node.meta?.servidores || {});
+                const hasVisibleSrv = srvKeys.some(sId => {
+                    const sNode = this.nodes.get(`SRV_${sId}`);
+                    return sNode && this.isServerMatchingFilters(sNode);
+                });
+                if (!hasVisibleSrv) return false;
+            }
+
             if (this.isStrategicViewActive() && !this.searchTerm) {
                 const isSelectedOrNeighbor = this.selectedNode &&
                     (this.selectedNode.key === node.key || (this.adjacency.get(this.selectedNode.key)?.has(node.key)));
-                if (!isSelectedOrNeighbor && node.serverCount < 2 && !node.enWatchlist && !node.altRole) {
+                const habloReciente = (Date.now() - (node.meta?.ultimaActividad || 0)) < 300000; // Últimos 5 min
+                if (!isSelectedOrNeighbor && node.serverCount < 2 && !node.enWatchlist && !node.altRole && !habloReciente) {
                     return false;
                 }
             }
@@ -468,17 +650,14 @@ window.C4ISR_Views.red = {
             const matchSelf = node.label.toLowerCase().includes(this.searchTerm) ||
                 prevName.includes(this.searchTerm) ||
                 tagText.includes(this.searchTerm) ||
-                String(node.rawId).includes(this.searchTerm) ||
-                String(node.meta?.inviteUrl || '').toLowerCase().includes(this.searchTerm);
+                String(node.rawId).includes(this.searchTerm);
             if (matchSelf) return true;
 
             const neighbors = this.adjacency.get(node.key);
             if (neighbors) {
                 for (const nKey of neighbors) {
                     const nb = this.nodes.get(nKey);
-                    if (nb && (nb.label.toLowerCase().includes(this.searchTerm) || String(nb.meta?.etiquetaManual?.texto || '').toLowerCase().includes(this.searchTerm))) {
-                        return true;
-                    }
+                    if (nb && nb.label.toLowerCase().includes(this.searchTerm)) return true;
                 }
             }
             return false;
@@ -490,9 +669,7 @@ window.C4ISR_Views.red = {
         const chatNeighbors = new Map();
         const directWeights = new Map();
 
-        for (const u of usuarios) {
-            chatNeighbors.set(u.id, new Set());
-        }
+        for (const u of usuarios) chatNeighbors.set(u.id, new Set());
 
         for (const rel of interacciones) {
             if (!chatNeighbors.has(rel.u1)) chatNeighbors.set(rel.u1, new Set());
@@ -528,9 +705,7 @@ window.C4ISR_Views.red = {
             for (let j = i + 1; j < candidatos.length; j++) {
                 const v = candidatos[j];
                 const pairKey = u.id < v.id ? `${u.id}:${v.id}` : `${v.id}:${u.id}`;
-                const pesoDirecto = directWeights.get(pairKey) || 0;
-
-                if (pesoDirecto > 1) continue;
+                if ((directWeights.get(pairKey) || 0) > 1) continue;
 
                 const vChatSet = chatNeighbors.get(v.id) || new Set();
                 const vSrvKeys = Object.keys(v.servidores || {});
@@ -558,7 +733,6 @@ window.C4ISR_Views.red = {
 
                 const unionSize = featuresU.size + featuresV.size - interseccion.length;
                 const jaccard = unionSize > 0 ? (interseccion.length / unionSize) : 0;
-
                 if (jaccard < 0.68) continue;
 
                 const rawHoursU = Array.isArray(u.horasActivas) ? u.horasActivas : [];
@@ -586,9 +760,7 @@ window.C4ISR_Views.red = {
                     const lastU = u.servidores[sId]?.lastSeen || 0;
                     const lastV = v.servidores[sId]?.lastSeen || 0;
                     const gapMs = Math.abs(lastU - lastV);
-                    if (gapMs >= 8000 && gapMs <= 600000) {
-                        relevosRapidos++;
-                    }
+                    if (gapMs >= 8000 && gapMs <= 600000) relevosRapidos++;
                 }
 
                 const esCritico = (relevosRapidos >= 1 && sharedChatPartners.length >= 1) ||
@@ -610,7 +782,6 @@ window.C4ISR_Views.red = {
                 };
 
                 paresDetectados.push(record);
-
                 if (!mapaAltsUsuario.has(u.id)) mapaAltsUsuario.set(u.id, []);
                 if (!mapaAltsUsuario.has(v.id)) mapaAltsUsuario.set(v.id, []);
                 mapaAltsUsuario.get(u.id).push({ mirrorId: v.id, mirrorTag: v.tag, ...record });
@@ -618,13 +789,7 @@ window.C4ISR_Views.red = {
             }
         }
 
-        paresDetectados.sort((a, b) => {
-            if ((a.nivelAlerta === 'CRÍTICO') !== (b.nivelAlerta === 'CRÍTICO')) {
-                return a.nivelAlerta === 'CRÍTICO' ? -1 : 1;
-            }
-            return b.jaccard - a.jaccard;
-        });
-
+        paresDetectados.sort((a, b) => (b.nivelAlerta === 'CRÍTICO') - (a.nivelAlerta === 'CRÍTICO') || (b.jaccard - a.jaccard));
         this.suspectPairs = paresDetectados;
         this.altMapByUser = mapaAltsUsuario;
 
@@ -637,13 +802,8 @@ window.C4ISR_Views.red = {
         }
 
         const tabBtnAlts = document.getElementById('tab-btn-alts');
-        if (tabBtnAlts) {
-            tabBtnAlts.textContent = `ALTS (${paresDetectados.length})`;
-        }
-
-        if (this.rightPanelTab === 'alts') {
-            this.renderAltsRadarList();
-        }
+        if (tabBtnAlts) tabBtnAlts.textContent = `ALTS (${paresDetectados.length})`;
+        if (this.rightPanelTab === 'alts') this.renderAltsRadarList();
     },
 
     async fetchAndSyncTopology() {
@@ -654,19 +814,20 @@ window.C4ISR_Views.red = {
             const interacciones = Array.isArray(data.interacciones) ? data.interacciones : [];
             const alianzas = Array.isArray(data.alianzas) ? data.alianzas : [];
             const pulsos = Array.isArray(data.pulsos) ? data.pulsos : [];
+            this.explorersList = Array.isArray(data.enjambre) ? data.enjambre : [];
             this.dvrEvents = Array.isArray(data.bitacoraDvr) ? data.bitacoraDvr.slice().reverse() : [];
             this.watchlistSet = new Set(Array.isArray(data.watchlist) ? data.watchlist.map(String) : []);
 
             const badge = document.getElementById('red-stats-badge');
             if (badge) {
-                badge.textContent = `${servidores.length} ESTACIONES // ${usuarios.length} SUJETOS`;
+                badge.textContent = `${servidores.length} SISTEMAS // ${usuarios.length} SUJETOS`;
             }
 
             const totalCeniza = servidores.filter(s => s.estadoCeniza?.raideado).length;
             const cenizaBadge = document.getElementById('red-ceniza-badge');
             if (cenizaBadge) {
                 if (totalCeniza > 0) {
-                    cenizaBadge.textContent = `${totalCeniza} EN CENIZA`;
+                    cenizaBadge.textContent = `${totalCeniza} CENIZA`;
                     cenizaBadge.classList.remove('hidden');
                 } else {
                     cenizaBadge.classList.add('hidden');
@@ -677,6 +838,8 @@ window.C4ISR_Views.red = {
 
             this.adjacency.clear();
             this.serverMembers.clear();
+            this.serverNodesList = [];
+            this.userNodesList = [];
 
             const addNeighbor = (k1, k2) => {
                 if (!this.adjacency.has(k1)) this.adjacency.set(k1, new Set());
@@ -685,6 +848,7 @@ window.C4ISR_Views.red = {
                 this.adjacency.get(k2).add(k1);
             };
 
+            // 1. Distribuir Servidores en Brazos Espirales Galácticos amplios (Estilo EVE Online)
             const activeServers = servidores.filter(
                 s => (s.usuariosCount || 0) > 0 || (s.alianzasSalientes && s.alianzasSalientes.length > 0) || s.estadoCeniza?.raideado
             );
@@ -697,18 +861,23 @@ window.C4ISR_Views.red = {
                 this.serverMembers.set(key, []);
                 let node = this.nodes.get(key);
                 const radius = Math.max(22, Math.min(48, 18 + Math.sqrt(srv.usuariosCount || 1) * 2.5));
+
+                // Posición galáctica en espiral amplia para que nunca se amontonen
+                const armAngle = idx * 2.15;
+                const galDist = activeServers.length === 1 ? 0 : (260 + Math.sqrt(idx + 1) * 195);
+                const targetX = Math.cos(armAngle) * galDist;
+                const targetY = Math.sin(armAngle) * galDist;
+
                 if (!node) {
-                    const angle = (idx / Math.max(1, activeServers.length)) * Math.PI * 2;
-                    const dist = activeServers.length === 1 ? 0 : 300 + (idx % 2) * 150;
                     node = {
                         key,
                         rawId: srv.id,
                         type: 'SERVER',
                         label: srv.name || 'Servidor',
-                        x: Math.cos(angle) * dist,
-                        y: Math.sin(angle) * dist,
-                        vx: 0,
-                        vy: 0,
+                        x: targetX,
+                        y: targetY,
+                        targetX,
+                        targetY,
                         radius,
                         connectedUsersCount: srv.usuariosCount || 0,
                         meta: srv
@@ -718,27 +887,33 @@ window.C4ISR_Views.red = {
                     node.label = srv.name || node.label;
                     node.radius = radius;
                     node.connectedUsersCount = srv.usuariosCount || 0;
+                    node.targetX = targetX;
+                    node.targetY = targetY;
                     node.meta = srv;
                 }
+                this.serverNodesList.push(node);
             });
 
             emptyServers.forEach((srv, idx) => {
                 const key = `SRV_${srv.id}`;
                 this.serverMembers.set(key, []);
                 let node = this.nodes.get(key);
+                const angle = (idx / Math.max(1, emptyServers.length)) * Math.PI * 2;
+                const ringRadius = 960 + (idx % 3) * 120;
+                const targetX = Math.cos(angle) * ringRadius;
+                const targetY = Math.sin(angle) * ringRadius;
+
                 if (!node) {
-                    const angle = (idx / Math.max(1, emptyServers.length)) * Math.PI * 2;
-                    const ringRadius = 680 + (idx % 3) * 90;
                     node = {
                         key,
                         rawId: srv.id,
                         type: 'SERVER',
                         label: srv.name || 'Servidor',
-                        x: Math.cos(angle) * ringRadius,
-                        y: Math.sin(angle) * ringRadius,
-                        vx: 0,
-                        vy: 0,
-                        radius: 16,
+                        x: targetX,
+                        y: targetY,
+                        targetX,
+                        targetY,
+                        radius: 15,
                         connectedUsersCount: 0,
                         meta: srv
                     };
@@ -746,51 +921,72 @@ window.C4ISR_Views.red = {
                 } else {
                     node.label = srv.name || node.label;
                     node.connectedUsersCount = 0;
+                    node.targetX = targetX;
+                    node.targetY = targetY;
                     node.meta = srv;
                 }
+                this.serverNodesList.push(node);
             });
 
+            // 2. Posicionar Usuarios orbitando alrededor de su ÚLTIMO Servidor Activo (Migración Dinámica)
             const nuevasAristas = [];
-            const serverSpawnIndex = new Map();
+            const serverOrbitCounter = new Map();
 
             usuarios.forEach((usr) => {
                 const key = `USR_${usr.id}`;
-                const srvKeys = Object.keys(usr.servidores || {});
-                const serverCount = srvKeys.length;
+                const srvEntries = Object.entries(usr.servidores || {});
+                const serverCount = srvEntries.length;
                 const altsDeUsuario = this.altMapByUser.get(usr.id) || [];
                 const altRole = altsDeUsuario.some(a => a.nivelAlerta === 'CRÍTICO')
                     ? 'CRITICO'
                     : (altsDeUsuario.length > 0 ? 'ADVERTENCIA' : null);
                 const enWatchlist = Boolean(usr.enWatchlist || this.watchlistSet.has(String(usr.id)));
 
+                // Determinar cuál es el servidor donde escribió más recientemente
+                let activeSrvId = usr.ultimoServidorId;
+                let maxLastSeen = 0;
+                for (const [sId, sInfo] of srvEntries) {
+                    if ((sInfo.lastSeen || 0) >= maxLastSeen && this.nodes.has(`SRV_${sId}`)) {
+                        maxLastSeen = sInfo.lastSeen || 0;
+                        activeSrvId = sId;
+                    }
+                }
+                if (!activeSrvId && srvEntries.length > 0) {
+                    activeSrvId = srvEntries[0][0];
+                }
+
+                const activeSrvKey = activeSrvId ? `SRV_${activeSrvId}` : null;
+                const parentSrv = activeSrvKey ? this.nodes.get(activeSrvKey) : null;
+                const slotIdx = serverOrbitCounter.get(activeSrvKey) || 0;
+                serverOrbitCounter.set(activeSrvKey, slotIdx + 1);
+
+                // Órbita en proporción áurea alrededor del servidor donde acaba de hablar
+                const goldenAngle = slotIdx * 2.3999632;
+                const orbitDist = (parentSrv ? parentSrv.radius + 32 : 50) + Math.sqrt(slotIdx + 1) * 19;
+                const targetX = (parentSrv ? parentSrv.targetX : 0) + Math.cos(goldenAngle) * orbitDist;
+                const targetY = (parentSrv ? parentSrv.targetY : 0) + Math.sin(goldenAngle) * orbitDist;
+
                 const radius = Math.max(
-                    6.5,
-                    Math.min(18, 5.5 + Math.log2((usr.totalMensajes || 1) + 1) * 1.9 + (serverCount > 1 ? 3.5 : 0) + (enWatchlist ? 3 : 0))
+                    6.0,
+                    Math.min(16, 5.2 + Math.log2((usr.totalMensajes || 1) + 1) * 1.7 + (serverCount > 1 ? 3.2 : 0) + (enWatchlist ? 3 : 0))
                 );
 
                 let node = this.nodes.get(key);
                 if (!node) {
-                    const firstSrvKey = srvKeys.length > 0 ? `SRV_${srvKeys[0]}` : null;
-                    const parentSrv = firstSrvKey ? this.nodes.get(firstSrvKey) : null;
-                    const idxInSrv = (serverSpawnIndex.get(firstSrvKey) || 0);
-                    serverSpawnIndex.set(firstSrvKey, idxInSrv + 1);
-
-                    const goldenAngle = idxInSrv * 2.3999632;
-                    const spiralRadius = 58 + Math.sqrt(idxInSrv + 1) * 23;
-                    const baseX = parentSrv ? parentSrv.x : 0;
-                    const baseY = parentSrv ? parentSrv.y : 0;
-
                     node = {
                         key,
                         rawId: usr.id,
                         type: 'USER',
                         label: usr.tag || 'Usuario',
-                        x: baseX + Math.cos(goldenAngle) * spiralRadius,
-                        y: baseY + Math.sin(goldenAngle) * spiralRadius,
-                        vx: 0,
-                        vy: 0,
+                        x: targetX,
+                        y: targetY,
+                        targetX,
+                        targetY,
                         radius,
                         serverCount,
+                        activeServerKey: activeSrvKey,
+                        activeServerName: parentSrv?.label || '',
+                        lastMessageTs: maxLastSeen || usr.ultimaActividad || 0,
                         fichado: Boolean(usr.fichado),
                         infracciones: usr.infracciones || 0,
                         enWatchlist,
@@ -802,20 +998,29 @@ window.C4ISR_Views.red = {
                     node.label = usr.tag || node.label;
                     node.radius = radius;
                     node.serverCount = serverCount;
+                    node.activeServerKey = activeSrvKey;
+                    node.activeServerName = parentSrv?.label || '';
+                    node.lastMessageTs = maxLastSeen || usr.ultimaActividad || 0;
+                    node.targetX = targetX;
+                    node.targetY = targetY;
                     node.fichado = Boolean(usr.fichado);
                     node.infracciones = usr.infracciones || 0;
                     node.enWatchlist = enWatchlist;
                     node.altRole = altRole;
                     node.meta = usr;
                 }
+                this.userNodesList.push(node);
 
-                for (const sId of srvKeys) {
+                for (const [sId, sInfo] of srvEntries) {
                     const targetKey = `SRV_${sId}`;
                     if (this.nodes.has(targetKey)) {
+                        const isPrimaryActive = (targetKey === activeSrvKey);
                         nuevasAristas.push({
                             source: key,
                             target: targetKey,
-                            weight: usr.servidores[sId].count || 1,
+                            weight: sInfo.count || 1,
+                            lastSeen: sInfo.lastSeen || 0,
+                            isPrimaryActive,
                             kind: 'MEMBERSHIP'
                         });
                         addNeighbor(key, targetKey);
@@ -870,6 +1075,7 @@ window.C4ISR_Views.red = {
             }
 
             this.edges = nuevasAristas;
+            this.updateExplorerDropdown();
             this.updateHudCoords();
 
             if (this.seenPulses.size > 500) this.seenPulses.clear();
@@ -878,23 +1084,23 @@ window.C4ISR_Views.red = {
                 if (!this.seenPulses.has(pulseKey)) {
                     this.seenPulses.add(pulseKey);
                     const isVip = this.watchlistSet.has(String(p.userId));
-                    this.spawnParticle(`USR_${p.userId}`, `SRV_${p.guildId}`, isVip ? '#fbbf24' : '#34d399');
+                    this.spawnParticle(`USR_${p.userId}`, `SRV_${p.guildId}`, isVip ? '#fcee0a' : '#00f0ff');
+                    if (p.fromGuildId && p.fromGuildId !== p.guildId) {
+                        this.spawnDvrTrace(`SRV_${p.fromGuildId}`, `SRV_${p.guildId}`, p.userTag, '#00f0ff');
+                    }
                     const ticker = document.getElementById('live-feed-ticker');
                     if (ticker) {
-                        const vipPrefix = isVip ? '<span style="color:#fbbf24;font-weight:700;">[★ VIP EN MOVIMIENTO]</span> ' : '[IMPULSO EN VIVO] ';
+                        const vipPrefix = isVip ? '<span style="color:#fcee0a;font-weight:700;">[★ VIP]</span> ' : '[TRANSMISIÓN] ';
                         ticker.innerHTML = `${vipPrefix}<strong>${DOMPurify.sanitize(String(p.userTag))}</strong> &rarr; ${DOMPurify.sanitize(String(p.guildName))}`;
                     }
                 }
             }
 
-            if (this.rightPanelTab === 'dvr') {
-                this.renderDvrCameraList();
-            }
+            if (this.rightPanelTab === 'dvr') this.renderDvrCameraList();
 
             if (this.selectedNode && this.nodes.has(this.selectedNode.key)) {
                 this.selectedNode = this.nodes.get(this.selectedNode.key);
                 if (this.rightPanelTab === 'inspector') {
-                    // Evitar pisar el input de etiqueta si el usuario está escribiendo en él
                     const activeEl = document.activeElement;
                     if (!activeEl || activeEl.id !== 'input-srv-tag') {
                         this.renderInspector(this.selectedNode);
@@ -906,14 +1112,14 @@ window.C4ISR_Views.red = {
         }
     },
 
-    spawnParticle(sourceKey, targetKey, color = '#34d399') {
+    spawnParticle(sourceKey, targetKey, color = '#00f0ff') {
         if (!this.nodes.has(sourceKey) || !this.nodes.has(targetKey)) return;
         this.particles.push({
             sourceKey,
             targetKey,
             color,
             progress: 0,
-            speed: 0.022 + Math.random() * 0.014
+            speed: 0.024 + Math.random() * 0.015
         });
     },
 
@@ -933,7 +1139,7 @@ window.C4ISR_Views.red = {
         if (!node || !this.canvas) return;
         this.selectedNode = node;
         this.highlightedPair = null;
-        this.camera.zoom = 1.2;
+        this.camera.zoom = 1.18;
         this.camera.x = (this.canvas.width / 2) - (node.x * this.camera.zoom);
         this.camera.y = (this.canvas.height / 2) - (node.y * this.camera.zoom);
         this.switchRightTab('inspector');
@@ -950,85 +1156,32 @@ window.C4ISR_Views.red = {
         this.highlightedPair = [key1, key2];
         const midX = (n1.x + n2.x) / 2;
         const midY = (n1.y + n2.y) / 2;
-        this.camera.zoom = 1.05;
+        this.camera.zoom = 1.0;
         this.camera.x = (this.canvas.width / 2) - (midX * this.camera.zoom);
         this.camera.y = (this.canvas.height / 2) - (midY * this.camera.zoom);
         this.updateHudCoords();
     },
 
+    /**
+     * Motor de Físicas O(N) Ultra-Optimizado:
+     * Interpola suavemente hacia las coordenadas orbitales del último servidor donde habló cada usuario.
+     * Si el usuario habla en otro servidor, su burbuja viaja suavemente por el espacio hacia el nuevo servidor.
+     */
     stepPhysics() {
         if (!this.physicsEnabled) return;
-        const visibleNodes = Array.from(this.nodes.values()).filter(n => this.isNodeVisible(n));
 
-        for (let i = 0; i < visibleNodes.length; i++) {
-            const n1 = visibleNodes[i];
-            for (let j = i + 1; j < visibleNodes.length; j++) {
-                const n2 = visibleNodes[j];
-                let dx = n2.x - n1.x;
-                let dy = n2.y - n1.y;
-                let distSq = dx * dx + dy * dy;
-                if (distSq < 1) {
-                    dx = (Math.random() - 0.5) * 2;
-                    dy = (Math.random() - 0.5) * 2;
-                    distSq = 4;
-                }
-                const bothServers = n1.type === 'SERVER' && n2.type === 'SERVER';
-                const maxDist = bothServers ? 650 : 290;
-                if (distSq > maxDist * maxDist) continue;
-
-                const dist = Math.sqrt(distSq);
-                const repulsionForce = bothServers ? 5600 : 1020;
-                const force = repulsionForce / distSq;
-                const fx = (dx / dist) * force;
-                const fy = (dy / dist) * force;
-
-                if (n1 !== this.draggedNode) { n1.vx -= fx; n1.vy -= fy; }
-                if (n2 !== this.draggedNode) { n2.vx += fx; n2.vy += fy; }
-            }
+        for (let i = 0; i < this.serverNodesList.length; i++) {
+            const sNode = this.serverNodesList[i];
+            if (sNode === this.draggedNode) continue;
+            sNode.x += (sNode.targetX - sNode.x) * 0.06;
+            sNode.y += (sNode.targetY - sNode.y) * 0.06;
         }
 
-        for (const edge of this.edges) {
-            if (edge.kind === 'CHAT' && !this.showUserLinks) continue;
-            const s = this.nodes.get(edge.source);
-            const t = this.nodes.get(edge.target);
-            if (!s || !t || !this.isNodeVisible(s) || !this.isNodeVisible(t)) continue;
-
-            const dx = t.x - s.x;
-            const dy = t.y - s.y;
-            const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-
-            let targetLen = 85;
-            if (edge.kind === 'MEMBERSHIP') {
-                const srvMembers = (this.serverMembers.get(t.key) || []).length;
-                targetLen = 98 + Math.min(270, Math.sqrt(srvMembers) * 16.5);
-            }
-
-            const strength = edge.kind === 'MEMBERSHIP' ? 0.032 : 0.012;
-            const force = (dist - targetLen) * strength;
-            const fx = (dx / dist) * force;
-            const fy = (dy / dist) * force;
-
-            if (s !== this.draggedNode) { s.vx += fx; s.vy += fy; }
-            if (t !== this.draggedNode) { t.vx -= fx * 0.12; t.vy -= fy * 0.12; }
-        }
-
-        for (const n of visibleNodes) {
-            if (n === this.draggedNode) continue;
-            const esCeniza = Boolean(n.meta?.estadoCeniza?.raideado);
-            if (n.type === 'SERVER' && n.connectedUsersCount === 0 && !esCeniza && (!n.meta?.alianzasSalientes || n.meta.alianzasSalientes.length === 0)) {
-                const distCenter = Math.sqrt(n.x * n.x + n.y * n.y) || 1;
-                const targetRing = 710;
-                const radialForce = (targetRing - distCenter) * 0.008;
-                n.vx += (n.x / distCenter) * radialForce;
-                n.vy += (n.y / distCenter) * radialForce;
-            } else {
-                n.vx -= n.x * 0.0009;
-                n.vy -= n.y * 0.0009;
-            }
-            n.vx *= 0.80;
-            n.vy *= 0.80;
-            n.x += n.vx;
-            n.y += n.vy;
+        for (let i = 0; i < this.userNodesList.length; i++) {
+            const uNode = this.userNodesList[i];
+            if (uNode === this.draggedNode) continue;
+            uNode.x += (uNode.targetX - uNode.x) * 0.075;
+            uNode.y += (uNode.targetY - uNode.y) * 0.075;
         }
     },
 
@@ -1044,11 +1197,13 @@ window.C4ISR_Views.red = {
         ctx.closePath();
     },
 
-    drawTacticalGrid(ctx, w, h) {
-        ctx.save();
-        const gridStep = 85 * this.camera.zoom;
+    drawCyberpunkBackdrop(ctx, w, h) {
+        ctx.fillStyle = '#06070d';
+        ctx.fillRect(0, 0, w, h);
+
+        const gridStep = 95 * this.camera.zoom;
         if (gridStep >= 18) {
-            ctx.strokeStyle = 'rgba(255, 42, 109, 0.04)';
+            ctx.strokeStyle = 'rgba(0, 240, 255, 0.045)';
             ctx.lineWidth = 1;
             const offsetX = this.camera.x % gridStep;
             const offsetY = this.camera.y % gridStep;
@@ -1064,7 +1219,6 @@ window.C4ISR_Views.red = {
             }
             ctx.stroke();
         }
-        ctx.restore();
     },
 
     drawFrame() {
@@ -1076,8 +1230,15 @@ window.C4ISR_Views.red = {
         const t = now * 0.0045;
         const pulse = (Math.sin(t) + 1) * 0.5;
 
-        ctx.clearRect(0, 0, w, h);
-        this.drawTacticalGrid(ctx, w, h);
+        this.drawCyberpunkBackdrop(ctx, w, h);
+
+        // Frustum Culling Bounds (para no renderizar lo que queda fuera de la pantalla)
+        const minWorldX = (-this.camera.x / this.camera.zoom) - 120;
+        const maxWorldX = ((w - this.camera.x) / this.camera.zoom) + 120;
+        const minWorldY = (-this.camera.y / this.camera.zoom) - 120;
+        const maxWorldY = ((h - this.camera.y) / this.camera.zoom) + 120;
+
+        const inViewport = (x, y) => x >= minWorldX && x <= maxWorldX && y >= minWorldY && y <= maxWorldY;
 
         const focusNode = this.hoveredNode || this.selectedNode;
         const focusNeighbors = focusNode ? (this.adjacency.get(focusNode.key) || new Set()) : null;
@@ -1092,60 +1253,93 @@ window.C4ISR_Views.red = {
         ctx.translate(this.camera.x, this.camera.y);
         ctx.scale(this.camera.zoom, this.camera.zoom);
 
-        // 0. Dibujar Halos de Soberanía (Territorios de Clanes/Servidores Activos)
-        for (const node of this.nodes.values()) {
-            if (node.type !== 'SERVER' || !this.isNodeVisible(node) || node.connectedUsersCount < 3) continue;
-            const esCeniza = Boolean(node.meta?.estadoCeniza?.raideado);
-            const territoryRadius = Math.min(220, 65 + Math.sqrt(node.connectedUsersCount) * 14);
-            const grad = ctx.createRadialGradient(node.x, node.y, node.radius, node.x, node.y, territoryRadius);
-            if (esCeniza) {
-                grad.addColorStop(0, 'rgba(100, 116, 139, 0.14)');
-                grad.addColorStop(1, 'rgba(100, 116, 139, 0)');
-            } else {
-                grad.addColorStop(0, 'rgba(239, 68, 68, 0.09)');
-                grad.addColorStop(1, 'rgba(239, 68, 68, 0)');
-            }
-            ctx.fillStyle = grad;
-            ctx.beginPath();
-            ctx.arc(node.x, node.y, territoryRadius, 0, Math.PI * 2);
-            ctx.fill();
+        // 0. Campo Estelar Profundo (Parallax EVE Online)
+        for (let i = 0; i < this.starfield.length; i++) {
+            const st = this.starfield[i];
+            if (!inViewport(st.x, st.y)) continue;
+            ctx.fillStyle = st.color;
+            ctx.globalAlpha = st.alpha;
+            ctx.fillRect(st.x, st.y, st.size, st.size);
         }
+        ctx.globalAlpha = 1.0;
 
-        // 1. Dibujar Aristas de Membresía y Chat
-        for (const edge of this.edges) {
+        // 1. Dibujar Hilos Conectores de Chat (Estilo Alianza Curva para el servidor donde el usuario habló)
+        for (let i = 0; i < this.edges.length; i++) {
+            const edge = this.edges[i];
             if (edge.kind === 'CHAT' && !this.showUserLinks) continue;
             const s = this.nodes.get(edge.source);
             const tNode = this.nodes.get(edge.target);
             if (!s || !tNode || !this.isNodeVisible(s) || !this.isNodeVisible(tNode)) continue;
+            if (!inViewport(s.x, s.y) && !inViewport(tNode.x, tNode.y)) continue;
 
             const edgeActive = !focusNode
                 ? !this.highlightedPair
                 : (s.key === focusNode.key || tNode.key === focusNode.key);
 
-            ctx.beginPath();
-            ctx.moveTo(s.x, s.y);
-            ctx.lineTo(tNode.x, tNode.y);
             if (edge.kind === 'MEMBERSHIP') {
+                const ageMs = now - (edge.lastSeen || 0);
+                const isRecentChat = ageMs < 900000; // Habló hace menos de 15 minutos
                 const isBridge = s.serverCount >= 2 || s.enWatchlist;
-                if (focusNode && edgeActive) {
-                    ctx.strokeStyle = isBridge ? 'rgba(251, 191, 36, 0.88)' : 'rgba(16, 185, 129, 0.72)';
-                    ctx.lineWidth = 2.0;
+
+                ctx.save();
+                if (edge.isPrimaryActive) {
+                    // Hilo conector principal curvo hacia el último servidor donde habló
+                    const dx = tNode.x - s.x;
+                    const dy = tNode.y - s.y;
+                    const midX = (s.x + tNode.x) * 0.5 - dy * 0.12;
+                    const midY = (s.y + tNode.y) * 0.5 + dx * 0.12;
+
+                    ctx.beginPath();
+                    ctx.moveTo(s.x, s.y);
+                    ctx.quadraticCurveTo(midX, midY, tNode.x, tNode.y);
+
+                    if (isRecentChat || (focusNode && edgeActive)) {
+                        ctx.strokeStyle = s.enWatchlist ? '#fcee0a' : '#00f0ff';
+                        ctx.globalAlpha = edgeActive ? 0.88 : 0.15;
+                        ctx.lineWidth = 1.9;
+                    } else {
+                        ctx.strokeStyle = isBridge ? '#fbbf24' : '#10b981';
+                        ctx.globalAlpha = edgeActive ? (isBridge ? 0.48 : 0.26) : 0.04;
+                        ctx.lineWidth = 1.2;
+                    }
+                    ctx.stroke();
+
+                    // Mostrar etiqueta de cuándo escribió si está seleccionado, en hover o habló recientemente
+                    if ((focusNode && edgeActive) || (isRecentChat && this.camera.zoom > 0.75)) {
+                        const timeLabel = formatearTiempoRelativo(edge.lastSeen);
+                        if (timeLabel) {
+                            ctx.font = 'bold 8.5px "JetBrains Mono", monospace';
+                            ctx.fillStyle = isRecentChat ? '#00f0ff' : '#34d399';
+                            ctx.textAlign = 'center';
+                            ctx.fillText(timeLabel, midX, midY - 3);
+                        }
+                    }
                 } else {
-                    const alpha = edgeActive ? (isBridge ? 0.45 : 0.20) : 0.035;
-                    ctx.strokeStyle = isBridge ? `rgba(251, 191, 36, ${alpha})` : `rgba(16, 185, 129, ${alpha})`;
-                    ctx.lineWidth = Math.min(3.0, 0.8 + Math.log2(edge.weight + 1) * 0.45);
+                    // Hilo secundario punteado hacia otros servidores anteriores donde también estuvo el usuario
+                    ctx.beginPath();
+                    ctx.setLineDash([4, 5]);
+                    ctx.moveTo(s.x, s.y);
+                    ctx.lineTo(tNode.x, tNode.y);
+                    ctx.strokeStyle = '#fbbf24';
+                    ctx.globalAlpha = edgeActive ? (focusNode ? 0.75 : 0.28) : 0.03;
+                    ctx.lineWidth = 1.1;
+                    ctx.stroke();
                 }
+                ctx.restore();
             } else {
-                const alpha = edgeActive ? 0.36 : 0.035;
-                ctx.strokeStyle = `rgba(56, 189, 248, ${alpha})`;
-                ctx.lineWidth = edgeActive && focusNode ? 1.8 : 1.0;
+                ctx.beginPath();
+                ctx.moveTo(s.x, s.y);
+                ctx.lineTo(tNode.x, tNode.y);
+                ctx.strokeStyle = `rgba(0, 240, 255, ${edgeActive ? 0.35 : 0.03})`;
+                ctx.lineWidth = 1.0;
+                ctx.stroke();
             }
-            ctx.stroke();
         }
 
-        // 2. Dibujar Rutas Curvas Hiperespaciales de Alianzas (Curvas de Bézier Púrpura)
+        // 2. Rutas Hiperespaciales de Alianzas entre Servidores
         if (this.showAllianceLinks) {
-            for (const ally of this.allianceEdges) {
+            for (let i = 0; i < this.allianceEdges.length; i++) {
+                const ally = this.allianceEdges[i];
                 const s = this.nodes.get(ally.source);
                 const tNode = this.nodes.get(ally.target);
                 if (!s || !tNode || !this.isNodeVisible(s) || !this.isNodeVisible(tNode)) continue;
@@ -1156,38 +1350,31 @@ window.C4ISR_Views.red = {
                 const dist = Math.sqrt(dx * dx + dy * dy);
                 if (dist <= s.radius + tNode.radius) continue;
 
-                // Punto de control perpendicular para formar un arco limpio sin cruzar el centro como una telaraña
-                const midX = (s.x + tNode.x) / 2;
-                const midY = (s.y + tNode.y) / 2;
-                const normX = -dy / dist;
-                const normY = dx / dist;
-                const curveOffset = Math.min(90, dist * 0.18);
-                const ctrlX = midX + normX * curveOffset;
-                const ctrlY = midY + normY * curveOffset;
+                const ctrlX = (s.x + tNode.x) * 0.5 - (dy / dist) * Math.min(100, dist * 0.18);
+                const ctrlY = (s.y + tNode.y) * 0.5 + (dx / dist) * Math.min(100, dist * 0.18);
 
                 ctx.save();
-                ctx.globalAlpha = isHighlighted ? 0.88 : 0.10;
+                ctx.globalAlpha = isHighlighted ? 0.85 : 0.08;
                 ctx.beginPath();
                 ctx.moveTo(s.x, s.y);
                 ctx.quadraticCurveTo(ctrlX, ctrlY, tNode.x, tNode.y);
                 ctx.strokeStyle = '#c084fc';
-                ctx.lineWidth = isHighlighted && focusNode ? 2.6 : 1.8;
+                ctx.lineWidth = isHighlighted && focusNode ? 2.6 : 1.7;
                 ctx.stroke();
 
-                // Pulso viajero sobre la curva de alianza
-                const u = ((now * 0.00045) % 1.0);
+                const u = ((now * 0.0004 + i * 0.27) % 1.0);
                 const invU = 1 - u;
                 const px = invU * invU * s.x + 2 * invU * u * ctrlX + u * u * tNode.x;
                 const py = invU * invU * s.y + 2 * invU * u * ctrlY + u * u * tNode.y;
                 ctx.beginPath();
                 ctx.arc(px, py, 3.0, 0, Math.PI * 2);
-                ctx.fillStyle = '#e9d5ff';
+                ctx.fillStyle = '#f3e8ff';
                 ctx.fill();
                 ctx.restore();
             }
         }
 
-        // 3. Dibujar Enlaces Espejo Punteados entre Cuentas Alt Detectadas
+        // 3. Enlaces Punteados de Cuentas Espejo (Alts)
         if (this.showAltLinks) {
             for (const altEdge of this.altEdges) {
                 const s = this.nodes.get(altEdge.source);
@@ -1205,23 +1392,14 @@ window.C4ISR_Views.red = {
                 ctx.moveTo(s.x, s.y);
                 ctx.lineTo(tNode.x, tNode.y);
                 ctx.strokeStyle = altEdge.critical ? '#ff003c' : '#fcee0a';
-                ctx.globalAlpha = (!focusNode || isHighlighted) ? 0.95 : 0.15;
-                ctx.lineWidth = isHighlighted ? 2.8 : 1.6;
+                ctx.globalAlpha = (!focusNode || isHighlighted) ? 0.92 : 0.12;
+                ctx.lineWidth = isHighlighted ? 2.6 : 1.5;
                 ctx.stroke();
-
-                if (this.camera.zoom > 0.65 || isHighlighted) {
-                    const mx = (s.x + tNode.x) / 2;
-                    const my = (s.y + tNode.y) / 2;
-                    ctx.font = 'bold 9.5px "JetBrains Mono", monospace';
-                    ctx.fillStyle = altEdge.critical ? '#ff003c' : '#fcee0a';
-                    ctx.textAlign = 'center';
-                    ctx.fillText(`ALT ${Math.round(altEdge.jaccard * 100)}%`, mx, my - 5);
-                }
                 ctx.restore();
             }
         }
 
-        // 4. Dibujar Trazas de Reproducción de Cámara DVR (Saltos de Servidor a Servidor)
+        // 4. Trazas de Migración y Cámara DVR
         for (let i = this.dvrTraces.length - 1; i >= 0; i--) {
             const tr = this.dvrTraces[i];
             tr.progress = Math.min(1.0, tr.progress + 0.018);
@@ -1246,24 +1424,22 @@ window.C4ISR_Views.red = {
             ctx.moveTo(nFrom.x, nFrom.y);
             ctx.lineTo(curX, curY);
             ctx.strokeStyle = tr.color;
-            ctx.lineWidth = 3.2;
+            ctx.lineWidth = 3.0;
             ctx.stroke();
 
             ctx.beginPath();
-            ctx.arc(curX, curY, 6, 0, Math.PI * 2);
+            ctx.arc(curX, curY, 5.5, 0, Math.PI * 2);
             ctx.fillStyle = '#ffffff';
-            ctx.shadowColor = tr.color;
-            ctx.shadowBlur = 14;
             ctx.fill();
 
-            ctx.font = 'bold 11px "JetBrains Mono", monospace';
+            ctx.font = 'bold 10.5px "JetBrains Mono", monospace';
             ctx.fillStyle = tr.color;
             ctx.textAlign = 'center';
-            ctx.fillText(tr.label, curX, curY - 12);
+            ctx.fillText(tr.label, curX, curY - 10);
             ctx.restore();
         }
 
-        // 5. Dibujar Partículas de Actividad en Vivo
+        // 5. Partículas de Mensajes en Vivo (Cero shadowBlur para 60 FPS en Móvil)
         for (let i = this.particles.length - 1; i >= 0; i--) {
             const p = this.particles[i];
             p.progress += p.speed;
@@ -1279,17 +1455,15 @@ window.C4ISR_Views.red = {
             const py = s.y + (tNode.y - s.y) * p.progress;
 
             ctx.beginPath();
-            ctx.arc(px, py, 3.6, 0, Math.PI * 2);
-            ctx.fillStyle = p.color || '#34d399';
-            ctx.shadowColor = p.color || '#10b981';
-            ctx.shadowBlur = 10;
+            ctx.arc(px, py, 3.8, 0, Math.PI * 2);
+            ctx.fillStyle = p.color || '#00f0ff';
             ctx.fill();
-            ctx.shadowBlur = 0;
         }
 
-        // 6. Dibujar Nodos (Servidores = Estaciones Hexagonales, Usuarios = Satélites Tácticos)
+        // 6. Dibujar Estaciones Hexagonales (Servidores) y Satélites (Usuarios)
         for (const node of this.nodes.values()) {
             if (!this.isNodeVisible(node)) continue;
+            if (!inViewport(node.x, node.y)) continue;
 
             const isActive = isNodeHighlighted(node.key);
             const isSelected = (this.selectedNode && this.selectedNode.key === node.key) ||
@@ -1304,108 +1478,81 @@ window.C4ISR_Views.red = {
                 const esCeniza = Boolean(node.meta?.estadoCeniza?.raideado);
                 const etiquetaObj = node.meta?.etiquetaManual;
 
-                // Anillo exterior hexagonal pulsante
+                // Anillo de Soberanía EVE Online / Cyberpunk
                 if (hasUsers || esCeniza || isSelected || isHovered) {
-                    this.drawHexagon(ctx, node.x, node.y, node.radius + 6 + pulse * 6);
-                    if (esCeniza) {
-                        ctx.setLineDash([5, 4]);
-                        ctx.strokeStyle = `rgba(148, 163, 184, ${0.7 - pulse * 0.35})`;
-                    } else {
-                        ctx.strokeStyle = `rgba(239, 68, 68, ${0.6 - pulse * 0.4})`;
-                    }
-                    ctx.lineWidth = 1.8;
+                    ctx.beginPath();
+                    ctx.arc(node.x, node.y, node.radius + 9 + pulse * 5, 0, Math.PI * 2);
+                    ctx.strokeStyle = esCeniza
+                        ? 'rgba(148, 163, 184, 0.45)'
+                        : 'rgba(255, 0, 85, 0.45)';
+                    ctx.lineWidth = 1.4;
                     ctx.stroke();
-                    ctx.setLineDash([]);
                 }
 
-                // Cuerpo Hexagonal del Servidor
                 this.drawHexagon(ctx, node.x, node.y, node.radius);
-                if (esCeniza) {
-                    ctx.fillStyle = '#334155'; // Gris Carbón Ceniza
-                } else {
-                    ctx.fillStyle = hasUsers ? '#dc2626' : '#5c1414';
-                }
+                ctx.fillStyle = esCeniza ? '#334155' : (hasUsers ? '#e11d48' : '#4c0519');
                 ctx.fill();
                 ctx.lineWidth = isSelected || isHovered ? 3.2 : 1.8;
                 ctx.strokeStyle = isSelected || isHovered
-                    ? '#ffffff'
-                    : (esCeniza ? '#94a3b8' : '#fca5a5');
+                    ? '#00f0ff'
+                    : (esCeniza ? '#94a3b8' : '#fda4af');
                 ctx.stroke();
 
-                // Núcleo interior táctico
-                this.drawHexagon(ctx, node.x, node.y, node.radius * 0.45);
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.28)';
+                this.drawHexagon(ctx, node.x, node.y, node.radius * 0.48);
+                ctx.strokeStyle = 'rgba(0, 240, 255, 0.35)';
                 ctx.lineWidth = 1;
                 ctx.stroke();
 
-                // Insignia superior si tiene Etiqueta Manual (1-2 palabras) o si está en Estado Ceniza
                 if (esCeniza) {
                     ctx.font = 'bold 9.5px "JetBrains Mono", monospace';
                     ctx.fillStyle = '#cbd5e1';
                     ctx.textAlign = 'center';
-                    ctx.fillText('[CENIZA // RAIDEADO]', node.x, node.y - node.radius - 9);
+                    ctx.fillText('[CENIZA // RAIDEADO]', node.x, node.y - node.radius - 11);
                 } else if (etiquetaObj && etiquetaObj.texto) {
-                    const tagColor = COLORES_ETIQUETA_SERVIDOR[etiquetaObj.tipo] || '#10b981';
+                    const tagColor = COLORES_ETIQUETA_SERVIDOR[etiquetaObj.tipo] || '#00f0ff';
                     ctx.font = 'bold 9.5px "JetBrains Mono", monospace';
                     ctx.fillStyle = tagColor;
                     ctx.textAlign = 'center';
-                    ctx.fillText(`[${etiquetaObj.texto}]`, node.x, node.y - node.radius - 9);
+                    ctx.fillText(`[${etiquetaObj.texto}]`, node.x, node.y - node.radius - 11);
                 }
 
-                // Nombre del Servidor debajo del Hexágono
                 ctx.font = 'bold 11px "JetBrains Mono", monospace';
                 ctx.fillStyle = esCeniza ? '#94a3b8' : '#ffffff';
                 ctx.textAlign = 'center';
-                ctx.fillText(node.label.slice(0, 25), node.x, node.y + node.radius + 15);
+                ctx.fillText(node.label.slice(0, 25), node.x, node.y + node.radius + 16);
             } else {
                 const isBridge = node.serverCount >= 2;
                 const isVip = Boolean(node.enWatchlist);
+                const habloReciente = (now - (node.lastMessageTs || 0)) < 600000;
 
-                if (isVip) {
-                    ctx.save();
-                    ctx.translate(node.x, node.y);
-                    ctx.rotate(t * 0.7);
+                if (isVip || node.altRole) {
                     ctx.beginPath();
-                    ctx.setLineDash([5, 3]);
-                    ctx.arc(0, 0, node.radius + 8 + pulse * 5, 0, Math.PI * 2);
-                    ctx.strokeStyle = '#fbbf24';
-                    ctx.lineWidth = 2.2;
-                    ctx.stroke();
-                    ctx.restore();
-                } else if (node.altRole) {
-                    const isCrit = node.altRole === 'CRITICO';
-                    ctx.save();
-                    ctx.translate(node.x, node.y);
-                    ctx.rotate(isCrit ? t * 0.6 : -t * 0.4);
-                    ctx.beginPath();
-                    ctx.setLineDash([4, 4]);
-                    ctx.arc(0, 0, node.radius + 7 + pulse * 4, 0, Math.PI * 2);
-                    ctx.strokeStyle = isCrit ? '#ff003c' : '#fcee0a';
+                    ctx.arc(node.x, node.y, node.radius + 5 + pulse * 4, 0, Math.PI * 2);
+                    ctx.strokeStyle = isVip ? '#fcee0a' : '#ff003c';
                     ctx.lineWidth = 1.8;
                     ctx.stroke();
-                    ctx.restore();
-                } else if (isBridge || node.fichado) {
+                } else if (habloReciente || isBridge || node.fichado) {
                     ctx.beginPath();
-                    ctx.arc(node.x, node.y, node.radius + 3.5 + pulse * 3, 0, Math.PI * 2);
-                    ctx.strokeStyle = node.fichado ? '#ff2a6d' : '#fbbf24';
-                    ctx.lineWidth = 1.4;
+                    ctx.arc(node.x, node.y, node.radius + 3.2, 0, Math.PI * 2);
+                    ctx.strokeStyle = habloReciente ? '#00f0ff' : (node.fichado ? '#ff2a6d' : '#fbbf24');
+                    ctx.lineWidth = 1.3;
                     ctx.stroke();
                 }
 
                 ctx.beginPath();
                 ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
-                ctx.fillStyle = isVip ? '#fbbf24' : '#10b981';
+                ctx.fillStyle = isVip ? '#fcee0a' : (habloReciente ? '#00f0ff' : '#10b981');
                 ctx.fill();
-                ctx.lineWidth = isSelected || isHovered ? 2.5 : 1.1;
-                ctx.strokeStyle = isSelected || isHovered ? '#ffffff' : '#059669';
+                ctx.lineWidth = isSelected || isHovered ? 2.4 : 1.0;
+                ctx.strokeStyle = isSelected || isHovered ? '#ffffff' : '#047857';
                 ctx.stroke();
 
                 const showLabel = isHovered || isSelected || isVip || node.altRole || isBridge || this.camera.zoom > 1.05;
                 if (showLabel) {
                     ctx.font = '10px "JetBrains Mono", monospace';
                     ctx.fillStyle = isVip
-                        ? '#fbbf24'
-                        : (node.altRole ? (node.altRole === 'CRITICO' ? '#ff003c' : '#fcee0a') : (isBridge ? '#fbbf24' : '#e2e8f0'));
+                        ? '#fcee0a'
+                        : (node.altRole ? '#ff003c' : (habloReciente ? '#00f0ff' : (isBridge ? '#fbbf24' : '#e2e8f0')));
                     ctx.textAlign = 'center';
                     ctx.fillText(node.label.slice(0, 18), node.x, node.y - node.radius - 5);
                 }
@@ -1470,8 +1617,8 @@ window.C4ISR_Views.red = {
         if (this.dvrEvents.length === 0) {
             container.innerHTML = `
                 <div style="padding: 1rem 0.4rem; color: var(--text-muted); line-height: 1.55;">
-                    <div style="color: var(--accent-info); font-weight: 700; margin-bottom: 0.4rem;">[ CÁMARA DVR EN GRABACIÓN ]</div>
-                    Aquí quedan grabados automáticamente los desplazamientos de usuarios cuando saltan de un servidor A a un servidor B, los movimientos de objetivos VIP y los ataques que reducen un servidor a cenizas.
+                    <div style="color: #00f0ff; font-weight: 700; margin-bottom: 0.4rem;">[ CÁMARA DVR EN GRABACIÓN ]</div>
+                    Aquí quedan grabados automáticamente los desplazamientos cuando un usuario habla en un servidor A y luego salta a un servidor B, además de los ataques Ceniza.
                 </div>
             `;
             return;
@@ -1479,17 +1626,17 @@ window.C4ISR_Views.red = {
 
         const headerPlayHtml = `
             <div style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center;">
-                <span style="color: var(--accent-amber); font-weight: 700; font-size: 0.72rem;">ÚLTIMOS ${this.dvrEvents.length} EVENTOS GRABADOS</span>
-                <button id="btn-play-all-dvr" class="btn-action" type="button" style="font-size: 0.68rem; padding: 3px 8px;">&#9654; REPRODUCIR SECUENCIA</button>
+                <span style="color: #fcee0a; font-weight: 700; font-size: 0.72rem;">ÚLTIMOS ${this.dvrEvents.length} EVENTOS</span>
+                <button id="btn-play-all-dvr" class="btn-action" type="button" style="font-size: 0.68rem; padding: 3px 8px;">&#9654; REPRODUCIR SALTOS</button>
             </div>
         `;
 
         const itemsHtml = this.dvrEvents.slice(0, 60).map((ev) => {
             const fecha = new Date(ev.ts || Date.now()).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-            let borderCol = '#38bdf8';
-            if (ev.tipo === 'RAID_CENIZA') borderCol = '#ef4444';
+            let borderCol = '#00f0ff';
+            if (ev.tipo === 'RAID_CENIZA') borderCol = '#ff003c';
             else if (ev.tipo === 'COMANDO_SQUAD') borderCol = '#f97316';
-            else if (ev.tipo === 'MOVIMIENTO_VIP') borderCol = '#fbbf24';
+            else if (ev.tipo === 'MOVIMIENTO_VIP') borderCol = '#fcee0a';
 
             return `
                 <div class="dvr-event-card" data-from="SRV_${DOMPurify.sanitize(String(ev.fromGuildId || ''))}" data-to="SRV_${DOMPurify.sanitize(String(ev.toGuildId || ''))}" data-label="${DOMPurify.sanitize(String(ev.userTag || 'EVENTO'))}" data-color="${borderCol}" style="border-left: 3px solid ${borderCol}; background: rgba(255,255,255,0.025); padding: 0.55rem 0.7rem; margin-bottom: 0.5rem; border-radius: 3px; cursor: pointer;">
@@ -1537,7 +1684,7 @@ window.C4ISR_Views.red = {
                     const fKey = `SRV_${ev.fromGuildId}`;
                     const tKey = `SRV_${ev.toGuildId}`;
                     if (this.nodes.has(fKey) && this.nodes.has(tKey)) {
-                        this.spawnDvrTrace(fKey, tKey, ev.userTag || ev.tipo, '#fcee0a');
+                        this.spawnDvrTrace(fKey, tKey, ev.userTag || ev.tipo, '#00f0ff');
                     }
                 }, 650);
             });
@@ -1552,45 +1699,43 @@ window.C4ISR_Views.red = {
             const srv = node.meta || {};
             const exploradores = Array.isArray(srv.exploradores) && srv.exploradores.length > 0
                 ? srv.exploradores.join(', ')
-                : 'Registro Histórico';
+                : 'Archivo Histórico';
             const numExploradores = srv.redundancia || (Array.isArray(srv.exploradores) ? srv.exploradores.length : 0);
             const redundanciaBadge = numExploradores >= 2
                 ? `<span style="color:#34d399;font-weight:700;">ÓPTIMA (${numExploradores} unidades)</span>`
-                : `<span style="color:#fbbf24;font-weight:700;">FRÁGIL (${numExploradores} unidad)</span>`;
+                : `<span style="color:#fbbf24;font-weight:700;">1 UNIDAD (SIN RESPALDO)</span>`;
 
-            // Bloque especial si el Servidor está en Estado Ceniza (Raideado)
             let cenizaDossierHtml = '';
             if (srv.estadoCeniza && srv.estadoCeniza.raideado) {
                 const c = srv.estadoCeniza;
                 const linkRaidHtml = c.linkRaid
-                    ? `<div><strong>Link Espameado en Raid:</strong> <a href="${DOMPurify.sanitize(c.linkRaid)}" target="_blank" rel="noopener noreferrer" style="color:#fcee0a;">${DOMPurify.sanitize(c.linkRaid)}</a></div>`
+                    ? `<div><strong>Link Espameado:</strong> <a href="${DOMPurify.sanitize(c.linkRaid)}" target="_blank" rel="noopener noreferrer" style="color:#fcee0a;">${DOMPurify.sanitize(c.linkRaid)}</a></div>`
                     : '';
                 cenizaDossierHtml = `
-                    <div style="margin-bottom: 0.85rem; padding: 0.65rem 0.75rem; background: rgba(148, 163, 184, 0.12); border: 1px solid #94a3b8; border-left: 4px solid #ef4444; border-radius: 4px;">
-                        <div style="color: #f87171; font-weight: 700; font-size: 0.74rem; margin-bottom: 4px;">[ REPORTE FORENSE DE CENIZAS // SERVIDOR RAIDEADO ]</div>
+                    <div style="margin-bottom: 0.85rem; padding: 0.65rem 0.75rem; background: rgba(148, 163, 184, 0.12); border: 1px solid #94a3b8; border-left: 4px solid #ff003c; border-radius: 4px;">
+                        <div style="color: #ff003c; font-weight: 700; font-size: 0.74rem; margin-bottom: 4px;">[ REPORTE DE CENIZAS // SERVIDOR RAIDEADO ]</div>
                         <div style="font-size: 0.72rem; line-height: 1.45; color: var(--text-main);">
-                            <div><strong>Nombre Previo al Raid:</strong> <span style="color:#fbbf24;">${DOMPurify.sanitize(c.nombreAnterior || node.label)}</span></div>
-                            <div><strong>Causa Detectada:</strong> ${DOMPurify.sanitize(c.motivo || 'Ataque masivo')}</div>
-                            <div><strong>Ejecutor Detectado:</strong> ${DOMPurify.sanitize(c.atacanteTag || 'Desconocido')}</div>
+                            <div><strong>Nombre Previo:</strong> <span style="color:#fcee0a;">${DOMPurify.sanitize(c.nombreAnterior || node.label)}</span></div>
+                            <div><strong>Causa:</strong> ${DOMPurify.sanitize(c.motivo || 'Ataque masivo')}</div>
+                            <div><strong>Ejecutor:</strong> ${DOMPurify.sanitize(c.atacanteTag || 'Desconocido')}</div>
                             ${linkRaidHtml}
                         </div>
                     </div>
                 `;
             }
 
-            // Editor de Etiqueta Manual de 1-2 palabras
             const currentTagText = srv.etiquetaManual?.texto || '';
             const currentTagType = srv.etiquetaManual?.tipo || 'HOSTIL';
 
             const tagEditorHtml = `
-                <div style="margin-bottom: 0.85rem; padding: 0.6rem 0.7rem; background: rgba(255,255,255,0.03); border: var(--border-subtle); border-radius: 4px;">
-                    <div style="color: var(--accent-amber); font-weight: 700; font-size: 0.7rem; margin-bottom: 5px;">ETIQUETA TÁCTICA EN MAPA (1-2 PALABRAS):</div>
+                <div style="margin-bottom: 0.85rem; padding: 0.6rem 0.7rem; background: rgba(0,240,255,0.03); border: 1px solid rgba(0,240,255,0.2); border-radius: 4px;">
+                    <div style="color: #00f0ff; font-weight: 700; font-size: 0.7rem; margin-bottom: 5px;">ETIQUETA DE SISTEMA EN MAPA (1-2 PALABRAS):</div>
                     <div style="display: flex; gap: 4px; margin-bottom: 5px;">
                         <input type="text" id="input-srv-tag" class="search-input" value="${DOMPurify.sanitize(currentTagText)}" placeholder="Ej: PROVEEDOR / RAIDERS / SOCIAL" maxlength="20" style="width: 100%; padding: 4px 7px; font-size: 0.73rem;">
                         <select id="select-srv-tag-type" style="background: var(--bg-input); color: var(--text-main); border: 1px solid rgba(255,255,255,0.14); border-radius: 4px; font-family: var(--font-mono); font-size: 0.7rem; padding: 2px 4px;">
                             <option value="HOSTIL" ${currentTagType === 'HOSTIL' ? 'selected' : ''}>ROJO</option>
                             <option value="PROVEEDOR" ${currentTagType === 'PROVEEDOR' ? 'selected' : ''}>NARANJA</option>
-                            <option value="SOCIAL" ${currentTagType === 'SOCIAL' ? 'selected' : ''}>AZUL</option>
+                            <option value="SOCIAL" ${currentTagType === 'SOCIAL' ? 'selected' : ''}>CIAN</option>
                             <option value="ALIADO" ${currentTagType === 'ALIADO' ? 'selected' : ''}>PÚRPURA</option>
                             <option value="OBJETIVO" ${currentTagType === 'OBJETIVO' ? 'selected' : ''}>AMARILLO</option>
                         </select>
@@ -1615,33 +1760,34 @@ window.C4ISR_Views.red = {
 
             const members = (this.serverMembers.get(node.key) || [])
                 .slice()
-                .sort((a, b) => (b.infracciones - a.infracciones) || ((b.meta?.totalMensajes || 0) - (a.meta?.totalMensajes || 0)));
+                .sort((a, b) => (b.lastMessageTs || 0) - (a.lastMessageTs || 0));
 
             const membersHtml = members.slice(0, 60).map(m => {
-                const badgeCol = m.enWatchlist ? '#fbbf24' : (m.altRole ? '#fcee0a' : (m.infracciones > 0 ? '#ef4444' : '#10b981'));
+                const timeStr = formatearTiempoRelativo(m.meta?.servidores?.[node.rawId]?.lastSeen || m.lastMessageTs);
+                const badgeCol = m.enWatchlist ? '#fcee0a' : (m.altRole ? '#ff003c' : '#00f0ff');
                 return `
                     <div class="srv-member-row" data-ukey="${DOMPurify.sanitize(m.key)}" style="display:flex;justify-content:space-between;align-items:center;padding:5px 6px;border-bottom:var(--border-subtle);cursor:pointer;">
-                        <span style="color:var(--text-main);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:190px;">${m.enWatchlist ? '&#9733; ' : '&#9679; '}${DOMPurify.sanitize(m.label)}</span>
-                        <span style="color:${badgeCol};font-size:0.7rem;font-weight:700;">${m.infracciones > 0 ? `NIVEL ${m.infracciones}` : `${m.meta?.totalMensajes || 1} MSGS`}</span>
+                        <span style="color:var(--text-main);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:185px;">${m.enWatchlist ? '&#9733; ' : '&#9679; '}${DOMPurify.sanitize(m.label)}</span>
+                        <span style="color:${badgeCol};font-size:0.68rem;font-weight:700;">${timeStr || `${m.meta?.totalMensajes || 1} MSGS`}</span>
                     </div>
                 `;
             }).join('');
 
             panel.innerHTML = `
-                <div style="border-left: 3px solid #ef4444; padding-left: 0.75rem; margin-bottom: 0.8rem;">
-                    <div style="color: #ef4444; font-weight: 700;">[ ESTACIÓN HEXAGONAL // SERVIDOR ]</div>
+                <div style="border-left: 3px solid #ff0055; padding-left: 0.75rem; margin-bottom: 0.8rem;">
+                    <div style="color: #ff0055; font-weight: 700;">[ SISTEMA ESTELAR // SERVIDOR ]</div>
                     <div style="font-size: 0.98rem; color: var(--text-main); font-weight: 700; margin-top: 3px;">${DOMPurify.sanitize(node.label)}</div>
                     <div class="selectable" style="color: var(--text-muted); font-size: 0.71rem;">ID: ${DOMPurify.sanitize(String(node.rawId))}</div>
                 </div>
                 ${cenizaDossierHtml}
                 ${tagEditorHtml}
                 ${inviteBlockHtml}
-                <div style="margin-bottom: 0.35rem;"><strong>Sujetos Monitoreados Aquí:</strong> <span style="color: var(--accent-green);">${members.length}</span></div>
+                <div style="margin-bottom: 0.35rem;"><strong>Sujetos en Sistema:</strong> <span style="color: #00f0ff;">${members.length}</span></div>
                 <div style="margin-bottom: 0.35rem;"><strong>Miembros Totales Discord:</strong> ${srv.memberCount || 'N/A'}</div>
-                <div style="margin-bottom: 0.35rem;"><strong>Cobertura de Redundancia:</strong> ${redundanciaBadge}</div>
+                <div style="margin-bottom: 0.35rem;"><strong>Redundancia Enjambre:</strong> ${redundanciaBadge}</div>
                 <div style="margin-bottom: 0.75rem; font-size: 0.72rem; color: var(--text-secondary);"><strong>Exploradores:</strong> ${DOMPurify.sanitize(exploradores)}</div>
-                <div style="color: var(--accent-rz); font-weight: 700; margin-bottom: 0.35rem;">SUJETOS ACTIVOS EN ESTE SERVIDOR (${members.length}):</div>
-                <div style="max-height: 210px; overflow-y: auto; border: var(--border-subtle); border-radius: 4px; background: rgba(0,0,0,0.2);">
+                <div style="color: #00f0ff; font-weight: 700; margin-bottom: 0.35rem;">ACTIVIDAD RECIENTE DE SUJETOS (${members.length}):</div>
+                <div style="max-height: 210px; overflow-y: auto; border: var(--border-subtle); border-radius: 4px; background: rgba(0,0,0,0.25);">
                     ${membersHtml || '<div style="padding:0.75rem;color:var(--text-muted);">Sin usuarios registrados aún.</div>'}
                 </div>
             `;
@@ -1686,20 +1832,24 @@ window.C4ISR_Views.red = {
             });
         } else {
             const usr = node.meta || {};
-            const servidoresList = Object.entries(usr.servidores || {}).map(([sId, info]) => {
-                return `
-                    <div class="usr-srv-row" data-skey="SRV_${DOMPurify.sanitize(sId)}" style="padding: 5px 4px; border-bottom: var(--border-subtle); cursor: pointer; display: flex; justify-content: space-between;">
-                        <span><strong style="color:#ef4444;">&#11042;</strong> <strong>${DOMPurify.sanitize(info.name)}</strong></span>
-                        <span style="color:var(--text-muted);">${info.count} msgs</span>
-                    </div>
-                `;
-            }).join('');
+            const servidoresList = Object.entries(usr.servidores || {})
+                .sort((a, b) => (b[1].lastSeen || 0) - (a[1].lastSeen || 0))
+                .map(([sId, info]) => {
+                    const isCurrent = (`SRV_${sId}` === node.activeServerKey);
+                    const timeAgo = formatearTiempoRelativo(info.lastSeen);
+                    return `
+                        <div class="usr-srv-row" data-skey="SRV_${DOMPurify.sanitize(sId)}" style="padding: 6px 5px; border-bottom: var(--border-subtle); cursor: pointer; display: flex; justify-content: space-between; align-items: center; background: ${isCurrent ? 'rgba(0, 240, 255, 0.08)' : 'transparent'};">
+                            <span><strong style="color:${isCurrent ? '#00f0ff' : '#ff0055'};">&#11042;</strong> <strong>${DOMPurify.sanitize(info.name)}</strong> ${isCurrent ? '<span style="color:#00f0ff;font-size:0.65rem;">[ACTUAL]</span>' : ''}</span>
+                            <span style="color:var(--text-secondary);font-size:0.7rem;">${info.count} msgs &bull; ${timeAgo}</span>
+                        </div>
+                    `;
+                }).join('');
 
             const activeHoursSet = new Set(Array.isArray(usr.horasActivas) ? usr.horasActivas : []);
             let clockCells = '';
             for (let h = 0; h < 24; h++) {
                 const isActiveHour = activeHoursSet.has(h);
-                const cellBg = isActiveHour ? 'var(--accent-green)' : 'rgba(255,255,255,0.06)';
+                const cellBg = isActiveHour ? '#00f0ff' : 'rgba(255,255,255,0.06)';
                 clockCells += `<div title="${String(h).padStart(2, '0')}:00 UTC - ${isActiveHour ? 'ACTIVO' : 'INACTIVO'}" style="height:12px;background:${cellBg};border-radius:2px;"></div>`;
             }
 
@@ -1708,8 +1858,8 @@ window.C4ISR_Views.red = {
                 : DOMPurify.sanitize(node.label);
 
             const snowflakeInfo = usr.fechaCreacionCuenta
-                ? `${DOMPurify.sanitize(usr.fechaCreacionCuenta)} (${usr.diasAntiguedad}d) ${usr.esBurner ? '<strong style="color:#ef4444;">[BURNER]</strong>' : ''}`
-                : 'Calculando en próximo evento...';
+                ? `${DOMPurify.sanitize(usr.fechaCreacionCuenta)} (${usr.diasAntiguedad}d) ${usr.esBurner ? '<strong style="color:#ff003c;">[BURNER]</strong>' : ''}`
+                : 'Registrado en archivo';
 
             const altsDeUsuario = this.altMapByUser.get(String(node.rawId)) || [];
             let altsHtml = `<div style="color: var(--text-muted); font-size: 0.72rem; margin-bottom: 0.75rem;">Sin coincidencias espejo por encima del umbral.</div>`;
@@ -1729,29 +1879,29 @@ window.C4ISR_Views.red = {
             }
 
             panel.innerHTML = `
-                <div style="border-left: 3px solid ${node.enWatchlist ? '#fbbf24' : '#10b981'}; padding-left: 0.75rem; margin-bottom: 0.75rem;">
-                    <div style="color: ${node.enWatchlist ? '#fbbf24' : '#10b981'}; font-weight: 700;">${node.enWatchlist ? '&#9733; [ OBJETIVO VIP EN SEGUIMIENTO ]' : '[ NODO USUARIO // VERDE ]'}</div>
+                <div style="border-left: 3px solid ${node.enWatchlist ? '#fcee0a' : '#00f0ff'}; padding-left: 0.75rem; margin-bottom: 0.75rem;">
+                    <div style="color: ${node.enWatchlist ? '#fcee0a' : '#00f0ff'}; font-weight: 700;">${node.enWatchlist ? '&#9733; [ OBJETIVO VIP EN SEGUIMIENTO ]' : '[ NODO SUJETO // ACTIVO ]'}</div>
                     <div style="font-size: 0.98rem; color: var(--text-main); font-weight: 700; margin-top: 3px;">${DOMPurify.sanitize(node.label)}</div>
                     <div class="selectable" style="color: var(--text-muted); font-size: 0.71rem;">UID: ${DOMPurify.sanitize(String(node.rawId))}</div>
                 </div>
 
-                <button id="btn-toggle-vip" class="btn-action" type="button" style="width: 100%; margin-bottom: 0.75rem; padding: 0.45rem; border-color: #fbbf24; color: ${node.enWatchlist ? '#09080c' : '#fbbf24'}; background: ${node.enWatchlist ? '#fbbf24' : 'rgba(251, 191, 36, 0.08)'}; font-weight: 700;">
+                <button id="btn-toggle-vip" class="btn-action" type="button" style="width: 100%; margin-bottom: 0.75rem; padding: 0.45rem; border-color: #fcee0a; color: ${node.enWatchlist ? '#09080c' : '#fcee0a'}; background: ${node.enWatchlist ? '#fcee0a' : 'rgba(252, 238, 10, 0.08)'}; font-weight: 700;">
                     &#9733; ${node.enWatchlist ? 'DESACTIVAR SEGUIMIENTO VIP' : 'ACTIVAR SEGUIMIENTO VIP (WATCHLIST)'}
                 </button>
 
+                <div style="margin-bottom: 0.35rem;"><strong>Última Transmisión:</strong> <span style="color: #00f0ff;">${formatearTiempoRelativo(node.lastMessageTs) || 'N/A'}</span></div>
                 <div style="margin-bottom: 0.35rem;"><strong>Creación Cuenta:</strong> <span style="color: var(--text-secondary);">${snowflakeInfo}</span></div>
                 <div style="margin-bottom: 0.35rem;"><strong>Historial Alias:</strong> <span style="color: var(--text-secondary);">${aliasesPrevios}</span></div>
                 <div style="margin-bottom: 0.35rem;"><strong>Actividad Total:</strong> <span style="color: var(--accent-green);">${usr.totalMensajes || 0} mensajes</span></div>
-                <div style="margin-bottom: 0.35rem;"><strong>Servidores Comunes:</strong> <span style="color: ${node.serverCount > 1 ? '#fbbf24' : 'var(--text-main)'};">${node.serverCount} servidor(es)</span></div>
-                <div style="margin-bottom: 0.7rem;"><strong>Infracciones Graves:</strong> <span style="color: ${node.infracciones > 0 ? '#ef4444' : 'var(--text-muted)'};">${node.infracciones}</span></div>
+                <div style="margin-bottom: 0.7rem;"><strong>Infracciones Graves:</strong> <span style="color: ${node.infracciones > 0 ? '#ff003c' : 'var(--text-muted)'};">${node.infracciones}</span></div>
 
-                <div style="color: var(--accent-info); font-weight: 700; font-size: 0.71rem; margin-bottom: 0.3rem;">HUELLA HORARIA 24H (UTC):</div>
+                <div style="color: #00f0ff; font-weight: 700; font-size: 0.71rem; margin-bottom: 0.3rem;">HUELLA HORARIA 24H (UTC):</div>
                 <div style="display:grid;grid-template-columns:repeat(24,1fr);gap:2px;margin-bottom:0.8rem;">${clockCells}</div>
 
                 <div style="color: #fcee0a; font-weight: 700; margin-bottom: 0.3rem;">SOSPECHAS DE CUENTA ESPEJO (ALTS):</div>
                 <div style="margin-bottom: 0.8rem;">${altsHtml}</div>
 
-                <div style="color: var(--accent-rz); font-weight: 700; margin-bottom: 0.3rem;">SERVIDORES DETECTADOS:</div>
+                <div style="color: var(--accent-rz); font-weight: 700; margin-bottom: 0.3rem;">HISTORIAL DE CONEXIÓN POR SERVIDOR:</div>
                 <div style="margin-bottom: 0.9rem;">${servidoresList || 'Sin servidores'}</div>
                 <button id="btn-open-dossier" class="btn-cyber" type="button" style="padding: 0.55rem; font-size: 0.76rem;">ABRIR EXPEDIENTE OSINT</button>
             `;
@@ -1817,6 +1967,8 @@ window.C4ISR_Views.red = {
         if (this.boundResize) window.removeEventListener('resize', this.boundResize);
         if (this.boundMouseUp) window.removeEventListener('mouseup', this.boundMouseUp);
         this.nodes.clear();
+        this.serverNodesList = [];
+        this.userNodesList = [];
         this.edges = [];
         this.altEdges = [];
         this.allianceEdges = [];
