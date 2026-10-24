@@ -31,6 +31,7 @@ let estadoRadarRed = {
 };
 
 const memoriaInvitaciones = new Map();
+const invitacionesOcultas = new Set();
 const etiquetasServidores = new Map();
 const watchlistUsuarios = new Set();
 const colaResolucionInvites = [];
@@ -307,6 +308,22 @@ app.get('/api/datos', autenticar, async (req, res) => {
         const expedientes = await database.obtenerExpedientes({});
         const hace24HorasMs = Date.now() - 86400000;
 
+        // Mapas de enriquecimiento desde el radar en vivo (Avatares reales y Servidores ya infiltrados)
+        const radarUsersMap = new Map();
+        for (const u of (estadoRadarRed.usuarios || [])) {
+            if (u && u.id) radarUsersMap.set(String(u.id), u);
+        }
+
+        const servidoresInfiltradosIds = new Set();
+        const servidoresInfiltradosNombres = new Set();
+        for (const s of (estadoRadarRed.servidores || [])) {
+            if (s && s.id && s.id !== 'DM_SECTOR') {
+                servidoresInfiltradosIds.add(String(s.id));
+                const norm = normalizarNombreServidor(s.name);
+                if (norm) servidoresInfiltradosNombres.add(norm);
+            }
+        }
+
         const datos = {
             total_registros: expedientes.length,
             alertas_recientes: 0,
@@ -319,6 +336,8 @@ app.get('/api/datos', autenticar, async (req, res) => {
         const linksUnicosPorCodigo = new Map();
 
         for (const exp of expedientes) {
+            const uid = String(exp.userId || '').trim();
+            const liveUser = radarUsersMap.get(uid);
             const fechaPrimerFichajeMs = Date.parse(exp.primerFichaje);
             if (!Number.isNaN(fechaPrimerFichajeMs) && fechaPrimerFichajeMs > hace24HorasMs) {
                 datos.alertas_recientes++;
@@ -326,38 +345,80 @@ app.get('/api/datos', autenticar, async (req, res) => {
 
             const historial = Array.isArray(exp.historial) ? exp.historial : [];
             const delitosGraves = [];
+            const vectoresSet = new Set();
+            const servidoresSet = new Set();
+
+            if (liveUser && liveUser.servidores) {
+                for (const sInfo of Object.values(liveUser.servidores)) {
+                    if (sInfo && sInfo.name && !sInfo.name.includes('Sector Privado')) {
+                        servidoresSet.add(sInfo.name);
+                    }
+                }
+            }
 
             for (const delito of historial) {
                 if (!delito || typeof delito !== 'object') continue;
                 const accionStr = String(delito.accion || '');
                 const msgOriginal = String(delito.mensajeOriginal || '');
 
+                if (delito.servidor && delito.servidor !== 'N/A' && !delito.servidor.includes('Sector Desconocido')) {
+                    servidoresSet.add(delito.servidor);
+                }
+
+                if (accionStr.includes('Comando') || accionStr.includes('Squad')) {
+                    vectoresSet.add('SQUAD');
+                } else if (accionStr.includes('Raid') || accionStr.includes('Dox')) {
+                    vectoresSet.add('RAID');
+                } else if (accionStr.includes('Links')) {
+                    vectoresSet.add('LINK');
+                } else if (accionStr.includes('OSINT') || accionStr.includes('Menci')) {
+                    vectoresSet.add('OSINT');
+                }
+
                 const invitesEncontradas = extraerInvitacionesDeTexto(msgOriginal);
                 if (invitesEncontradas.length > 0) {
+                    vectoresSet.add('LINK');
                     const fechaDelito = delito.fecha || exp.primerFichaje || new Date().toISOString();
                     for (const inv of invitesEncontradas) {
+                        const codeKey = inv.code.toLowerCase();
+                        if (invitacionesOcultas.has(codeKey)) continue;
+
                         registrarInvitacionViva({
                             code: inv.code,
                             url: inv.url,
                             origenServerName: delito.servidor || 'Sector Desconocido',
-                            emisorId: exp.userId,
+                            emisorId: uid,
                             emisorTag: exp.ultimoAlias || 'Usuario',
                             fecha: fechaDelito
                         });
 
-                        const codeKey = inv.code.toLowerCase();
                         const memInfo = memoriaInvitaciones.get(codeKey);
                         const nombreMostrar = (memInfo && memInfo.guildName)
                             ? memInfo.guildName
-                            : (delito.servidor || 'Sector Desconocido');
+                            : (delito.servidor || 'Servidor Promocionado');
+
+                        const normTarget = normalizarNombreServidor(nombreMostrar);
+                        const yaInfiltrado = Boolean(
+                            (memInfo?.guildId && servidoresInfiltradosIds.has(String(memInfo.guildId))) ||
+                            (normTarget && servidoresInfiltradosNombres.has(normTarget))
+                        );
 
                         const mensajeLimpio = msgOriginal.replace(/^\[INVITE_DETECTADA:[^\]]+\]\n?/i, '');
 
                         if (!linksUnicosPorCodigo.has(codeKey)) {
                             linksUnicosPorCodigo.set(codeKey, {
-                                id: exp.userId,
+                                code: inv.code,
+                                id: uid,
+                                emisorTag: exp.ultimoAlias || liveUser?.tag || 'Usuario',
+                                emisorAvatar: liveUser?.avatar || null,
                                 serverName: nombreMostrar,
                                 origenName: delito.servidor || 'Sector Desconocido',
+                                origenes: memInfo?.origenes || [delito.servidor || 'Sector Desconocido'],
+                                status: memInfo?.status || 'PENDING',
+                                guildId: memInfo?.guildId || null,
+                                icon: memInfo?.icon || null,
+                                memberCount: memInfo?.memberCount || 0,
+                                infiltrado: yaInfiltrado,
                                 mensaje: mensajeLimpio,
                                 url: inv.url,
                                 fecha: fechaDelito
@@ -371,33 +432,39 @@ app.get('/api/datos', autenticar, async (req, res) => {
                 }
             }
 
-            if (delitosGraves.length > 0) {
-                const ultimoGrave = delitosGraves[delitosGraves.length - 1];
-                datos.blacklist.push({
-                    id: exp.userId,
-                    username: exp.ultimoAlias || 'Desconocido',
-                    historialAliases: Array.isArray(exp.historialAliases) ? exp.historialAliases : [],
-                    reincidencia: exp.totalInfracciones || delitosGraves.length,
-                    evidencia: ultimoGrave.mensajeOriginal || '[ Sin evidencia ]',
-                    fecha: ultimoGrave.fecha || exp.primerFichaje,
-                    servidor: ultimoGrave.servidor || 'Sector Desconocido',
-                    notas: exp.notasAnalista || '',
-                    historial: historial
-                });
-            } else {
-                const ultimoEvento = historial.length > 0 ? historial[historial.length - 1] : null;
-                datos.blacklist.push({
-                    id: exp.userId,
-                    username: exp.ultimoAlias || 'Identidad Desconocida',
-                    historialAliases: Array.isArray(exp.historialAliases) ? exp.historialAliases : [],
-                    reincidencia: exp.totalInfracciones || 0,
-                    evidencia: ultimoEvento ? ultimoEvento.mensajeOriginal : '[ SIN REGISTROS ACTIVOS ]',
-                    fecha: (ultimoEvento && ultimoEvento.fecha) || exp.primerFichaje || new Date().toISOString(),
-                    servidor: (ultimoEvento && ultimoEvento.servidor) || 'N/A',
-                    notas: exp.notasAnalista || '',
-                    historial: historial
-                });
-            }
+            const intelCombinada = exp.intelExterna || liveUser?.intelExterna || null;
+            if (intelCombinada?.xnBaneado) vectoresSet.add('XN-BAN');
+            if (intelCombinada?.vpsDetectado) vectoresSet.add('VPS-5604');
+            if (intelCombinada?.lcSancionado) vectoresSet.add('LC-GUARD');
+
+            const perfilOsintCombinado = {
+                ...(exp.perfilOsint || {}),
+                ...(liveUser?.perfilOsint || {})
+            };
+
+            const ultimoEvento = delitosGraves.length > 0
+                ? delitosGraves[delitosGraves.length - 1]
+                : (historial.length > 0 ? historial[historial.length - 1] : null);
+
+            datos.blacklist.push({
+                id: uid,
+                username: exp.ultimoAlias || liveUser?.tag || 'Identidad Desconocida',
+                avatar: liveUser?.avatar || null,
+                historialAliases: Array.isArray(exp.historialAliases) ? exp.historialAliases : [],
+                reincidencia: exp.totalInfracciones || delitosGraves.length,
+                delitosGravesCount: delitosGraves.length,
+                vectores: Array.from(vectoresSet),
+                servidoresLista: Array.from(servidoresSet),
+                perfilOsint: Object.keys(perfilOsintCombinado).length > 0 ? perfilOsintCombinado : null,
+                intelExterna: intelCombinada,
+                enWatchlist: watchlistUsuarios.has(uid),
+                horasActivas: liveUser?.horasActivas || [],
+                evidencia: ultimoEvento ? ultimoEvento.mensajeOriginal : '[ SIN REGISTROS ACTIVOS ]',
+                fecha: (ultimoEvento && ultimoEvento.fecha) || exp.actualizadoEn || exp.primerFichaje || new Date().toISOString(),
+                servidor: (ultimoEvento && ultimoEvento.servidor) || 'N/A',
+                notas: exp.notasAnalista || '',
+                historial: historial
+            });
         }
 
         datos.links = Array.from(linksUnicosPorCodigo.values());
@@ -406,6 +473,18 @@ app.get('/api/datos', autenticar, async (req, res) => {
         console.error('[ERROR API /api/datos]:', error.message);
         res.status(500).json({ error: 'Desincronizacion de Base de Datos' });
     }
+});
+
+/**
+ * Permite ocultar una tarjeta de invitacion en Radar de Alianzas sin destruir el expediente del usuario emisor.
+ */
+app.post('/api/links/ocultar', autenticar, (req, res) => {
+    const { code } = req.body || {};
+    if (!code) return res.status(400).json({ error: 'Codigo de invitacion requerido.' });
+    const cleanCode = String(code).trim().toLowerCase();
+    invitacionesOcultas.add(cleanCode);
+    memoriaInvitaciones.delete(cleanCode);
+    return res.json({ success: true });
 });
 
 app.get('/api/red', autenticar, async (req, res) => {
@@ -594,6 +673,7 @@ app.get('/api/red', autenticar, async (req, res) => {
                 const msgCrudo = String(h.mensajeOriginal || '');
                 const invitesEnMsg = extraerInvitacionesDeTexto(msgCrudo);
                 for (const inv of invitesEnMsg) {
+                    if (invitacionesOcultas.has(inv.code.toLowerCase())) continue;
                     registrarInvitacionViva({
                         code: inv.code,
                         url: inv.url,
